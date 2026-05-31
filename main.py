@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 
+from src.gui.app import App
+
 
 def main():
-    print("Hello from HSF")
+    app = App()
+    app.mainloop()
 
 
 if __name__ == "__main__":
