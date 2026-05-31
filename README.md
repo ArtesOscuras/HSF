@@ -1,3 +1,3 @@
 # HSF
 
-Hacks Station Framework
+Hack Station Framework

@@ -14,7 +14,7 @@ from src.identifier import identify_device
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("HSF - Hacks Station Framework")
+        self.title("HSF - Hack Station Framework")
         self.minsize(800, 600)
         self.state("zoomed")
 
