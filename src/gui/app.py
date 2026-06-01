@@ -8,7 +8,7 @@ from .dialogs import InterfaceSelector
 from src.machines import store
 import src.machines
 from src.scanner import PassiveMDNSScanner, ActiveScanner
-from src.identifier import identify_device
+from src.identifier import identify_device, get_gateway_ip
 
 
 class App(tk.Tk):
@@ -34,6 +34,7 @@ class App(tk.Tk):
         self._selected_interface = None
 
         self._register_views()
+        self.visualizer.activate_view("network")
         self._register_commands()
         self.after(500, self._start_passive_scanner)
 
@@ -219,7 +220,8 @@ class App(tk.Tk):
             threading.Thread(target=self._identify, args=(machine,), daemon=True).start()
 
     def _identify(self, machine):
-        result = identify_device(machine.ip)
+        gateway = get_gateway_ip()
+        result = identify_device(machine.ip, gateway_ip=gateway, hostname=machine.hostname)
         if result:
             machine.device_type = result
             self.console.after(0, lambda m=machine: self.console.info(

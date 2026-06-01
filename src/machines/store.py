@@ -50,7 +50,7 @@ class MachineStore:
         return list(self._machines.values())
 
     def get_all_sorted(self):
-        return sorted(self._machines.values(), key=lambda m: m.last_seen, reverse=True)
+        return sorted(self._machines.values(), key=lambda m: m.first_seen)
 
     def count(self):
         return len(self._machines)
