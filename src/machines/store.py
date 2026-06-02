@@ -1,4 +1,25 @@
+import json
+import os
+import sqlite3
+import threading
+import time as _time
 from datetime import datetime
+
+
+_DB_FILE = None
+_AUTOSAVE_INTERVAL = 30
+_autosave_running = False
+_autosave_thread = None
+_save_lock = threading.Lock()
+
+
+def _init_db_path():
+    global _DB_FILE
+    if _DB_FILE is None:
+        proj = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        db_dir = os.path.join(proj, "databases")
+        os.makedirs(db_dir, exist_ok=True)
+        _DB_FILE = os.path.join(db_dir, "machines.dbs")
 
 
 class Machine:
@@ -57,3 +78,91 @@ class MachineStore:
 
     def clear(self):
         self._machines.clear()
+
+    def save(self):
+        _init_db_path()
+        with _save_lock, sqlite3.connect(_DB_FILE) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS machines (
+                    ip TEXT PRIMARY KEY,
+                    hostname TEXT,
+                    mac TEXT,
+                    device_type TEXT,
+                    methods TEXT,
+                    first_seen TEXT,
+                    last_seen TEXT
+                )
+            """)
+            for m in self._machines.values():
+                conn.execute(
+                    "INSERT OR REPLACE INTO machines VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        m.ip,
+                        m.hostname,
+                        m.mac,
+                        m.device_type,
+                        json.dumps(sorted(m.methods)),
+                        m.first_seen.isoformat(),
+                        m.last_seen.isoformat(),
+                    ),
+                )
+
+    def load(self):
+        _init_db_path()
+        if not os.path.isfile(_DB_FILE):
+            return
+        try:
+            with sqlite3.connect(_DB_FILE) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS machines (
+                        ip TEXT PRIMARY KEY,
+                        hostname TEXT,
+                        mac TEXT,
+                        device_type TEXT,
+                        methods TEXT,
+                        first_seen TEXT,
+                        last_seen TEXT
+                    )
+                """)
+                rows = conn.execute("SELECT * FROM machines").fetchall()
+        except (sqlite3.DatabaseError, sqlite3.OperationalError):
+            return
+
+        for row in rows:
+            ip, hostname, mac, device_type, methods_json, first_seen, last_seen = row
+            m = Machine(ip, hostname=hostname, mac=mac)
+            m.device_type = device_type
+            try:
+                m.methods = set(json.loads(methods_json))
+            except (json.JSONDecodeError, TypeError):
+                pass
+            try:
+                m.first_seen = datetime.fromisoformat(first_seen)
+            except (ValueError, TypeError):
+                pass
+            try:
+                m.last_seen = datetime.fromisoformat(last_seen)
+            except (ValueError, TypeError):
+                pass
+            self._machines[ip] = m
+
+
+def start_autosave():
+    global _autosave_running, _autosave_thread
+    if _autosave_running:
+        return
+    _autosave_running = True
+    _autosave_thread = threading.Thread(target=_autosave_loop, daemon=True)
+    _autosave_thread.start()
+
+
+def stop_autosave():
+    global _autosave_running
+    _autosave_running = False
+
+
+def _autosave_loop():
+    while _autosave_running:
+        _time.sleep(_AUTOSAVE_INTERVAL)
+        if _autosave_running:
+            store.save()

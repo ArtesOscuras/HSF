@@ -5,10 +5,11 @@ from .console import Console
 from .visualizer import Visualizer
 from .views import NetworkView
 from .dialogs import InterfaceSelector
-from src.machines import store
+from src.machines import store, start_autosave as start_machines_autosave
 import src.machines
 from src.scanner import PassiveMDNSScanner, ActiveScanner
-from src.identifier import identify_device, get_gateway_ip
+from src.scanner.mdns_cache import load as load_mdns_cache, save as save_mdns_cache, start_autosave, wipe as wipe_mdns_cache
+from src.identifier import identify_device, get_gateway_ip, _dbg
 
 
 class App(tk.Tk):
@@ -32,10 +33,17 @@ class App(tk.Tk):
         self._passive_scanner = None
         self._active_scanner = None
         self._selected_interface = None
+        self._identifying_ips = set()
 
         self._register_views()
         self.visualizer.activate_view("network")
         self._register_commands()
+
+        load_mdns_cache()
+        start_autosave()
+        store.load()
+        start_machines_autosave()
+
         self.after(500, self._start_passive_scanner)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -55,6 +63,7 @@ class App(tk.Tk):
     def _register_commands(self):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
         self.console.register_command("scan", self._cmd_scan, "Network scanning commands")
+        self.console.register_command("clear-data", self._cmd_clear_data, "Wipe all stored data")
         self.console.register_command("exit", self._cmd_exit, "Close the application")
 
     def _cmd_view(self, args):
@@ -209,31 +218,55 @@ class App(tk.Tk):
             self.console.after(0, lambda: self.console.error(hostname))
             return
 
+        if ip in ("127.0.0.1", "::1", "localhost") or ip.startswith("127."):
+            return
+
         existing = store.get(ip)
         is_new = existing is None
         machine = store.add_or_update(ip=ip, hostname=hostname, mac=mac, method=method)
+
+        _dbg(f"[discovery] ip={ip} hostname={hostname} method={method} is_new={is_new} prev_type={existing.device_type if existing else 'N/A'}")
+
+        if ip in self._identifying_ips:
+            return
 
         if is_new:
             self.console.after(0, lambda m=machine: self.console.success(
                 f"{m.ip:<20} {m.hostname:<20} [{', '.join(m.methods)}]"
             ))
+            self._identifying_ips.add(ip)
+            threading.Thread(target=self._identify, args=(machine,), daemon=True).start()
+        elif not existing.device_type or existing.device_type in ("device unknown", "iOS device"):
+            self._identifying_ips.add(ip)
             threading.Thread(target=self._identify, args=(machine,), daemon=True).start()
 
     def _identify(self, machine):
-        gateway = get_gateway_ip()
-        result = identify_device(machine.ip, gateway_ip=gateway, hostname=machine.hostname)
-        if result:
-            machine.device_type = result
-            self.console.after(0, lambda m=machine: self.console.info(
-                f"  {m.ip:<20} identified as: {m.device_type}"
-            ))
+        _dbg(f"[identify-start] {machine.ip}  hostname={machine.hostname}")
+        try:
+            gateway = get_gateway_ip()
+            result = identify_device(machine.ip, gateway_ip=gateway, hostname=machine.hostname)
+            _dbg(f"[identify-done]  {machine.ip}  result={result!r}")
+            if result:
+                machine.device_type = result
+                self.console.after(0, lambda m=machine: self.console.info(
+                    f"  {m.ip:<20} identified as: {m.device_type}"
+                ))
+        finally:
+            self._identifying_ips.discard(machine.ip)
 
     def _cmd_exit(self, args):
         self.destroy()
+
+    def _cmd_clear_data(self, args):
+        store.clear()
+        wipe_mdns_cache()
+        self.console.success("All data cleared (mDNS cache + machine list + database files)")
 
     def _on_close(self):
         if self._passive_scanner:
             self._passive_scanner.stop()
         if self._active_scanner:
             self._active_scanner.stop()
+        store.save()
+        save_mdns_cache()
         self.destroy()

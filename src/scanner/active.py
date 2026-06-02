@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 import netifaces
 from scapy.all import ARP, Ether, srp
 from zeroconf import Zeroconf, ServiceBrowser, BadTypeInNameException
+from .mdns_cache import add_service, decode_properties
 
 try:
     import nmap
@@ -46,11 +47,20 @@ class _ActiveServiceListener:
         if not info:
             return
         hostname = info.server.rstrip(".")
+        txt = decode_properties(info.properties)
         for addr in info.addresses:
             if len(addr) == 4:
-                self.callback(ip=socket.inet_ntoa(addr), hostname=hostname, mac="", method="mDNS-Active")
+                ip = socket.inet_ntoa(addr)
+                if ip == "127.0.0.1":
+                    continue
+                add_service(ip, type_, hostname=hostname, txt=txt)
+                self.callback(ip=ip, hostname=hostname, mac="", method="mDNS-Active")
             elif len(addr) == 16:
-                self.callback(ip=socket.inet_ntop(socket.AF_INET6, addr), hostname=hostname, mac="", method="mDNSv6-Active")
+                ip = socket.inet_ntop(socket.AF_INET6, addr)
+                if ip == "::1":
+                    continue
+                add_service(ip, type_, hostname=hostname, txt=txt)
+                self.callback(ip=ip, hostname=hostname, mac="", method="mDNSv6-Active")
 
     def remove_service(self, *args):
         pass

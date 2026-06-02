@@ -2,6 +2,7 @@ import socket
 import threading
 import time
 from zeroconf import Zeroconf, ServiceBrowser, BadTypeInNameException
+from .mdns_cache import add_service, decode_properties
 
 
 class _PassiveListener:
@@ -14,16 +15,25 @@ class _PassiveListener:
             if not info:
                 return
             hostname = info.server.rstrip(".")
+            txt = decode_properties(info.properties)
             for addr in info.addresses:
                 if len(addr) == 4:
+                    ip = socket.inet_ntoa(addr)
+                    if ip == "127.0.0.1":
+                        continue
+                    add_service(ip, type_, hostname=hostname, txt=txt)
                     self.callback(
-                        ip=socket.inet_ntoa(addr),
+                        ip=ip,
                         hostname=hostname,
                         method="mDNS-Passive"
                     )
                 elif len(addr) == 16:
+                    ip = socket.inet_ntop(socket.AF_INET6, addr)
+                    if ip == "::1":
+                        continue
+                    add_service(ip, type_, hostname=hostname, txt=txt)
                     self.callback(
-                        ip=socket.inet_ntop(socket.AF_INET6, addr),
+                        ip=ip,
                         hostname=hostname,
                         method="mDNSv6-Passive"
                     )

@@ -15,7 +15,8 @@ class NetworkView(BaseView):
     name = "network"
     description = "Network monitoring and scanning"
 
-    LABEL_WIDTH = 25
+    DEVICE_WIDTH = 22
+    HOSTNAME_WIDTH = 28
 
     def _build_ui(self):
         self.columnconfigure(0, weight=1)
@@ -89,7 +90,7 @@ class NetworkView(BaseView):
         if w < 50:
             return " " * 3
         font = tkfont.Font(font=self.text.cget("font"))
-        sample = f"{ICONS['default']}   {'M' * self.LABEL_WIDTH}   255.255.255.255"
+        sample = f"{ICONS['default']}   {'M' * self.DEVICE_WIDTH}{'M' * self.HOSTNAME_WIDTH}255.255.255.255"
         content_px = font.measure(sample)
         char_width = font.measure(" ")
         padding_px = max(5, (w - content_px) // 2)
@@ -101,18 +102,16 @@ class NetworkView(BaseView):
         icon = self._guess_icon(machine)
         self.text.insert(tk.END, f"{icon}   ", "bright")
 
-        if machine.device_type == "device unknown" and machine.hostname:
-            visible = machine.hostname
-            suffix = " (mDNS)"
-            self.text.insert(tk.END, visible, "bright")
-            self.text.insert(tk.END, suffix, "muted")
-            pad = max(1, self.LABEL_WIDTH - len(visible) - len(suffix))
-        else:
-            label = machine.device_type if machine.device_type else "device unknown"
-            self.text.insert(tk.END, label, "bright")
-            pad = max(1, self.LABEL_WIDTH - len(label))
-
+        device_type = machine.device_type if machine.device_type else "device unknown"
+        self.text.insert(tk.END, device_type, "bright")
+        pad = max(1, self.DEVICE_WIDTH - len(device_type))
         self.text.insert(tk.END, " " * pad)
+
+        hostname = machine.hostname if machine.hostname else ""
+        self.text.insert(tk.END, hostname, "muted")
+        pad2 = max(1, self.HOSTNAME_WIDTH - len(hostname))
+        self.text.insert(tk.END, " " * pad2)
+
         self.text.insert(tk.END, f"{machine.ip}\n", "bright")
 
     def _poll(self):
