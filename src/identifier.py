@@ -13,12 +13,17 @@ _DBG_LOCK = __import__("threading").Lock()
 
 def _dbg(msg):
     line = f"{_time.strftime('%H:%M:%S')}  {msg}\n"
-    with _DBG_LOCK:
-        os.makedirs(os.path.dirname(_DBG_FILE), exist_ok=True)
-        with open(_DBG_FILE, "a") as f:
-            f.write(line)
+    try:
+        with _DBG_LOCK:
+            os.makedirs(os.path.dirname(_DBG_FILE), exist_ok=True)
+            with open(_DBG_FILE, "a") as f:
+                f.write(line)
+    except (PermissionError, OSError):
+        pass
 # ---------------------------------------------------------------------------
 
+
+import socket
 
 TIMEOUT = 1.5
 PORT_445 = 445
@@ -68,20 +73,11 @@ def _probe_ttl(ip):
 
 
 def _probe_port(ip, port):
-    sport = RandShort()
-    pkt = IP(dst=ip) / TCP(sport=sport, dport=port, flags="S")
-    reply = sr1(pkt, timeout=TIMEOUT, verbose=0)
-    if reply is None:
-        return None
-    if reply[IP].src != ip or reply[TCP].dport != sport:
-        return None
-    ttl = reply[IP].ttl
-    if reply.haslayer(TCP):
-        flags = reply[TCP].flags
-        if flags & 0x12:
-            return {"open": True, "ttl": ttl}
-        return {"open": False, "ttl": ttl}
-    return {"open": False, "ttl": ttl}
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(TIMEOUT)
+    result = sock.connect_ex((ip, port))
+    sock.close()
+    return {"open": result == 0, "ttl": 0}
 
 
 def _probe_mdns_service(ip, service_name):

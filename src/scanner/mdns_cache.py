@@ -108,8 +108,11 @@ def save():
             data[ip] = {}
             for svc, info in services.items():
                 data[ip][svc] = dict(info)
-        with open(_CACHE_FILE, "w") as f:
-            json.dump(data, f, indent=2)
+        try:
+            with open(_CACHE_FILE, "w") as f:
+                json.dump(data, f, indent=2)
+        except (PermissionError, OSError):
+            pass
 
 
 def load():

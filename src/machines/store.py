@@ -83,37 +83,40 @@ class MachineStore:
 
     def save(self):
         _init_db_path()
-        with _save_lock, sqlite3.connect(_DB_FILE) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS machines (
-                    ip TEXT PRIMARY KEY,
-                    hostname TEXT,
-                    mac TEXT,
-                    device_type TEXT,
-                    model TEXT,
-                    methods TEXT,
-                    first_seen TEXT,
-                    last_seen TEXT
-                )
-            """)
-            try:
-                conn.execute("ALTER TABLE machines ADD COLUMN model TEXT DEFAULT ''")
-            except sqlite3.OperationalError:
-                pass
-            for m in self._machines.values():
-                conn.execute(
-                    "INSERT OR REPLACE INTO machines VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        m.ip,
-                        m.hostname,
-                        m.mac,
-                        m.device_type,
-                        m.model,
-                        json.dumps(sorted(m.methods)),
-                        m.first_seen.isoformat(),
-                        m.last_seen.isoformat(),
-                    ),
-                )
+        try:
+            with _save_lock, sqlite3.connect(_DB_FILE) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS machines (
+                        ip TEXT PRIMARY KEY,
+                        hostname TEXT,
+                        mac TEXT,
+                        device_type TEXT,
+                        model TEXT,
+                        methods TEXT,
+                        first_seen TEXT,
+                        last_seen TEXT
+                    )
+                """)
+                try:
+                    conn.execute("ALTER TABLE machines ADD COLUMN model TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass
+                for m in self._machines.values():
+                    conn.execute(
+                        "INSERT OR REPLACE INTO machines VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            m.ip,
+                            m.hostname,
+                            m.mac,
+                            m.device_type,
+                            m.model,
+                            json.dumps(sorted(m.methods)),
+                            m.first_seen.isoformat(),
+                            m.last_seen.isoformat(),
+                        ),
+                    )
+        except (PermissionError, OSError, sqlite3.OperationalError):
+            pass
 
     def load(self):
         _init_db_path()
