@@ -178,6 +178,8 @@ class App(tk.Tk):
                 f"Network: {self._active_scanner.network_cidr}  "
                 f"Nmap: {nmap_status}"
             )
+            if not self._active_scanner.has_nmap:
+                self.console.warning("python-nmap not found: pip install python-nmap")
         except RuntimeError as e:
             self.console.error(str(e))
 
@@ -262,9 +264,14 @@ class App(tk.Tk):
                     if server_name:
                         machine.hostname = server_name
                 if result != old_type:
-                    self.console.after(0, lambda m=machine: self.console.info(
-                        f"  {m.ip:<20} identified as: {m.device_type}"
-                    ))
+                    if machine.device_type == "device unknown":
+                        self.console.after(0, lambda m=machine: self.console.body(
+                            f"  {m.ip:<20} identified as: {m.device_type}"
+                        ))
+                    else:
+                        self.console.after(0, lambda m=machine: self.console.success(
+                            f"  {m.ip:<20} identified as: {m.device_type}"
+                        ))
         finally:
             self._identifying_ips.discard(machine.ip)
 

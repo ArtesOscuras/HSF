@@ -2,12 +2,13 @@ import tkinter as tk
 from tkinter import scrolledtext
 
 
-FG = "#bdfd01"
-FG_DIM = "#8cba02"
+FG = "#ffffff"
+FG_DIM = "#888888"
 BG = "#0a0a0a"
 BG_INPUT = "#111111"
+SUCCESS = "#00cc66"
 TITLE_COLOR = "#ffffff"
-INFO_COLOR = "#c0c0c0"
+INFO_COLOR = "#5ba3ec"
 WARN_COLOR = "#ce9178"
 ERR_COLOR = "#f44747"
 
@@ -20,6 +21,7 @@ class Console(tk.Frame):
         self._history = []
         self._history_index = -1
         self._saved_input = ""
+        self._font_size = 11
 
         self.grid_propagate(False)
         self.config(bg=BG)
@@ -39,6 +41,8 @@ class Console(tk.Frame):
             highlightthickness=0,
         )
         self.output_area.grid(row=0, column=0, sticky="nsew")
+        self.output_area.vbar.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
+                                         width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
 
         input_frame = tk.Frame(self, bg=BG_INPUT)
         input_frame.columnconfigure(0, weight=0)
@@ -74,6 +78,13 @@ class Console(tk.Frame):
         self.input_entry.bind("<Down>", self._on_down)
         self.input_entry.focus()
 
+        self.bind_all("<Control-plus>", lambda e: self._adjust_font(+1))
+        self.bind_all("<Control-minus>", lambda e: self._adjust_font(-1))
+        self.bind_all("<Command-plus>", lambda e: self._adjust_font(+1))
+        self.bind_all("<Command-minus>", lambda e: self._adjust_font(-1))
+        self.bind_all("<Control-equal>", lambda e: self._adjust_font(+1))
+        self.bind_all("<Command-equal>", lambda e: self._adjust_font(+1))
+
         self.register_command("help", self._cmd_help, "Show this help message")
         self.register_command("clear", self._cmd_clear, "Clear the console")
         self.register_command("echo", self._cmd_echo, "Echo back the arguments")
@@ -106,7 +117,7 @@ class Console(tk.Frame):
         self.writeln(f"[*] {text}", INFO_COLOR)
 
     def success(self, text):
-        self.writeln(f"[+] {text}", FG)
+        self.writeln(f"[+] {text}", SUCCESS)
 
     def body(self, text):
         self.writeln(text, FG_DIM)
@@ -146,6 +157,14 @@ class Console(tk.Frame):
             self.input_var.set(self._saved_input)
         else:
             self.input_var.set(self._history[self._history_index])
+        return "break"
+
+    def _adjust_font(self, delta):
+        self._font_size = max(8, min(24, self._font_size + delta))
+        new_font = ("Menlo", self._font_size)
+        self.output_area.configure(font=new_font)
+        self.input_entry.configure(font=new_font)
+        self.prompt_label.configure(font=new_font)
         return "break"
 
     def _execute(self, raw):

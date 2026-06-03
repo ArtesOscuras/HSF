@@ -17,7 +17,7 @@ class Visualizer(tk.Frame):
             self,
             text="Visualization Area",
             font=("Menlo", 18),
-            fg="#8cba02",
+            fg="#888888",
             bg="#000000",
         )
         self._placeholder.place(relx=0.5, rely=0.5, anchor="center")

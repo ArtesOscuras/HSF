@@ -4,8 +4,8 @@ import tkinter.font as tkfont
 from .base import BaseView
 from src.machines import store, interface_name, interface_ip
 
-MUTED = "#c0c0c0"
-BRIGHT = "#bdfd01"
+MUTED = "#888888"
+BRIGHT = "#ffffff"
 
 ICONS = {
     "default": "\U0001F4BB",
@@ -65,6 +65,8 @@ class NetworkView(BaseView):
         self.text.tag_configure("bright", foreground=BRIGHT)
 
         scrollbar = tk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.text.yview)
+        scrollbar.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
+                            width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.text.configure(yscrollcommand=scrollbar.set)
 

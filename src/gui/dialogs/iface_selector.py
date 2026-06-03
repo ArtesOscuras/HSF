@@ -33,9 +33,9 @@ class InterfaceSelector(tk.Toplevel):
         self.listbox = tk.Listbox(
             list_frame,
             bg="#000000",
-            fg="#bdfd01",
-            selectbackground="#1a3300",
-            selectforeground="#bdfd01",
+            fg="#ffffff",
+            selectbackground="#333333",
+            selectforeground="#ffffff",
             font=("Menlo", 12),
             borderwidth=0,
             highlightthickness=0,
@@ -44,6 +44,8 @@ class InterfaceSelector(tk.Toplevel):
         self.listbox.grid(row=0, column=0, sticky="nsew")
 
         scrollbar = tk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.listbox.yview)
+        scrollbar.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
+                            width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.listbox.configure(yscrollcommand=scrollbar.set)
 
@@ -61,7 +63,7 @@ class InterfaceSelector(tk.Toplevel):
             btn_frame,
             text="  Cancel  ",
             bg="#222222",
-            fg="#bdfd01",
+            fg="#ffffff",
             font=("Menlo", 10),
             relief=tk.RAISED,
             bd=1,
@@ -78,7 +80,7 @@ class InterfaceSelector(tk.Toplevel):
             btn_frame,
             text="  Select  ",
             bg="#222222",
-            fg="#bdfd01",
+            fg="#ffffff",
             font=("Menlo", 10),
             relief=tk.RAISED,
             bd=1,
