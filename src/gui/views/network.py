@@ -1,3 +1,4 @@
+import re
 import tkinter as tk
 import tkinter.font as tkfont
 from .base import BaseView
@@ -51,7 +52,7 @@ class NetworkView(BaseView):
             text_frame,
             bg="#000000",
             fg=BRIGHT,
-            font=("Menlo", 18),
+            font=("Menlo", 16),
             borderwidth=0,
             highlightthickness=0,
             pady=10,
@@ -85,6 +86,11 @@ class NetworkView(BaseView):
     def _guess_icon(machine):
         return ICONS["default"]
 
+    @staticmethod
+    def _display_label(machine):
+        label = machine.model if machine.model else (machine.device_type or "device unknown")
+        return re.sub(r"\s+Build\s+\d+", "", label)
+
     def _center_padding(self):
         w = self.text.winfo_width()
         if w < 50:
@@ -102,7 +108,7 @@ class NetworkView(BaseView):
         icon = self._guess_icon(machine)
         self.text.insert(tk.END, f"{icon}   ", "bright")
 
-        label = machine.model if machine.model else (machine.device_type or "device unknown")
+        label = self._display_label(machine)
         self.text.insert(tk.END, label, "bright")
         pad = max(1, self.DEVICE_WIDTH - len(label))
         self.text.insert(tk.END, " " * pad)

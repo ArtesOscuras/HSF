@@ -9,7 +9,7 @@ from src.machines import store, start_autosave as start_machines_autosave
 import src.machines
 from src.scanner import PassiveMDNSScanner, ActiveScanner
 from src.scanner.mdns_cache import load as load_mdns_cache, save as save_mdns_cache, start_autosave, wipe as wipe_mdns_cache
-from src.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _dbg
+from src.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _probe_smb_info, _dbg
 
 
 class App(tk.Tk):
@@ -63,7 +63,7 @@ class App(tk.Tk):
     def _register_commands(self):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
         self.console.register_command("scan", self._cmd_scan, "Network scanning commands")
-        self.console.register_command("clear-data", self._cmd_clear_data, "Wipe all stored data")
+        self.console.register_command("delete-dbs", self._cmd_delete_dbs, "Wipe all stored data")
         self.console.register_command("exit", self._cmd_exit, "Close the application")
 
     def _cmd_view(self, args):
@@ -252,6 +252,15 @@ class App(tk.Tk):
                 model = extract_model_for_ip(machine.ip, resolve=True)
                 if model:
                     machine.model = model
+                if result == "Windows machine":
+                    os_info, domain, server_name = _probe_smb_info(machine.ip)
+                    if os_info:
+                        machine.device_type = os_info
+                        machine.os = os_info
+                    if domain:
+                        machine.domain = domain
+                    if server_name:
+                        machine.hostname = server_name
                 if result != old_type:
                     self.console.after(0, lambda m=machine: self.console.info(
                         f"  {m.ip:<20} identified as: {m.device_type}"
@@ -262,7 +271,7 @@ class App(tk.Tk):
     def _cmd_exit(self, args):
         self.destroy()
 
-    def _cmd_clear_data(self, args):
+    def _cmd_delete_dbs(self, args):
         store.clear()
         wipe_mdns_cache()
         self.console.success("All data cleared (mDNS cache + machine list + database files)")

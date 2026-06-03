@@ -113,6 +113,23 @@ def _probe_udp_port(ip, port):
     return True
 
 
+def _probe_smb_info(ip):
+    try:
+        from impacket.smbconnection import SMBConnection
+        conn = SMBConnection(remoteName="*SMBSERVER", remoteHost=ip, sess_port=445, timeout=3)
+        conn.login("", "")
+        os_str = conn.getServerOS()
+        try:
+            domain = conn.getServerDNSDomainName()
+        except Exception:
+            domain = ""
+        server_name = conn.getServerName() or ""
+        conn.logoff()
+    except Exception:
+        return "", "", ""
+    return os_str.strip() if os_str else "", domain.strip() if domain else "", server_name.strip()
+
+
 def get_gateway_ip():
     try:
         return netifaces.gateways()["default"][netifaces.AF_INET][0]

@@ -29,6 +29,8 @@ class Machine:
         self.mac = mac
         self.device_type = ""
         self.model = ""
+        self.os = ""
+        self.domain = ""
         self.methods = {method} if method else set()
         self.first_seen = datetime.now()
         self.last_seen = datetime.now()
@@ -49,6 +51,8 @@ class Machine:
             "mac": self.mac,
             "device_type": self.device_type,
             "model": self.model,
+            "os": self.os,
+            "domain": self.domain,
             "methods": sorted(self.methods),
             "first_seen": self.first_seen.strftime("%H:%M:%S"),
             "last_seen": self.last_seen.strftime("%H:%M:%S"),
@@ -92,6 +96,8 @@ class MachineStore:
                         mac TEXT,
                         device_type TEXT,
                         model TEXT,
+                        os TEXT,
+                        domain TEXT,
                         methods TEXT,
                         first_seen TEXT,
                         last_seen TEXT
@@ -101,15 +107,27 @@ class MachineStore:
                     conn.execute("ALTER TABLE machines ADD COLUMN model TEXT DEFAULT ''")
                 except sqlite3.OperationalError:
                     pass
+                try:
+                    conn.execute("ALTER TABLE machines ADD COLUMN os TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    conn.execute("ALTER TABLE machines ADD COLUMN domain TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass
                 for m in self._machines.values():
                     conn.execute(
-                        "INSERT OR REPLACE INTO machines VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        """INSERT OR REPLACE INTO machines
+                           (ip, hostname, mac, device_type, model, os, domain, methods, first_seen, last_seen)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (
                             m.ip,
                             m.hostname,
                             m.mac,
                             m.device_type,
                             m.model,
+                            m.os,
+                            m.domain,
                             json.dumps(sorted(m.methods)),
                             m.first_seen.isoformat(),
                             m.last_seen.isoformat(),
@@ -131,6 +149,8 @@ class MachineStore:
                         mac TEXT,
                         device_type TEXT,
                         model TEXT,
+                        os TEXT,
+                        domain TEXT,
                         methods TEXT,
                         first_seen TEXT,
                         last_seen TEXT
@@ -140,17 +160,27 @@ class MachineStore:
                     conn.execute("ALTER TABLE machines ADD COLUMN model TEXT DEFAULT ''")
                 except sqlite3.OperationalError:
                     pass
+                try:
+                    conn.execute("ALTER TABLE machines ADD COLUMN os TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass
+                try:
+                    conn.execute("ALTER TABLE machines ADD COLUMN domain TEXT DEFAULT ''")
+                except sqlite3.OperationalError:
+                    pass
                 rows = conn.execute(
-                    "SELECT ip, hostname, mac, device_type, model, methods, first_seen, last_seen FROM machines"
+                    "SELECT ip, hostname, mac, device_type, model, os, domain, methods, first_seen, last_seen FROM machines"
                 ).fetchall()
         except (sqlite3.DatabaseError, sqlite3.OperationalError):
             return
 
         for row in rows:
-            ip, hostname, mac, device_type, model, methods_json, first_seen, last_seen = row
+            ip, hostname, mac, device_type, model, os_val, domain_val, methods_json, first_seen, last_seen = row
             m = Machine(ip, hostname=hostname, mac=mac)
             m.device_type = device_type
             m.model = model or ""
+            m.os = os_val or ""
+            m.domain = domain_val or ""
             try:
                 m.methods = set(json.loads(methods_json))
             except (json.JSONDecodeError, TypeError):
