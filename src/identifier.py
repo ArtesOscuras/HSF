@@ -267,12 +267,12 @@ class RouterIdentifier(BaseIdentifier):
     name = "router"
 
     def identify(self, ip, context, gateway_ip=None, hostname=""):
-        ttl = context.ttl()
-        if ttl is None:
+        if not gateway_ip or ip != gateway_ip:
             return None
-        if TTL_ROUTER_MIN <= ttl <= TTL_ROUTER_MAX and gateway_ip and ip == gateway_ip:
+        ttl = context.ttl()
+        if ttl is not None and TTL_ROUTER_MIN <= ttl <= TTL_ROUTER_MAX:
             return "Router"
-        return None
+        return "Gateway"
 
 
 class MacIdentifier(BaseIdentifier):
@@ -295,20 +295,14 @@ class MacIdentifier(BaseIdentifier):
                 return f"Mac ({model})"
             return "Mac"
 
-        has_cl = context.mdns_service(SERVICE_COMPANION_LINK)
-        has_airplay = context.mdns_service(SERVICE_AIRPLAY)
-        has_raop = context.mdns_service(SERVICE_RAOP)
+        if context.mdns_service(SERVICE_COMPANION_LINK):
+            model = self._extract_model(context)
+            if model and model.lower().startswith("mac"):
+                return f"Mac ({model})"
 
-        if not (has_cl or has_airplay or has_raop):
-            return None
-
-        model = self._extract_model(context)
-        if model and model.lower().startswith("mac"):
-            return f"Mac ({model})"
-
-        txt_cl = context.mdns_txt(SERVICE_COMPANION_LINK)
-        if txt_cl.get("osxvers", "").strip():
-            return "Mac"
+            txt_cl = context.mdns_txt(SERVICE_COMPANION_LINK)
+            if txt_cl.get("osxvers", "").strip():
+                return "Mac"
 
         return None
 
@@ -323,8 +317,6 @@ class IOSIdentifier(BaseIdentifier):
         has_apple |= context.mdns_service(SERVICE_COMPANION_LINK)
         has_apple |= context.mdns_service(SERVICE_APPLETV)
         has_apple |= context.mdns_service(SERVICE_HOMEKIT)
-        has_apple |= context.mdns_service(SERVICE_AIRPLAY)
-        has_apple |= context.mdns_service(SERVICE_RAOP)
 
         if has_apple:
             if "ipad" in h:
@@ -350,13 +342,9 @@ class WindowsIdentifier(BaseIdentifier):
     name = "windows"
 
     def identify(self, ip, context, gateway_ip=None, hostname=""):
-        ttl = context.ttl()
-        if ttl is None:
-            return None
-        if TTL_WIN_MIN <= ttl <= TTL_WIN_MAX:
-            result = context.port(PORT_445)
-            if result and result["open"]:
-                return "Windows machine"
+        result = context.port(PORT_445)
+        if result and result["open"]:
+            return "Windows machine"
         return None
 
 
@@ -458,10 +446,6 @@ def identify_device(ip, gateway_ip=None, hostname=""):
             _dbg(f"  FINAL: {result}")
             return result
 
-    if context.ttl() is None:
-        _dbg(f"  TTL gate: no ping response -> device unknown")
-        return "device unknown"
-
     for identifier in _post_ttl_identifiers:
         result = identifier.identify(ip, context, gateway_ip=gateway_ip, hostname=hostname)
         _dbg(f"  {identifier.name}: --> {result!r}")
@@ -471,3 +455,66 @@ def identify_device(ip, gateway_ip=None, hostname=""):
 
     _dbg(f"  FINAL: device unknown")
     return "device unknown"
+
+
+def _resolve_model_via_mdns(ip, service_name, model_keys):
+    import socket
+    import threading as _th
+    from zeroconf import Zeroconf, ServiceBrowser
+    from src.scanner.mdns_cache import add_service, decode_properties
+
+    zc = Zeroconf()
+    result = {}
+    done = _th.Event()
+
+    class _Resolver:
+        def add_service(self_, _zc, _type, _name):
+            try:
+                info = _zc.get_service_info(_type, _name, timeout=2000)
+                if not info:
+                    return
+                for addr in info.addresses:
+                    if len(addr) == 4 and socket.inet_ntoa(addr) == ip:
+                        result.update(decode_properties(info.properties))
+                        done.set()
+            except Exception:
+                pass
+
+        def remove_service(self_, *args):
+            pass
+
+        def update_service(self_, *args):
+            pass
+
+    ServiceBrowser(zc, service_name, _Resolver())
+    done.wait(timeout=2.5)
+    zc.close()
+
+    if result:
+        add_service(ip, service_name, txt=result)
+        for key in model_keys:
+            val = result.get(key, "").strip()
+            if val:
+                return val
+    return ""
+
+
+def extract_model_for_ip(ip, resolve=False):
+    from src.scanner.mdns_cache import get_services
+    for service_name, info in get_services(ip).items():
+        model = info.get("txt", {}).get("model", "").strip()
+        if model:
+            return model
+        am = info.get("txt", {}).get("am", "").strip()
+        if am:
+            return am
+
+    if resolve:
+        model = _resolve_model_via_mdns(ip, SERVICE_AIRPLAY, ("model",))
+        if model:
+            return model
+        model = _resolve_model_via_mdns(ip, SERVICE_RAOP, ("am", "model"))
+        if model:
+            return model
+
+    return ""

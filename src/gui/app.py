@@ -9,7 +9,7 @@ from src.machines import store, start_autosave as start_machines_autosave
 import src.machines
 from src.scanner import PassiveMDNSScanner, ActiveScanner
 from src.scanner.mdns_cache import load as load_mdns_cache, save as save_mdns_cache, start_autosave, wipe as wipe_mdns_cache
-from src.identifier import identify_device, get_gateway_ip, _dbg
+from src.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _dbg
 
 
 class App(tk.Tk):
@@ -42,7 +42,7 @@ class App(tk.Tk):
         load_mdns_cache()
         start_autosave()
         store.load()
-        start_machines_autosave()
+        start_machines_autosave(store)
 
         self.after(500, self._start_passive_scanner)
 
@@ -242,15 +242,20 @@ class App(tk.Tk):
 
     def _identify(self, machine):
         _dbg(f"[identify-start] {machine.ip}  hostname={machine.hostname}")
+        old_type = machine.device_type
         try:
             gateway = get_gateway_ip()
             result = identify_device(machine.ip, gateway_ip=gateway, hostname=machine.hostname)
             _dbg(f"[identify-done]  {machine.ip}  result={result!r}")
             if result:
                 machine.device_type = result
-                self.console.after(0, lambda m=machine: self.console.info(
-                    f"  {m.ip:<20} identified as: {m.device_type}"
-                ))
+                model = extract_model_for_ip(machine.ip, resolve=True)
+                if model:
+                    machine.model = model
+                if result != old_type:
+                    self.console.after(0, lambda m=machine: self.console.info(
+                        f"  {m.ip:<20} identified as: {m.device_type}"
+                    ))
         finally:
             self._identifying_ips.discard(machine.ip)
 

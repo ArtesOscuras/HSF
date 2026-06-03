@@ -102,9 +102,9 @@ class NetworkView(BaseView):
         icon = self._guess_icon(machine)
         self.text.insert(tk.END, f"{icon}   ", "bright")
 
-        device_type = machine.device_type if machine.device_type else "device unknown"
-        self.text.insert(tk.END, device_type, "bright")
-        pad = max(1, self.DEVICE_WIDTH - len(device_type))
+        label = machine.model if machine.model else (machine.device_type or "device unknown")
+        self.text.insert(tk.END, label, "bright")
+        pad = max(1, self.DEVICE_WIDTH - len(label))
         self.text.insert(tk.END, " " * pad)
 
         hostname = machine.hostname if machine.hostname else ""

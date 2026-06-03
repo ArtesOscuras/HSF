@@ -11,7 +11,7 @@ _proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__f
 _DB_DIR = os.path.join(_proj_root, "databases")
 _CACHE_FILE = os.path.join(_DB_DIR, "mdns_cache.json")
 _MAX_AGE = 24 * 3600
-_AUTOSAVE_INTERVAL = 30
+_AUTOSAVE_INTERVAL = 10
 _autosave_running = False
 _autosave_thread = None
 
@@ -94,7 +94,6 @@ def clear():
 
 def wipe():
     _cache.clear()
-    stop_autosave()
     for filename in os.listdir(_DB_DIR):
         filepath = os.path.join(_DB_DIR, filename)
         if os.path.isfile(filepath):

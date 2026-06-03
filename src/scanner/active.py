@@ -129,13 +129,16 @@ class ActiveScanner:
 
     def _run_arp(self):
         network_str = str(self._network)
-        pkt = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=network_str)
-        try:
-            ans, _ = srp(pkt, iface=self._interface[0], timeout=3, verbose=0)
-            for _, r in ans:
-                self.on_host(ip=r.psrc, hostname="", mac=r.hwsrc, method="ARP")
-        except PermissionError:
-            self.on_host(ip="ERROR", hostname="ARP requires root privileges", mac="", method="error")
+        while self._running:
+            pkt = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=network_str)
+            try:
+                ans, _ = srp(pkt, iface=self._interface[0], timeout=3, verbose=0)
+                for _, r in ans:
+                    self.on_host(ip=r.psrc, hostname="", mac=r.hwsrc, method="ARP")
+            except PermissionError:
+                self.on_host(ip="ERROR", hostname="ARP requires root privileges", mac="", method="error")
+                return
+            time.sleep(ACTIVE_INTERVAL)
 
     def _run_mdns_active(self):
         while self._running:
