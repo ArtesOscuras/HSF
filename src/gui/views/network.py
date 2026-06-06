@@ -16,6 +16,7 @@ class NetworkView(BaseView):
     name = "network"
     description = "Network monitoring and scanning"
 
+    ID_WIDTH = 4
     DEVICE_WIDTH = 22
     HOSTNAME_WIDTH = 28
 
@@ -98,7 +99,7 @@ class NetworkView(BaseView):
         if w < 50:
             return " " * 3
         font = tkfont.Font(font=self.text.cget("font"))
-        sample = f"{ICONS['default']}   {'M' * self.DEVICE_WIDTH}{'M' * self.HOSTNAME_WIDTH}255.255.255.255"
+        sample = f"#{'M' * (self.ID_WIDTH - 1)}   {ICONS['default']}   {'M' * self.DEVICE_WIDTH}{'M' * self.HOSTNAME_WIDTH}255.255.255.255"
         content_px = font.measure(sample)
         char_width = font.measure(" ")
         padding_px = max(5, (w - content_px) // 2)
@@ -107,6 +108,12 @@ class NetworkView(BaseView):
     def _insert_line(self, machine, center_pad):
         self.text.insert(tk.END, center_pad, "bright")
         self.text.insert(tk.END, "    ", "bright")
+
+        id_str = f"#{machine.id}" if machine.id else "#?"
+        self.text.insert(tk.END, id_str, "muted")
+        pad0 = max(1, self.ID_WIDTH - len(id_str))
+        self.text.insert(tk.END, " " * pad0)
+
         icon = self._guess_icon(machine)
         self.text.insert(tk.END, f"{icon}   ", "bright")
 

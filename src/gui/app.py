@@ -1,15 +1,23 @@
-import tkinter as tk
+import ipaddress
+import os
+import re
+import shutil
+import socket
+import subprocess
 import threading
+import tkinter as tk
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import netifaces
 from .console import Console
 from .visualizer import Visualizer
 from .views import NetworkView
 from .dialogs import InterfaceSelector
 from src.machines import store, start_autosave as start_machines_autosave
+from src.machines import machine_db
 import src.machines
 from src.scanner import PassiveMDNSScanner, ActiveScanner
 from src.scanner.mdns_cache import load as load_mdns_cache, save as save_mdns_cache, start_autosave, wipe as wipe_mdns_cache
-from src.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _probe_smb_info, _dbg
+from src.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _probe_smb_info, _probe_ssh_banner, _parse_ssh_banner, _dbg
 
 
 class App(tk.Tk):
@@ -21,19 +29,26 @@ class App(tk.Tk):
 
         self.configure(bg="#000000")
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(0, weight=2)
-        self.rowconfigure(1, weight=1)
+        self.rowconfigure(0, weight=1)
 
-        self.visualizer = Visualizer(self, highlightbackground="#2d2d2d", highlightthickness=1)
-        self.visualizer.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
+        self._pane = tk.PanedWindow(self, orient=tk.VERTICAL, bg="#2d2d2d",
+                                     sashwidth=5, sashrelief=tk.FLAT, borderwidth=0)
+        self._pane.grid(row=0, column=0, sticky="nsew", padx=2, pady=2)
 
-        self.console = Console(self, highlightbackground="#2d2d2d", highlightthickness=1)
-        self.console.grid(row=1, column=0, sticky="nsew", padx=2, pady=2)
+        self.visualizer = Visualizer(self._pane)
+        self._pane.add(self.visualizer, stretch="always")
+
+        self.console = Console(self._pane)
+        self._pane.add(self.console, stretch="always")
+
+        self.after(100, self._set_initial_sash)
 
         self._passive_scanner = None
         self._active_scanner = None
         self._selected_interface = None
         self._identifying_ips = set()
+        self._tcpscan_running = False
+        self._tcpscan_process = None
 
         self._register_views()
         self.visualizer.activate_view("network")
@@ -48,10 +63,15 @@ class App(tk.Tk):
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+    def _set_initial_sash(self):
+        h = self.winfo_height()
+        if h > 100:
+            self._pane.sash_place(0, 0, h * 2 // 3)
+
     def _start_passive_scanner(self):
         self._passive_scanner = PassiveMDNSScanner(on_host_callback=self._on_host_discovered)
         self._passive_scanner.start()
-        self.console.info("Passive mDNS scan started")
+        self.console.info("Passive listening mDNS started")
 
     def _register_views(self):
         self.visualizer.register_view("network", NetworkView(self.visualizer))
@@ -63,6 +83,7 @@ class App(tk.Tk):
     def _register_commands(self):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
         self.console.register_command("scan", self._cmd_scan, "Network scanning commands")
+        self.console.register_command("tcpscan", self._cmd_tcpscan, "Scan TCP ports on an IP")
         self.console.register_command("delete-dbs", self._cmd_delete_dbs, "Wipe all stored data")
         self.console.register_command("exit", self._cmd_exit, "Close the application")
 
@@ -93,7 +114,9 @@ class App(tk.Tk):
             self._scan_active()
             return
         sub = args[0].lower()
-        if sub == "active":
+        if re.match(r"^\d+\.\d+\.\d+\.\d+$", sub):
+            self._scan_ip(sub)
+        elif sub == "active":
             self._scan_active()
         elif sub == "passive":
             self._scan_passive()
@@ -110,6 +133,7 @@ class App(tk.Tk):
         iface_status = f" ({self._selected_interface[0]})" if self._selected_interface else " (none)"
         self.console.title("Scan commands")
         self.console.body(f"  scan [active]        ARP + mDNS + Nmap (all methods)")
+        self.console.body(f"  scan <ip>            Identify a specific IP address")
         self.console.body(f"  scan passive         Restart passive mDNS discovery")
         self.console.body(f"  scan iface           List available interfaces")
         self.console.body(f"  scan iface <name>    Select interface by name")
@@ -145,20 +169,21 @@ class App(tk.Tk):
             return
         self._passive_scanner = PassiveMDNSScanner(on_host_callback=self._on_host_discovered)
         self._passive_scanner.start()
-        self.console.info("Passive mDNS scan started")
+        self.console.info("Passive listening mDNS started")
 
     def _scan_active(self):
         if self._active_scanner and self._active_scanner.is_running:
             self.console.warning("Active scan is already running.")
             return
 
-        iface = self._selected_interface
-        if not iface:
-            self.console.info("No interface selected. Choose one:")
-            iface = self._show_interface_dialog()
+        iface = self._show_interface_dialog()
 
         if not iface:
             self.console.warning("Scan cancelled: no interface selected")
+            return
+
+        if iface[0] == "ip":
+            self._scan_ip(iface[1])
             return
 
         self._selected_interface = iface
@@ -201,6 +226,154 @@ class App(tk.Tk):
             self.console.info("Scan stopped")
         else:
             self.console.warning("No scan is running.")
+
+    def _scan_ip(self, ip):
+        src.machines.interface_name = ""
+        src.machines.interface_ip = ""
+        machine = store.add_or_update(ip=ip, method="manual")
+        self.console.success(f"{machine.ip:<20} {machine.hostname:<20} [manual]")
+        if ip in self._identifying_ips:
+            return
+        self._identifying_ips.add(ip)
+        threading.Thread(target=self._identify, args=(machine,), daemon=True).start()
+
+    TCP_PORTS_COMMON = [
+        7, 9, 13, 21, 22, 23, 25, 37, 49, 53, 69, 70, 79, 80, 88, 110, 111,
+        113, 119, 123, 135, 137, 138, 139, 143, 161, 162, 179, 199, 389, 443,
+        445, 465, 512, 513, 514, 515, 548, 554, 587, 631, 636, 646, 873, 993,
+        995, 1025, 1026, 1027, 1080, 1099, 1433, 1434, 1521, 1723, 2049, 2121,
+        2222, 2375, 2701, 3128, 3260, 3306, 3389, 3690, 4369, 4444, 4786, 4848,
+        5000, 5353, 5432, 5555, 5672, 5800, 5900, 5985, 5986, 6379, 6667, 7001,
+        7002, 7777, 8000, 8009, 8080, 8180, 8443, 8888, 9000, 9090, 9200, 9443,
+        9999, 11211, 27017, 50070, 61616,
+    ]
+
+    @staticmethod
+    def _is_root():
+        try:
+            return os.geteuid() == 0
+        except AttributeError:
+            return False
+
+    def _tcp_scan_connect(self, ip, ports):
+        open_ports = []
+        def _check(p):
+            if not self._tcpscan_running:
+                return
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1.5)
+            try:
+                if sock.connect_ex((ip, p)) == 0:
+                    open_ports.append(p)
+            finally:
+                sock.close()
+        with ThreadPoolExecutor(max_workers=100) as exe:
+            futures = [exe.submit(_check, p) for p in ports]
+            for f in as_completed(futures):
+                if not self._tcpscan_running:
+                    break
+        return sorted(open_ports)
+
+    def _tcp_scan_syn_nmap(self, ip, ports):
+        port_list = ",".join(str(p) for p in ports)
+        _dbg(f"[tcpscan-nmap] {ip} ports={len(ports)}")
+        try:
+            self._tcpscan_process = subprocess.Popen(
+                ["nmap", "-n", "-Pn", "-sS", "-p", port_list, ip],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+            )
+            out, _ = self._tcpscan_process.communicate(timeout=120)
+            _dbg(f"[tcpscan-nmap] output:\n{out}")
+        except (subprocess.TimeoutExpired, Exception) as e:
+            self._tcpscan_process.kill()
+            self._tcpscan_process.communicate()
+            _dbg(f"[tcpscan-nmap] killed: {e}")
+            return []
+        finally:
+            self._tcpscan_process = None
+        open_ports = []
+        for line in out.splitlines():
+            m = re.match(r"(\d+)/tcp\s+open", line)
+            if m:
+                open_ports.append(int(m.group(1)))
+        _dbg(f"[tcpscan-nmap] done: open={len(open_ports)} ports={sorted(open_ports)}")
+        return sorted(open_ports)
+
+    @staticmethod
+    def _detect_scan_method():
+        if shutil.which("nmap"):
+            return "SYN"
+        return "connect"
+
+    def _tcp_scan(self, ip, ports, method):
+        if method.startswith("SYN"):
+            return self._tcp_scan_syn_nmap(ip, ports)
+        return self._tcp_scan_connect(ip, ports)
+
+    def _run_tcpscan(self, ip, method):
+        self._tcpscan_running = True
+        try:
+            # Phase 1: common ports
+            open_ports = self._tcp_scan(ip, self.TCP_PORTS_COMMON, method)
+            for p in open_ports:
+                self.console.after(0, lambda port=p: self.console.success(
+                    f"  {ip}  port {port} open"
+                ))
+            self.console.after(0, lambda: self.console.info(
+                f"TCP common ports ({len(self.TCP_PORTS_COMMON)}) done. Continuing full scan (65535)..."
+            ))
+
+            if not self._tcpscan_running:
+                self.console.after(0, lambda: self.console.warning(f"TCP scan {ip} stopped"))
+                return
+
+            # Phase 2: remaining ports
+            common_set = set(self.TCP_PORTS_COMMON)
+            remaining = [p for p in range(1, 65536) if p not in common_set]
+            more = self._tcp_scan(ip, remaining, method)
+            for p in more:
+                self.console.after(0, lambda port=p: self.console.success(
+                    f"  {ip}  port {port} open"
+                ))
+            all_ports = open_ports + more
+            machine = store.get(ip)
+            if machine and machine.id:
+                machine_db.save_tcp_ports(machine.id, all_ports)
+            self.console.after(0, lambda: self.console.info(
+                f"TCP scan {ip} finished ({65535} ports): {len(all_ports)} open"
+            ))
+        finally:
+            self._tcpscan_running = False
+
+    def _cmd_tcpscan(self, args):
+        if not args:
+            self.console.body("Usage: tcpscan <ip> | tcpscan stop")
+            return
+        sub = args[0].lower()
+        if sub == "stop":
+            if not self._tcpscan_running:
+                self.console.warning("No tcpscan is running.")
+                return
+            self._tcpscan_running = False
+            if self._tcpscan_process:
+                self._tcpscan_process.kill()
+            self.console.info("TCP scan stop requested")
+            return
+        ip = sub
+        if self._tcpscan_running:
+            self.console.warning("A TCP scan is already running.")
+            return
+        _dbg(f"[tcpscan] requested for {ip}")
+        if self._active_scanner and self._active_scanner.is_running:
+            self._active_scanner.stop()
+            self._active_scanner = None
+            self.console.info("Active scan stopped")
+        if self._is_root() and self._detect_scan_method() == "SYN":
+            method = "SYN (nmap)"
+        else:
+            method = "connect" + (" (no root)" if not self._is_root() else "")
+        self.console.info(f"TCP scanning {ip}  ({method})...")
+        threading.Thread(target=self._run_tcpscan, args=(ip, method), daemon=True).start()
 
     def _scan_list(self):
         machines = store.get_all_sorted()
@@ -263,6 +436,13 @@ class App(tk.Tk):
                         machine.domain = domain
                     if server_name:
                         machine.hostname = server_name
+                if result == "Linux device":
+                    banner = _probe_ssh_banner(machine.ip)
+                    if banner:
+                        os_label = _parse_ssh_banner(banner)
+                        machine.device_type = os_label or banner
+                        machine.os = os_label or banner
+                machine_db.save_machine_info(machine)
                 if result != old_type:
                     if machine.device_type == "device unknown":
                         self.console.after(0, lambda m=machine: self.console.body(
@@ -281,6 +461,7 @@ class App(tk.Tk):
     def _cmd_delete_dbs(self, args):
         store.clear()
         wipe_mdns_cache()
+        machine_db.delete_all()
         self.console.success("All data cleared (mDNS cache + machine list + database files)")
 
     def _on_close(self):

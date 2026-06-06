@@ -8,7 +8,7 @@ class InterfaceSelector(tk.Toplevel):
         self.result = None
 
         self.title("Select Interface")
-        self.geometry("500x300")
+        self.geometry("500x350")
         self.configure(bg="#111111")
 
         self.transient(parent)
@@ -16,6 +16,8 @@ class InterfaceSelector(tk.Toplevel):
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
+        self.rowconfigure(2, weight=0)
+        self.rowconfigure(3, weight=0)
 
         tk.Label(
             self,
@@ -26,7 +28,7 @@ class InterfaceSelector(tk.Toplevel):
         ).grid(row=0, column=0, sticky="w", padx=15, pady=(15, 5))
 
         list_frame = tk.Frame(self, bg="#000000")
-        list_frame.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 10))
+        list_frame.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 5))
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
 
@@ -56,8 +58,37 @@ class InterfaceSelector(tk.Toplevel):
         if self._interfaces:
             self.listbox.selection_set(0)
 
+        ip_frame = tk.Frame(self, bg="#111111")
+        ip_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=(5, 5))
+        ip_frame.columnconfigure(1, weight=1)
+
+        tk.Label(
+            ip_frame,
+            text="Or enter a specific IP:",
+            font=("Menlo", 10),
+            fg="#888888",
+            bg="#111111",
+        ).grid(row=0, column=0, sticky="w", padx=(0, 10))
+
+        self.ip_var = tk.StringVar()
+        self.ip_entry = tk.Entry(
+            ip_frame,
+            textvariable=self.ip_var,
+            bg="#000000",
+            fg="#ffffff",
+            insertbackground="#ffffff",
+            font=("Menlo", 12),
+            borderwidth=1,
+            relief=tk.FLAT,
+            highlightthickness=1,
+            highlightcolor="#333333",
+            highlightbackground="#333333",
+        )
+        self.ip_entry.grid(row=0, column=1, sticky="ew")
+        self.ip_entry.bind("<Return>", lambda e: self._select())
+
         btn_frame = tk.Frame(self, bg="#111111")
-        btn_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=(0, 15))
+        btn_frame.grid(row=3, column=0, sticky="ew", padx=15, pady=(5, 15))
 
         cancel_btn = tk.Label(
             btn_frame,
@@ -112,9 +143,13 @@ class InterfaceSelector(tk.Toplevel):
         return result
 
     def _select(self):
-        sel = self.listbox.curselection()
-        if sel:
-            self.result = self._interfaces[sel[0]]
+        custom_ip = self.ip_var.get().strip()
+        if custom_ip:
+            self.result = ("ip", custom_ip, "")
+        else:
+            sel = self.listbox.curselection()
+            if sel:
+                self.result = self._interfaces[sel[0]]
         self.destroy()
 
     def _cancel(self):

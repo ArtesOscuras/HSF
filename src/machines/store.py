@@ -24,6 +24,7 @@ def _init_db_path():
 
 class Machine:
     def __init__(self, ip, hostname="", mac="", method=""):
+        self.id = 0
         self.ip = ip
         self.hostname = hostname
         self.mac = mac
@@ -46,6 +47,7 @@ class Machine:
 
     def to_dict(self):
         return {
+            "id": self.id,
             "ip": self.ip,
             "hostname": self.hostname,
             "mac": self.mac,
@@ -62,12 +64,16 @@ class Machine:
 class MachineStore:
     def __init__(self):
         self._machines = {}
+        self._next_id = 1
 
     def add_or_update(self, ip, hostname="", mac="", method=""):
         if ip in self._machines:
             self._machines[ip].update(hostname=hostname, mac=mac, method=method)
         else:
-            self._machines[ip] = Machine(ip, hostname=hostname, mac=mac, method=method)
+            m = Machine(ip, hostname=hostname, mac=mac, method=method)
+            m.id = self._next_id
+            self._next_id += 1
+            self._machines[ip] = m
         return self._machines[ip]
 
     def get(self, ip):
@@ -77,21 +83,27 @@ class MachineStore:
         return list(self._machines.values())
 
     def get_all_sorted(self):
-        return sorted(self._machines.values(), key=lambda m: m.first_seen)
+        return sorted(self._machines.values(), key=lambda m: m.id)
 
     def count(self):
         return len(self._machines)
 
     def clear(self):
         self._machines.clear()
+        self._next_id = 1
 
     def save(self):
         _init_db_path()
         try:
             with _save_lock, sqlite3.connect(_DB_FILE) as conn:
+                cur = conn.execute("PRAGMA table_info(machines)")
+                columns = [r[1] for r in cur.fetchall()]
+                if columns and "id" not in columns:
+                    conn.execute("DROP TABLE machines")
                 conn.execute("""
                     CREATE TABLE IF NOT EXISTS machines (
-                        ip TEXT PRIMARY KEY,
+                        id INTEGER PRIMARY KEY,
+                        ip TEXT UNIQUE,
                         hostname TEXT,
                         mac TEXT,
                         device_type TEXT,
@@ -103,24 +115,13 @@ class MachineStore:
                         last_seen TEXT
                     )
                 """)
-                try:
-                    conn.execute("ALTER TABLE machines ADD COLUMN model TEXT DEFAULT ''")
-                except sqlite3.OperationalError:
-                    pass
-                try:
-                    conn.execute("ALTER TABLE machines ADD COLUMN os TEXT DEFAULT ''")
-                except sqlite3.OperationalError:
-                    pass
-                try:
-                    conn.execute("ALTER TABLE machines ADD COLUMN domain TEXT DEFAULT ''")
-                except sqlite3.OperationalError:
-                    pass
                 for m in self._machines.values():
                     conn.execute(
                         """INSERT OR REPLACE INTO machines
-                           (ip, hostname, mac, device_type, model, os, domain, methods, first_seen, last_seen)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                           (id, ip, hostname, mac, device_type, model, os, domain, methods, first_seen, last_seen)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (
+                            m.id,
                             m.ip,
                             m.hostname,
                             m.mac,
@@ -142,41 +143,27 @@ class MachineStore:
             return
         try:
             with sqlite3.connect(_DB_FILE) as conn:
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS machines (
-                        ip TEXT PRIMARY KEY,
-                        hostname TEXT,
-                        mac TEXT,
-                        device_type TEXT,
-                        model TEXT,
-                        os TEXT,
-                        domain TEXT,
-                        methods TEXT,
-                        first_seen TEXT,
-                        last_seen TEXT
-                    )
-                """)
-                try:
-                    conn.execute("ALTER TABLE machines ADD COLUMN model TEXT DEFAULT ''")
-                except sqlite3.OperationalError:
-                    pass
-                try:
-                    conn.execute("ALTER TABLE machines ADD COLUMN os TEXT DEFAULT ''")
-                except sqlite3.OperationalError:
-                    pass
-                try:
-                    conn.execute("ALTER TABLE machines ADD COLUMN domain TEXT DEFAULT ''")
-                except sqlite3.OperationalError:
-                    pass
+                cur = conn.execute("PRAGMA table_info(machines)")
+                columns = [r[1] for r in cur.fetchall()]
+                if "id" not in columns:
+                    self._next_id = 1
+                    return
                 rows = conn.execute(
-                    "SELECT ip, hostname, mac, device_type, model, os, domain, methods, first_seen, last_seen FROM machines"
+                    "SELECT id, ip, hostname, mac, device_type, model, os, domain, methods, first_seen, last_seen FROM machines"
                 ).fetchall()
         except (sqlite3.DatabaseError, sqlite3.OperationalError):
             return
 
+        max_id = 0
         for row in rows:
-            ip, hostname, mac, device_type, model, os_val, domain_val, methods_json, first_seen, last_seen = row
+            mid, ip, hostname, mac, device_type, model, os_val, domain_val, methods_json, first_seen, last_seen = row
             m = Machine(ip, hostname=hostname, mac=mac)
+            try:
+                m.id = int(mid)
+            except (ValueError, TypeError):
+                pass
+            if m.id > max_id:
+                max_id = m.id
             m.device_type = device_type
             m.model = model or ""
             m.os = os_val or ""
@@ -194,6 +181,7 @@ class MachineStore:
             except (ValueError, TypeError):
                 pass
             self._machines[ip] = m
+        self._next_id = max_id + 1
 
 
 def start_autosave(store_instance):

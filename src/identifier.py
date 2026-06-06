@@ -1,5 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 import os
+import re
+import subprocess
 import time as _time
 import netifaces
 from scapy.all import IP, ICMP, TCP, UDP, DNS, DNSQR, sr1, RandShort
@@ -29,6 +31,7 @@ TIMEOUT = 1.5
 PORT_445 = 445
 PORT_631 = 631
 PORT_9100 = 9100
+PORT_SSH = 22
 PORT_MDNS = 5353
 PORT_RTSP = 554
 PORT_ONVIF_DISCOVERY = 3702
@@ -36,6 +39,8 @@ TTL_ROUTER_MIN = 250
 TTL_ROUTER_MAX = 256
 TTL_WIN_MIN = 120
 TTL_WIN_MAX = 130
+TTL_LINUX_MIN = 50
+TTL_LINUX_MAX = 65
 SERVICE_APPLE_MOBDEV2 = "_apple-mobdev2._tcp.local."
 SERVICE_COMPANION_LINK = "_companion-link._tcp.local."
 SERVICE_RDLINK = "_rdlink._tcp.local."
@@ -64,12 +69,15 @@ ANDROID_KEYWORDS = (
 
 
 def _probe_ttl(ip):
-    reply = sr1(IP(dst=ip) / ICMP(), timeout=TIMEOUT, verbose=0)
-    if reply is None:
+    try:
+        out = subprocess.run(
+            ["ping", "-c", "1", ip],
+            capture_output=True, timeout=3, text=True,
+        ).stdout
+        m = re.search(r"ttl=(\d+)", out, re.IGNORECASE)
+        return int(m.group(1)) if m else None
+    except Exception:
         return None
-    if reply[IP].src != ip:
-        return None
-    return reply[IP].ttl
 
 
 def _probe_port(ip, port):
@@ -128,6 +136,24 @@ def _probe_smb_info(ip):
     except Exception:
         return "", "", ""
     return os_str.strip() if os_str else "", domain.strip() if domain else "", server_name.strip()
+
+
+def _probe_ssh_banner(ip):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(TIMEOUT)
+    try:
+        sock.connect((ip, 22))
+        banner = sock.recv(256).decode(errors="replace").strip()
+        return banner
+    except Exception:
+        return ""
+    finally:
+        sock.close()
+
+
+def _parse_ssh_banner(banner):
+    m = re.search(r"OpenSSH[^ ]* (.+)", banner)
+    return m.group(1).strip() if m else ""
 
 
 def get_gateway_ip():
@@ -227,7 +253,7 @@ class ProbeContext:
             SERVICE_APPLETV, SERVICE_HOMEKIT, SERVICE_GOOGLECAST,
             SERVICE_ONVIF, SERVICE_RTSP, SERVICE_AIRPLAY, SERVICE_RAOP,
         )
-        ports = (PORT_445, PORT_9100, PORT_631, PORT_RTSP)
+        ports = (PORT_445, PORT_9100, PORT_631, PORT_RTSP, PORT_SSH)
         udp_ports = (PORT_ONVIF_DISCOVERY,)
 
         def _do_ttl():
@@ -361,6 +387,19 @@ class WindowsIdentifier(BaseIdentifier):
         return None
 
 
+class LinuxIdentifier(BaseIdentifier):
+    name = "linux"
+
+    def identify(self, ip, context, gateway_ip=None, hostname=""):
+        result = context.port(PORT_SSH)
+        if not result or not result["open"]:
+            return None
+        ttl = context.ttl()
+        if ttl is not None and TTL_LINUX_MIN <= ttl <= TTL_LINUX_MAX:
+            return "Linux device"
+        return None
+
+
 class PrinterIdentifier(BaseIdentifier):
     name = "printer"
 
@@ -421,6 +460,7 @@ def _init_defaults():
     ])
     _post_ttl_identifiers.extend([
         WindowsIdentifier(),
+        LinuxIdentifier(),
         PrinterIdentifier(),
         IPCameraIdentifier(),
     ])

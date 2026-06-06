@@ -1,0 +1,122 @@
+import json
+import os
+import sqlite3
+from datetime import datetime
+
+
+_DB_DIR = None
+
+
+def _init_db_dir():
+    global _DB_DIR
+    if _DB_DIR is None:
+        proj = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        _DB_DIR = os.path.join(proj, "databases")
+        os.makedirs(_DB_DIR, exist_ok=True)
+
+
+def _get_path(machine_id):
+    _init_db_dir()
+    return os.path.join(_DB_DIR, f"machine_{machine_id}.dbs")
+
+
+def save_machine_info(machine):
+    _init_db_dir()
+    path = _get_path(machine.id)
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS machine_info (
+                    ip TEXT,
+                    hostname TEXT,
+                    mac TEXT,
+                    device_type TEXT,
+                    model TEXT,
+                    os TEXT,
+                    domain TEXT,
+                    methods TEXT,
+                    first_seen TEXT,
+                    last_seen TEXT
+                )
+            """)
+            conn.execute("DELETE FROM machine_info")
+            conn.execute(
+                "INSERT INTO machine_info VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    machine.ip,
+                    machine.hostname,
+                    machine.mac,
+                    machine.device_type,
+                    machine.model,
+                    machine.os,
+                    machine.domain,
+                    json.dumps(sorted(machine.methods)),
+                    machine.first_seen.isoformat(),
+                    machine.last_seen.isoformat(),
+                ),
+            )
+    except (PermissionError, OSError, sqlite3.OperationalError):
+        pass
+
+
+def save_tcp_ports(machine_id, ports):
+    _init_db_dir()
+    path = _get_path(machine_id)
+    now = datetime.now().isoformat()
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tcp_ports (
+                    port INTEGER,
+                    service TEXT,
+                    discovered_at TEXT
+                )
+            """)
+            conn.execute("DELETE FROM tcp_ports")
+            for p in ports:
+                conn.execute(
+                    "INSERT INTO tcp_ports VALUES (?, ?, ?)",
+                    (p, "", now),
+                )
+    except (PermissionError, OSError, sqlite3.OperationalError):
+        pass
+
+
+def load_tcp_ports(machine_id):
+    _init_db_dir()
+    path = _get_path(machine_id)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tcp_ports (
+                    port INTEGER,
+                    service TEXT,
+                    discovered_at TEXT
+                )
+            """)
+            rows = conn.execute("SELECT port FROM tcp_ports ORDER BY port").fetchall()
+            return [r[0] for r in rows]
+    except (sqlite3.DatabaseError, sqlite3.OperationalError):
+        return []
+
+
+def delete_machine_db(machine_id):
+    _init_db_dir()
+    path = _get_path(machine_id)
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+    except (PermissionError, OSError):
+        pass
+
+
+def delete_all():
+    _init_db_dir()
+    for filename in os.listdir(_DB_DIR):
+        if filename.startswith("machine_") and filename.endswith(".dbs"):
+            try:
+                os.remove(os.path.join(_DB_DIR, filename))
+            except (PermissionError, OSError):
+                pass
