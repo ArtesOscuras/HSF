@@ -17,7 +17,7 @@ from src.machines import machine_db
 import src.machines
 from src.scanner import PassiveMDNSScanner, ActiveScanner
 from src.scanner.mdns_cache import load as load_mdns_cache, save as save_mdns_cache, start_autosave, wipe as wipe_mdns_cache
-from src.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _probe_smb_info, _probe_ssh_banner, _parse_ssh_banner, _probe_ttl, _dbg
+from src.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _probe_smb_info, _probe_ssh_banner, _parse_ssh_banner, _probe_ttl, _run_whatweb, _probe_web_internal, _identify_linux_distro, _extract_domains_from_whatweb, _dbg
 
 
 class App(tk.Tk):
@@ -87,6 +87,8 @@ class App(tk.Tk):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
         self.console.register_command("scan", self._cmd_scan, "Network scanning commands")
         self.console.register_command("tcpscan", self._cmd_tcpscan, "Scan TCP ports on an IP")
+        self.console.register_command("whatweb", self._cmd_whatweb, "Web technology scan on a port")
+        self.console.register_command("bannergrab", self._cmd_bannergrab, "Grab service banner from a port")
         self.console.register_command("delete-dbs", self._cmd_delete_dbs, "Wipe all stored data")
         self.console.register_command("exit", self._cmd_exit, "Close the application")
 
@@ -110,7 +112,7 @@ class App(tk.Tk):
         else:
             try:
                 self.visualizer.activate_view(sub)
-                self.console.success(f"Switched to view: {sub}")
+                self.console.info(f"Switched to view: {sub}")
             except ValueError:
                 self.console.error(f"Unknown view: {sub}. Use 'view list' to see available views.")
 
@@ -134,9 +136,11 @@ class App(tk.Tk):
         view_name = f"machine_{machine.id}"
         if view_name not in self.visualizer.get_view_names():
             from .views import MachineDetailView
-            self.visualizer.register_view(view_name, MachineDetailView(self.visualizer, machine))
+            machine_view = MachineDetailView(self.visualizer, machine)
+            machine_view._on_back_click = lambda: self.visualizer.activate_view("network")
+            self.visualizer.register_view(view_name, machine_view)
         self.visualizer.activate_view(view_name)
-        self.console.success(f"Viewing machine #{machine.id}")
+        self.console.info(f"Switched to view: machine_{machine.id}")
 
     def _open_machine_view(self, machine):
         self._cmd_view_machine([str(machine.id)])
@@ -245,19 +249,12 @@ class App(tk.Tk):
         return dialog.result
 
     def _scan_stop(self):
-        stopped = False
         if self._active_scanner and self._active_scanner.is_running:
             self._active_scanner.stop()
             self._active_scanner = None
-            stopped = True
-        if self._passive_scanner and self._passive_scanner.is_running:
-            self._passive_scanner.stop()
-            self._passive_scanner = None
-            stopped = True
-        if stopped:
-            self.console.info("Scan stopped")
+            self.console.info("Active scan stopped")
         else:
-            self.console.warning("No scan is running.")
+            self.console.warning("No active scan is running.")
 
     def _scan_ip(self, ip):
         self.console.info(f"Checking {ip}...")
@@ -289,14 +286,16 @@ class App(tk.Tk):
                 machine.os = os_info
             if domain:
                 machine.domain = domain
+                machine_db.save_domain(machine.id, domain, "smb")
             if server_name:
                 machine.hostname = server_name
         if result == "Linux device":
             banner = _probe_ssh_banner(machine.ip)
             if banner:
-                os_label = _parse_ssh_banner(banner)
-                machine.device_type = os_label or banner
-                machine.os = os_label or banner
+                distro = _identify_linux_distro(banner)
+                if distro:
+                    machine.device_type = distro
+                    machine.os = distro
         machine_db.save_machine_info(machine)
         self.console.after(0, lambda: self.console.success(
             f"{machine.ip:<20} {machine.hostname:<20} [manual]"
@@ -320,7 +319,7 @@ class App(tk.Tk):
         except AttributeError:
             return False
 
-    def _tcp_scan_connect(self, ip, ports):
+    def _tcp_scan_connect(self, ip, ports, port_callback=None):
         open_ports = []
         def _check(p):
             if not self._tcpscan_running:
@@ -330,6 +329,8 @@ class App(tk.Tk):
             try:
                 if sock.connect_ex((ip, p)) == 0:
                     open_ports.append(p)
+                    if port_callback:
+                        port_callback(p)
             finally:
                 sock.close()
         with ThreadPoolExecutor(max_workers=100) as exe:
@@ -370,16 +371,31 @@ class App(tk.Tk):
             return "SYN"
         return "connect"
 
-    def _tcp_scan(self, ip, ports, method):
+    def _tcp_scan(self, ip, ports, method, port_callback=None):
         if method.startswith("SYN"):
             return self._tcp_scan_syn_nmap(ip, ports)
-        return self._tcp_scan_connect(ip, ports)
+        return self._tcp_scan_connect(ip, ports, port_callback=port_callback)
 
     def _run_tcpscan(self, ip, method):
+        machine = store.get(ip)
         self._tcpscan_running = True
+        all_ports = []
         try:
+            def _save_ports():
+                if machine and machine.id:
+                    machine_db.save_tcp_ports(machine.id, sorted(all_ports))
+
+            def _on_port(p):
+                if p not in all_ports:
+                    all_ports.append(p)
+                _save_ports()
+
             # Phase 1: common ports
-            open_ports = self._tcp_scan(ip, self.TCP_PORTS_COMMON, method)
+            open_ports = self._tcp_scan(ip, self.TCP_PORTS_COMMON, method, port_callback=_on_port)
+            for p in open_ports:
+                if p not in all_ports:
+                    all_ports.append(p)
+            _save_ports()
             for p in open_ports:
                 self.console.after(0, lambda port=p: self.console.success(
                     f"  {ip}  port {port} open"
@@ -395,25 +411,41 @@ class App(tk.Tk):
             # Phase 2: remaining ports
             common_set = set(self.TCP_PORTS_COMMON)
             remaining = [p for p in range(1, 65536) if p not in common_set]
-            more = self._tcp_scan(ip, remaining, method)
+            more = self._tcp_scan(ip, remaining, method, port_callback=_on_port)
+            for p in more:
+                if p not in all_ports:
+                    all_ports.append(p)
+            _save_ports()
             for p in more:
                 self.console.after(0, lambda port=p: self.console.success(
                     f"  {ip}  port {port} open"
                 ))
-            all_ports = open_ports + more
-            machine = store.get(ip)
-            if machine and machine.id:
-                machine_db.save_tcp_ports(machine.id, all_ports)
             self.console.after(0, lambda: self.console.info(
                 f"TCP scan {ip} finished ({65535} ports): {len(all_ports)} open"
             ))
         finally:
             self._tcpscan_running = False
 
+    def _get_active_machine(self):
+        name = self.visualizer.get_active_view_name()
+        if name and name.startswith("machine_"):
+            try:
+                mid = int(name.split("_")[1])
+                for m in store.get_all():
+                    if m.id == mid:
+                        return m
+            except (ValueError, IndexError):
+                pass
+        return None
+
     def _cmd_tcpscan(self, args):
         if not args:
-            self.console.body("Usage: tcpscan <ip> | tcpscan stop")
-            return
+            m = self._get_active_machine()
+            if m:
+                args = [str(m.id)]
+            else:
+                self.console.body("Usage: tcpscan <ip|id> | tcpscan stop")
+                return
         sub = args[0].lower()
         if sub == "stop":
             if not self._tcpscan_running:
@@ -451,6 +483,175 @@ class App(tk.Tk):
             method = "connect" + (" (no root)" if not self._is_root() else "")
         self.console.info(f"TCP scanning {ip}  ({method})...")
         threading.Thread(target=self._run_tcpscan, args=(ip, method), daemon=True).start()
+
+    def _cmd_whatweb(self, args):
+        m = self._get_active_machine()
+        if not args:
+            if m:
+                args = [str(m.id)]
+            else:
+                self.console.body("Usage: whatweb <ip|id> [port]")
+                return
+        target = args[0]
+        port = 80
+        if len(args) >= 2:
+            try:
+                port = int(args[1])
+            except ValueError:
+                self.console.error("Invalid port number")
+                return
+        machine = None
+        if re.match(r"^\d+$", target):
+            mid = int(target)
+            for m in store.get_all():
+                if m.id == mid:
+                    machine = m
+                    break
+        else:
+            machine = store.get(target)
+        if not machine:
+            self.console.warning(f"No machine found for: {target}")
+            return
+        ip = machine.ip
+        threading.Thread(target=self._run_webscan, args=(ip, port, machine), daemon=True).start()
+
+    @staticmethod
+    def _has_whatweb():
+        try:
+            r = subprocess.run(["whatweb", "--version"], capture_output=True, timeout=5)
+            if r.returncode == 0:
+                return True, "direct"
+        except (FileNotFoundError, PermissionError, OSError, subprocess.TimeoutExpired):
+            pass
+        try:
+            r = subprocess.run("whatweb --version", shell=True, capture_output=True, timeout=5)
+            if r.returncode == 0:
+                return True, "subshell"
+        except (FileNotFoundError, PermissionError, OSError, subprocess.TimeoutExpired):
+            pass
+        try:
+            shell = os.environ.get("SHELL", "/bin/sh")
+            r = subprocess.run([shell, "-ic", "whatweb --version"], capture_output=True, timeout=5)
+            if r.returncode == 0:
+                alias_r = subprocess.run(
+                    [shell, "-ic", "alias whatweb 2>/dev/null"],
+                    capture_output=True, timeout=5, text=True,
+                )
+                alias_out = alias_r.stdout.strip()
+                if "whatweb=" in alias_out:
+                    path = alias_out.split("whatweb=", 1)[1].strip().strip("'").strip('"')
+                    if os.path.isfile(path):
+                        return True, path
+                return True, "interactive"
+        except (FileNotFoundError, PermissionError, OSError, subprocess.TimeoutExpired):
+            pass
+        return False, ""
+
+    @staticmethod
+    def _strip_ansi(text):
+        return re.sub(r"\x1b\[[0-9;]*m", "", text)
+
+    def _run_webscan(self, ip, port, machine):
+        found, mode = self._has_whatweb()
+        if found:
+            self.console.after(0, lambda: self.console.info(
+                f"Web scanning {ip}:{port} (whatweb)..."
+            ))
+            stdout, stderr = _run_whatweb(ip, port, mode=mode)
+            stdout = self._strip_ansi(stdout)
+            stderr = self._strip_ansi(stderr)
+            if stderr:
+                for line in stderr.split("\n"):
+                    if line.strip():
+                        self.console.after(0, lambda l=line: self.console.error(f"  whatweb: {l}"))
+                stdout = stdout + "\n" + stderr if stdout else stderr
+            if stdout:
+                machine_db.save_web_service(machine.id, port, stdout)
+                domains = _extract_domains_from_whatweb(stdout)
+                for d in domains:
+                    machine_db.save_domain(machine.id, d, "whatweb")
+                self.console.after(0, lambda: self.console.info(
+                    f"Web scan {ip}:{port} done (whatweb)"
+                ))
+                for d in domains:
+                    self.console.after(0, lambda dom=d: self.console.success(f"  domain: {dom}"))
+            else:
+                self.console.after(0, lambda: self.console.warning(
+                    f"No web service detected at {ip}:{port}"
+                ))
+        else:
+            self.console.after(0, lambda: self.console.error(
+                "whatweb not found in path"
+            ))
+            self.console.after(0, lambda: self.console.info(
+                f"Web scanning {ip}:{port} (internal scanner)..."
+            ))
+            output = _probe_web_internal(ip, port)
+            engine = "internal"
+            if output:
+                machine_db.save_web_service(machine.id, port, output)
+                self.console.after(0, lambda: self.console.info(
+                    f"Web scan {ip}:{port} done ({engine})"
+                ))
+                for line in output.split("\n"):
+                    self.console.after(0, lambda l=line: self.console.body(f"  {l}"))
+            else:
+                self.console.after(0, lambda: self.console.warning(
+                    f"No web service detected at {ip}:{port}"
+                ))
+
+    def _cmd_bannergrab(self, args):
+        if len(args) < 2:
+            self.console.body("Usage: bannergrab <ip|id> <port>")
+            return
+        target, port_str = args[0], args[1]
+        try:
+            port = int(port_str)
+        except ValueError:
+            self.console.error("Invalid port number")
+            return
+        machine = None
+        if re.match(r"^\d+$", target):
+            mid = int(target)
+            for m in store.get_all():
+                if m.id == mid:
+                    machine = m
+                    break
+        else:
+            machine = store.get(target)
+        if not machine:
+            self.console.warning(f"No machine found for: {target}")
+            return
+        ip = machine.ip
+        threading.Thread(target=self._run_bannergrab, args=(ip, port), daemon=True).start()
+
+    def _run_bannergrab(self, ip, port):
+        self.console.after(0, lambda: self.console.info(f"Connecting to {ip}:{port}..."))
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(5)
+        try:
+            sock.connect((ip, port))
+            banner = b""
+            while True:
+                try:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    banner += chunk
+                except socket.timeout:
+                    break
+            sock.close()
+        except Exception as e:
+            err_msg = str(e)
+            self.console.after(0, lambda m=err_msg: self.console.error(f"  {ip}:{port} connection failed: {m}"))
+            return
+        text = banner.decode(errors="replace").strip()
+        if text:
+            self.console.after(0, lambda: self.console.success(f"Banner from {ip}:{port}:"))
+            for line in text.split("\n"):
+                self.console.after(0, lambda l=line: self.console.body(f"  {l}"))
+        else:
+            self.console.after(0, lambda: self.console.warning(f"No banner received from {ip}:{port}"))
 
     def _scan_list(self):
         machines = store.get_all_sorted()
@@ -511,14 +712,15 @@ class App(tk.Tk):
                         machine.os = os_info
                     if domain:
                         machine.domain = domain
-                    if server_name:
+                        machine_db.save_domain(machine.id, domain, "smb")
                         machine.hostname = server_name
                 if result == "Linux device":
                     banner = _probe_ssh_banner(machine.ip)
                     if banner:
-                        os_label = _parse_ssh_banner(banner)
-                        machine.device_type = os_label or banner
-                        machine.os = os_label or banner
+                        distro = _identify_linux_distro(banner)
+                        if distro:
+                            machine.device_type = distro
+                            machine.os = distro
                 machine_db.save_machine_info(machine)
                 if result != old_type:
                     if machine.device_type == "device unknown":
@@ -539,7 +741,7 @@ class App(tk.Tk):
         store.clear()
         wipe_mdns_cache()
         machine_db.delete_all()
-        self.console.success("All data cleared (mDNS cache + machine list + database files)")
+        self.console.info("All data cleared (mDNS cache + machine list + database files)")
 
     def _on_close(self):
         if self._passive_scanner:

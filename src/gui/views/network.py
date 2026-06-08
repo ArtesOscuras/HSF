@@ -75,10 +75,12 @@ class NetworkView(BaseView):
 
     def on_activate(self):
         self.text.bind("<Button-1>", self._on_line_click)
+        self.text.bind("<Motion>", self._on_mouse_move)
         self._poll()
 
     def on_deactivate(self):
         self.text.unbind("<Button-1>")
+        self.text.unbind("<Motion>")
         if self._poll_id:
             self.after_cancel(self._poll_id)
             self._poll_id = None
@@ -138,6 +140,12 @@ class NetworkView(BaseView):
         if self._on_machine_click and 0 <= line < len(self._machines):
             self._on_machine_click(self._machines[line])
         return "break"
+
+    def _on_mouse_move(self, event):
+        index = self.text.index(f"@{event.x},{event.y}")
+        line = int(index.split(".")[0]) - 1
+        cursor = "hand2" if 0 <= line < len(self._machines) else ""
+        self.text.configure(cursor=cursor)
 
     def _poll(self):
         self.iface_label.config(

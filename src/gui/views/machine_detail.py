@@ -31,8 +31,12 @@ class MachineDetailView(BaseView):
             font=("Menlo", 22, "bold"),
             fg="#ffffff",
             bg="#000000",
+            cursor="hand2",
         )
         self._title_label.pack(anchor="center")
+        self._title_label.bind("<Button-1>", self._on_title_click)
+        self._on_back_click = None
+        self._last_hash = None
 
         text_frame = tk.Frame(self, bg="#000000")
         text_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
@@ -47,7 +51,7 @@ class MachineDetailView(BaseView):
             borderwidth=0,
             highlightthickness=0,
             state=tk.DISABLED,
-            wrap=tk.NONE,
+            wrap=tk.WORD,
         )
         self.text.grid(row=0, column=0, sticky="nsew")
 
@@ -71,6 +75,10 @@ class MachineDetailView(BaseView):
             self.after_cancel(self._poll_id)
             self._poll_id = None
 
+    def _on_title_click(self, event):
+        if self._on_back_click:
+            self._on_back_click()
+
     def _poll(self):
         self._refresh()
         self._poll_id = self.after(2000, self._poll)
@@ -79,6 +87,24 @@ class MachineDetailView(BaseView):
         m = store.get(self._machine.ip)
         if m:
             self._machine = m
+
+        ports = machine_db.load_tcp_ports(self._machine.id)
+        web = machine_db.load_web_services(self._machine.id)
+        domains = machine_db.load_domains(self._machine.id)
+        current_hash = hash((
+            self._machine.device_type, self._machine.model, self._machine.os,
+            self._machine.domain, self._machine.hostname, self._machine.mac,
+            tuple(ports), tuple((p, o) for p, o in web), tuple(domains),
+        ))
+        if current_hash == self._last_hash and self.text.index("end-1c") != "1.0":
+            return
+        self._last_hash = current_hash
+
+        try:
+            first_line = self.text.index("@0,0")
+            line_num = int(first_line.split(".")[0])
+        except Exception:
+            line_num = 1
 
         self.text.configure(state=tk.NORMAL)
         self.text.delete("1.0", tk.END)
@@ -103,6 +129,15 @@ class MachineDetailView(BaseView):
             self.text.insert(tk.END, f"  {label + ':':<{label_w}} ", "muted")
             self.text.insert(tk.END, f"{value or '-'}\n", "bright")
 
+        domains = machine_db.load_domains(m.id)
+        if domains:
+            self.text.insert(tk.END, f"\nDomains:\n", "info")
+            for d, src in domains:
+                self.text.insert(tk.END, f"  {d}", "bright")
+                if src:
+                    self.text.insert(tk.END, f" ({src})", "muted")
+                self.text.insert(tk.END, "\n")
+
         ports = machine_db.load_tcp_ports(m.id)
         if ports:
             self.text.insert(tk.END, f"\nTCP ports ({len(ports)}):\n", "info")
@@ -113,6 +148,17 @@ class MachineDetailView(BaseView):
         else:
             self.text.insert(tk.END, "\nTCP ports: (not scanned yet)\n", "muted")
 
+        web = machine_db.load_web_services(m.id)
+        if web:
+            for port, output in web:
+                self.text.insert(tk.END, f"\nWeb port {port}:\n", "info")
+                for line in output.split("\n"):
+                    self.text.insert(tk.END, f"  {line}\n", "bright")
+
+        last_line = self.text.index("end-1c")
+        total = int(last_line.split(".")[0]) if last_line else 1
+        fraction = line_num / max(total, 1)
+        self.text.yview_moveto(min(fraction, 1.0))
         self.text.configure(state=tk.DISABLED)
 
 

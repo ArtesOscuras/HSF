@@ -68,6 +68,42 @@ ANDROID_KEYWORDS = (
 )
 
 
+LINUX_DISTROS = (
+    ("Ubuntu", "ubuntu"),
+    ("Debian", "debian"),
+    ("Fedora", "fedora"),
+    ("CentOS", "centos"),
+    ("Red Hat", "rhel", "red hat"),
+    ("Alpine", "alpine"),
+    ("Arch Linux", "arch"),
+    ("Kali", "kali"),
+    ("openSUSE", "suse"),
+    ("Raspbian", "raspbian"),
+    ("Gentoo", "gentoo"),
+    ("Amazon Linux", "amzn", "amazon linux"),
+    ("Slackware", "slackware"),
+    ("Mageia", "mageia"),
+    ("Manjaro", "manjaro"),
+    ("Parrot", "parrot"),
+    ("Rocky Linux", "rocky"),
+    ("Oracle Linux", "oracle linux", "ol"),
+    ("AlmaLinux", "almalinux"),
+    ("Devuan", "devuan"),
+    ("Void Linux", "void"),
+    ("NixOS", "nixos"),
+    ("Pop!_OS", "pop"),
+    ("Elementary", "elementary"),
+    ("Zorin", "zorin"),
+    ("MX Linux", "mx linux"),
+    ("EndeavourOS", "endeavour"),
+    ("Garuda", "garuda"),
+    ("Deepin", "deepin"),
+    ("FreeBSD", "freebsd"),
+    ("OpenBSD", "openbsd"),
+    ("NetBSD", "netbsd"),
+)
+
+
 def _probe_ttl(ip):
     try:
         out = subprocess.run(
@@ -154,6 +190,99 @@ def _probe_ssh_banner(ip):
 def _parse_ssh_banner(banner):
     m = re.search(r"OpenSSH[^ ]* (.+)", banner)
     return m.group(1).strip() if m else ""
+
+
+def _identify_linux_distro(banner):
+    b = banner.lower()
+    for entry in LINUX_DISTROS:
+        distro_name = entry[0]
+        for kw in entry[1:]:
+            if kw in b:
+                return distro_name
+    return ""
+
+
+def _extract_domains_from_whatweb(output):
+    domains = set()
+    for m in re.finditer(r"RedirectLocation\[(.*?)\]", output):
+        url = m.group(1).strip()
+        if not re.match(r"^https?://", url):
+            continue
+        host = re.sub(r"^https?://", "", url).split("/")[0].split(":")[0]
+        if host and "." in host:
+            domains.add(host)
+    return sorted(domains)
+
+
+def _run_whatweb(ip, port, mode="direct"):
+    url = f"{ip}:{port}"
+    try:
+        if mode == "direct":
+            out = subprocess.run(
+                [mode, "-a", "3", url],
+                capture_output=True, timeout=60, text=True,
+            )
+        elif mode == "subshell":
+            out = subprocess.run(
+                f"whatweb -a 3 {url}", shell=True,
+                capture_output=True, timeout=60, text=True,
+            )
+        elif mode == "interactive":
+            shell = os.environ.get("SHELL", "/bin/sh")
+            out = subprocess.run(
+                [shell, "-ic", f"whatweb -a 3 {url}"],
+                capture_output=True, timeout=60, text=True,
+            )
+        else:
+            out = subprocess.run(
+                [mode, "-a", "3", url],
+                capture_output=True, timeout=60, text=True,
+            )
+        return out.stdout.strip(), out.stderr.strip()
+    except (Exception, PermissionError, OSError):
+        return "", ""
+
+
+def _probe_web_internal(ip, port):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(3)
+    try:
+        sock.connect((ip, port))
+        sock.send(f"GET / HTTP/1.0\r\nHost: {ip}\r\n\r\n".encode())
+        resp = b""
+        while True:
+            try:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                resp += chunk
+            except socket.timeout:
+                break
+    except Exception:
+        return ""
+    finally:
+        sock.close()
+
+    resp_str = resp.decode(errors="replace")
+    lines = resp_str.split("\r\n")
+    info = [f"HTTP: {lines[0]}" if lines else "HTTP: no response"]
+    headers = {}
+    for line in lines[1:]:
+        if ":" in line:
+            k, v = line.split(":", 1)
+            headers[k.strip().lower()] = v.strip()
+
+    if "server" in headers:
+        info.append(f"Server: {headers['server']}")
+    if "x-powered-by" in headers:
+        info.append(f"X-Powered-By: {headers['x-powered-by']}")
+    m = re.search(r"<title>(.*?)</title>", resp_str, re.IGNORECASE | re.DOTALL)
+    if m:
+        info.append(f"Title: {m.group(1).strip()}")
+    if "set-cookie" in headers:
+        info.append(f"Set-Cookie: {headers['set-cookie']}")
+
+    return "\n".join(info)
 
 
 def get_gateway_ip():
