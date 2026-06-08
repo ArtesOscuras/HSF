@@ -17,7 +17,7 @@ from src.machines import machine_db
 import src.machines
 from src.scanner import PassiveMDNSScanner, ActiveScanner
 from src.scanner.mdns_cache import load as load_mdns_cache, save as save_mdns_cache, start_autosave, wipe as wipe_mdns_cache
-from src.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _probe_smb_info, _probe_ssh_banner, _parse_ssh_banner, _dbg
+from src.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _probe_smb_info, _probe_ssh_banner, _parse_ssh_banner, _probe_ttl, _dbg
 
 
 class App(tk.Tk):
@@ -74,9 +74,12 @@ class App(tk.Tk):
         self.console.info("Passive listening mDNS started")
 
     def _register_views(self):
-        self.visualizer.register_view("network", NetworkView(self.visualizer))
+        net_view = NetworkView(self.visualizer)
+        net_view._on_machine_click = self._open_machine_view
+        self.visualizer.register_view("network", net_view)
         self.console.add_help_section("Views", [
             ("view list", "List available views"),
+            ("view machine <id|ip>", "View machine details"),
             ("view <name>", "Switch to a view"),
         ])
 
@@ -102,12 +105,41 @@ class App(tk.Tk):
                     self.console.body(f"  {n:<12} {desc}")
             else:
                 self.console.warning("No views available.")
+        elif sub == "machine":
+            self._cmd_view_machine(args[1:])
         else:
             try:
                 self.visualizer.activate_view(sub)
                 self.console.success(f"Switched to view: {sub}")
             except ValueError:
                 self.console.error(f"Unknown view: {sub}. Use 'view list' to see available views.")
+
+    def _cmd_view_machine(self, args):
+        if not args:
+            self.console.body("Usage: view machine <id|ip>")
+            return
+        target = args[0]
+        machine = None
+        if re.match(r"^\d+$", target):
+            mid = int(target)
+            for m in store.get_all():
+                if m.id == mid:
+                    machine = m
+                    break
+        else:
+            machine = store.get(target)
+        if not machine:
+            self.console.warning(f"No machine found for: {target}")
+            return
+        view_name = f"machine_{machine.id}"
+        if view_name not in self.visualizer.get_view_names():
+            from .views import MachineDetailView
+            self.visualizer.register_view(view_name, MachineDetailView(self.visualizer, machine))
+        self.visualizer.activate_view(view_name)
+        self.console.success(f"Viewing machine #{machine.id}")
+
+    def _open_machine_view(self, machine):
+        self._cmd_view_machine([str(machine.id)])
 
     def _cmd_scan(self, args):
         if not args:
@@ -228,14 +260,47 @@ class App(tk.Tk):
             self.console.warning("No scan is running.")
 
     def _scan_ip(self, ip):
+        self.console.info(f"Checking {ip}...")
+        threading.Thread(target=self._run_scan_ip, args=(ip,), daemon=True).start()
+
+    def _run_scan_ip(self, ip):
         src.machines.interface_name = ""
         src.machines.interface_ip = ""
-        machine = store.add_or_update(ip=ip, method="manual")
-        self.console.success(f"{machine.ip:<20} {machine.hostname:<20} [manual]")
-        if ip in self._identifying_ips:
+        _dbg(f"[scan-ip] checking {ip} for evidence...")
+        gateway = get_gateway_ip()
+        result = identify_device(ip, gateway_ip=gateway, hostname="")
+        ttl = _probe_ttl(ip)
+        from src.scanner.mdns_cache import get_services
+        mds = get_services(ip)
+        has_evidence = result != "device unknown" or ttl is not None or bool(mds)
+        _dbg(f"[scan-ip] result={result} ttl={ttl} mds={sorted(mds.keys()) if mds else []} evidence={has_evidence}")
+        if not has_evidence:
+            self.console.after(0, lambda: self.console.warning(f"No device detected at {ip}"))
             return
-        self._identifying_ips.add(ip)
-        threading.Thread(target=self._identify, args=(machine,), daemon=True).start()
+        machine = store.add_or_update(ip=ip, method="manual")
+        machine.device_type = result
+        model = extract_model_for_ip(machine.ip, resolve=True)
+        if model:
+            machine.model = model
+        if result == "Windows machine":
+            os_info, domain, server_name = _probe_smb_info(machine.ip)
+            if os_info:
+                machine.device_type = os_info
+                machine.os = os_info
+            if domain:
+                machine.domain = domain
+            if server_name:
+                machine.hostname = server_name
+        if result == "Linux device":
+            banner = _probe_ssh_banner(machine.ip)
+            if banner:
+                os_label = _parse_ssh_banner(banner)
+                machine.device_type = os_label or banner
+                machine.os = os_label or banner
+        machine_db.save_machine_info(machine)
+        self.console.after(0, lambda: self.console.success(
+            f"{machine.ip:<20} {machine.hostname:<20} [manual]"
+        ))
 
     TCP_PORTS_COMMON = [
         7, 9, 13, 21, 22, 23, 25, 37, 49, 53, 69, 70, 79, 80, 88, 110, 111,
@@ -360,6 +425,18 @@ class App(tk.Tk):
             self.console.info("TCP scan stop requested")
             return
         ip = sub
+        if re.match(r"^\d+$", ip):
+            machine_id = int(ip)
+            machine = None
+            for m in store.get_all():
+                if m.id == machine_id:
+                    machine = m
+                    break
+            if machine:
+                ip = machine.ip
+            else:
+                self.console.warning(f"No machine with ID #{machine_id}")
+                return
         if self._tcpscan_running:
             self.console.warning("A TCP scan is already running.")
             return

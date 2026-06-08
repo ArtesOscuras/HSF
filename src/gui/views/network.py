@@ -74,12 +74,15 @@ class NetworkView(BaseView):
         self._poll_id = None
 
     def on_activate(self):
+        self.text.bind("<Button-1>", self._on_line_click)
         self._poll()
 
     def on_deactivate(self):
+        self.text.unbind("<Button-1>")
         if self._poll_id:
             self.after_cancel(self._poll_id)
             self._poll_id = None
+        self._machines = []
 
     @staticmethod
     def _is_local(m):
@@ -129,6 +132,13 @@ class NetworkView(BaseView):
 
         self.text.insert(tk.END, f"{machine.ip}\n", "bright")
 
+    def _on_line_click(self, event):
+        index = self.text.index(f"@{event.x},{event.y}")
+        line = int(index.split(".")[0]) - 1
+        if self._on_machine_click and 0 <= line < len(self._machines):
+            self._on_machine_click(self._machines[line])
+        return "break"
+
     def _poll(self):
         self.iface_label.config(
             text=f"{interface_name}  {interface_ip}" if interface_name else ""
@@ -136,6 +146,7 @@ class NetworkView(BaseView):
 
         all_machines = store.get_all_sorted()
         machines = [m for m in all_machines if not self._is_local(m)]
+        self._machines = machines
 
         center_pad = self._center_padding()
 
