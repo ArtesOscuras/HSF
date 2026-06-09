@@ -91,10 +91,12 @@ class MachineDetailView(BaseView):
         ports = machine_db.load_tcp_ports(self._machine.id)
         web = machine_db.load_web_services(self._machine.id)
         domains = machine_db.load_domains(self._machine.id)
+        banners = machine_db.load_banners(self._machine.id)
         current_hash = hash((
             self._machine.device_type, self._machine.model, self._machine.os,
             self._machine.domain, self._machine.hostname, self._machine.mac,
             tuple(ports), tuple((p, o) for p, o in web), tuple(domains),
+            tuple(banners),
         ))
         if current_hash == self._last_hash and self.text.index("end-1c") != "1.0":
             return
@@ -137,6 +139,21 @@ class MachineDetailView(BaseView):
                 if src:
                     self.text.insert(tk.END, f" ({src})", "muted")
                 self.text.insert(tk.END, "\n")
+
+        banners = machine_db.load_banners(m.id)
+        if banners:
+            last_port = None
+            for p, out, probe in reversed(banners):
+                if out.strip():
+                    last_port = p
+                    break
+            if last_port is not None:
+                for p, out, probe in banners:
+                    if p == last_port and out.strip():
+                        out_short = out.split("\n")[0][:100]
+                        self.text.insert(tk.END, f"\nBanner port {p} ({probe}):\n", "info")
+                        self.text.insert(tk.END, f"  {out_short}\n", "bright")
+                        break
 
         ports = machine_db.load_tcp_ports(m.id)
         if ports:

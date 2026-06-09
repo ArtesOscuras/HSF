@@ -196,6 +196,51 @@ def delete_machine_db(machine_id):
         pass
 
 
+def save_banner(machine_id, port, output, probe=""):
+    _init_db_dir()
+    path = _get_path(machine_id)
+    now = datetime.now().isoformat()
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS banners (
+                    port INTEGER,
+                    output TEXT,
+                    probe TEXT,
+                    scanned_at TEXT
+                )
+            """)
+            conn.execute(
+                "INSERT INTO banners VALUES (?, ?, ?, ?)",
+                (port, output, probe, now),
+            )
+    except (PermissionError, OSError, sqlite3.OperationalError):
+        pass
+
+
+def load_banners(machine_id):
+    _init_db_dir()
+    path = _get_path(machine_id)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS banners (
+                    port INTEGER,
+                    output TEXT,
+                    probe TEXT,
+                    scanned_at TEXT
+                )
+            """)
+            rows = conn.execute(
+                "SELECT port, output, probe FROM banners ORDER BY scanned_at"
+            ).fetchall()
+            return [(r[0], r[1], r[2]) for r in rows]
+    except (sqlite3.DatabaseError, sqlite3.OperationalError):
+        return []
+
+
 def delete_all():
     _init_db_dir()
     for filename in os.listdir(_DB_DIR):

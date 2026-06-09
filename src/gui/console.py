@@ -97,6 +97,7 @@ class Console(tk.Frame):
 
     def write(self, text, color=None):
         self.output_area.config(state=tk.NORMAL)
+        is_at_bottom = self.output_area.yview()[1] >= 1.0
         tag = None
         if color:
             tag = f"color_{id(color)}"
@@ -104,7 +105,8 @@ class Console(tk.Frame):
             self.output_area.insert(tk.END, text, tag)
         else:
             self.output_area.insert(tk.END, text)
-        self.output_area.see(tk.END)
+        if is_at_bottom:
+            self.output_area.see(tk.END)
         self.output_area.config(state=tk.DISABLED)
 
     def writeln(self, text="", color=None):
@@ -147,6 +149,7 @@ class Console(tk.Frame):
         if self._history_index > 0:
             self._history_index -= 1
             self.input_var.set(self._history[self._history_index])
+            self.input_entry.icursor(tk.END)
         return "break"
 
     def _on_down(self, event):
@@ -157,6 +160,7 @@ class Console(tk.Frame):
             self.input_var.set(self._saved_input)
         else:
             self.input_var.set(self._history[self._history_index])
+            self.input_entry.icursor(tk.END)
         return "break"
 
     def _adjust_font(self, delta):

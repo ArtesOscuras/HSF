@@ -1,26 +1,51 @@
+import os
 import re
 import tkinter as tk
 import tkinter.font as tkfont
+from PIL import Image, ImageTk
 from .base import BaseView
 from src.machines import store, interface_name, interface_ip
 
 MUTED = "#888888"
 BRIGHT = "#ffffff"
 
-ICONS = {
-    "default": "\U0001F4BB",
-}
+ICON_SIZE = 32
+COL_GAP = "   "
+
+_icon_cache = {}
+
+
+def _load_icons():
+    global _icon_cache
+    if _icon_cache:
+        return
+    icons_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "icons")
+    icons_dir = os.path.abspath(icons_dir)
+    if not os.path.isdir(icons_dir):
+        return
+    for fname in os.listdir(icons_dir):
+        if not fname.lower().endswith(".png"):
+            continue
+        path = os.path.join(icons_dir, fname)
+        try:
+            img = Image.open(path).convert("RGBA")
+            img = img.resize((ICON_SIZE, ICON_SIZE), Image.LANCZOS)
+            name = os.path.splitext(fname)[0].lower()
+            _icon_cache[name] = ImageTk.PhotoImage(img)
+        except Exception:
+            pass
 
 
 class NetworkView(BaseView):
     name = "network"
     description = "Network monitoring and scanning"
 
-    ID_WIDTH = 4
-    DEVICE_WIDTH = 22
-    HOSTNAME_WIDTH = 28
+    MIN_ID = 4
+    MIN_HOSTNAME = 6
 
     def _build_ui(self):
+        _load_icons()
+
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
@@ -59,6 +84,8 @@ class NetworkView(BaseView):
             pady=10,
             state=tk.DISABLED,
             wrap=tk.NONE,
+            spacing1=6,
+            spacing3=6,
         )
         self.text.grid(row=0, column=0, sticky="nsew")
 
@@ -76,7 +103,7 @@ class NetworkView(BaseView):
     def on_activate(self):
         self.text.bind("<Button-1>", self._on_line_click)
         self.text.bind("<Motion>", self._on_mouse_move)
-        self._poll()
+        self.after(100, self._poll)
 
     def on_deactivate(self):
         self.text.unbind("<Button-1>")
@@ -92,45 +119,41 @@ class NetworkView(BaseView):
 
     @staticmethod
     def _guess_icon(machine):
-        return ICONS["default"]
+        dt = (machine.device_type or "device unknown").lower()
+        for name in sorted(_icon_cache, key=lambda n: -len(n)):
+            if name in dt or dt in name:
+                return _icon_cache[name]
+        return _icon_cache.get("device unknown")
 
     @staticmethod
     def _display_label(machine):
         label = machine.model if machine.model else (machine.device_type or "device unknown")
         return re.sub(r"\s+Build\s+\d+", "", label)
 
-    def _center_padding(self):
-        w = self.text.winfo_width()
-        if w < 50:
-            return " " * 3
-        font = tkfont.Font(font=self.text.cget("font"))
-        sample = f"#{'M' * (self.ID_WIDTH - 1)}   {ICONS['default']}   {'M' * self.DEVICE_WIDTH}{'M' * self.HOSTNAME_WIDTH}255.255.255.255"
-        content_px = font.measure(sample)
-        char_width = font.measure(" ")
-        padding_px = max(5, (w - content_px) // 2)
-        return " " * max(1, padding_px // char_width)
-
-    def _insert_line(self, machine, center_pad):
-        self.text.insert(tk.END, center_pad, "bright")
-        self.text.insert(tk.END, "    ", "bright")
-
+    def _insert_line(self, machine, w_id, w_device, w_hostname, center_pad):
         id_str = f"#{machine.id}" if machine.id else "#?"
+        label = self._display_label(machine)
+        hostname = machine.hostname or ""
+
+        self.text.insert(tk.END, center_pad, "bright")
         self.text.insert(tk.END, id_str, "muted")
-        pad0 = max(1, self.ID_WIDTH - len(id_str))
-        self.text.insert(tk.END, " " * pad0)
+        self.text.insert(tk.END, " " * max(1, w_id - len(id_str)))
+        self.text.insert(tk.END, COL_GAP, "bright")
 
         icon = self._guess_icon(machine)
-        self.text.insert(tk.END, f"{icon}   ", "bright")
+        if icon:
+            self.text.image_create(tk.END, image=icon)
+        else:
+            self.text.insert(tk.END, "?")
+        self.text.insert(tk.END, COL_GAP, "bright")
 
-        label = self._display_label(machine)
         self.text.insert(tk.END, label, "bright")
-        pad = max(1, self.DEVICE_WIDTH - len(label))
-        self.text.insert(tk.END, " " * pad)
+        self.text.insert(tk.END, " " * max(1, w_device - len(label)))
+        self.text.insert(tk.END, COL_GAP, "bright")
 
-        hostname = machine.hostname if machine.hostname else ""
         self.text.insert(tk.END, hostname, "muted")
-        pad2 = max(1, self.HOSTNAME_WIDTH - len(hostname))
-        self.text.insert(tk.END, " " * pad2)
+        self.text.insert(tk.END, " " * max(1, w_hostname - len(hostname)))
+        self.text.insert(tk.END, COL_GAP, "bright")
 
         self.text.insert(tk.END, f"{machine.ip}\n", "bright")
 
@@ -156,13 +179,39 @@ class NetworkView(BaseView):
         machines = [m for m in all_machines if not self._is_local(m)]
         self._machines = machines
 
-        center_pad = self._center_padding()
+        w_id = self.MIN_ID
+        w_device = 0
+        w_hostname = self.MIN_HOSTNAME
+        for m in machines:
+            id_str = f"#{m.id}" if m.id else "#?"
+            w_id = max(w_id, len(id_str))
+            w_device = max(w_device, len(self._display_label(m)))
+            w_hostname = max(w_hostname, len(m.hostname or ""))
+
+        font = tkfont.Font(font=self.text.cget("font"))
+        gap_px = font.measure(COL_GAP)
+
+        row_content_px = (
+            font.measure("M" * w_id) + gap_px
+            + ICON_SIZE + gap_px
+            + font.measure("M" * w_device) + gap_px
+            + font.measure("M" * w_hostname) + gap_px
+            + font.measure("255.255.255.255")
+        )
+
+        w = self.text.winfo_width()
+        char_w = font.measure(" ")
+        if w > row_content_px:
+            pad_chars = int((w - row_content_px) // 2 // char_w)
+            center_pad = " " * max(0, pad_chars)
+        else:
+            center_pad = "  "
 
         self.text.configure(state=tk.NORMAL)
         self.text.delete("1.0", tk.END)
 
         for m in machines:
-            self._insert_line(m, center_pad)
+            self._insert_line(m, w_id, w_device, w_hostname, center_pad)
 
         self.text.configure(state=tk.DISABLED)
 

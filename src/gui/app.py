@@ -1,19 +1,22 @@
 import ipaddress
 import os
+import platform
 import re
 import shutil
 import socket
 import subprocess
 import threading
+import time
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import netifaces
 from .console import Console
 from .visualizer import Visualizer
-from .views import NetworkView
+from .views import NetworkView, DomainListView
 from .dialogs import InterfaceSelector
 from src.machines import store, start_autosave as start_machines_autosave
 from src.machines import machine_db
+from src.machines import domain_db
 import src.machines
 from src.scanner import PassiveMDNSScanner, ActiveScanner
 from src.scanner.mdns_cache import load as load_mdns_cache, save as save_mdns_cache, start_autosave, wipe as wipe_mdns_cache
@@ -49,6 +52,7 @@ class App(tk.Tk):
         self._identifying_ips = set()
         self._tcpscan_running = False
         self._tcpscan_process = None
+        self._bannergrab_running = False
 
         self._register_views()
         self.visualizer.activate_view("network")
@@ -77,8 +81,14 @@ class App(tk.Tk):
         net_view = NetworkView(self.visualizer)
         net_view._on_machine_click = self._open_machine_view
         self.visualizer.register_view("network", net_view)
+
+        domain_view = DomainListView(self.visualizer)
+        self.visualizer.register_view("domains", domain_view)
+
         self.console.add_help_section("Views", [
             ("view list", "List available views"),
+            ("view network", "Network device list"),
+            ("view domains", "Discovered domains list"),
             ("view machine <id|ip>", "View machine details"),
             ("view <name>", "Switch to a view"),
         ])
@@ -90,6 +100,8 @@ class App(tk.Tk):
         self.console.register_command("whatweb", self._cmd_whatweb, "Web technology scan on a port")
         self.console.register_command("bannergrab", self._cmd_bannergrab, "Grab service banner from a port")
         self.console.register_command("delete-dbs", self._cmd_delete_dbs, "Wipe all stored data")
+        self.console.register_command("ping", self._cmd_ping, "Ping a machine by IP or ID")
+        self.console.register_command("nslookup", self._cmd_nslookup, "DNS lookup for a domain, IP or machine ID")
         self.console.register_command("exit", self._cmd_exit, "Close the application")
 
     def _cmd_view(self, args):
@@ -286,6 +298,7 @@ class App(tk.Tk):
                 machine.os = os_info
             if domain:
                 machine.domain = domain
+                domain_db.init_or_update(domain, machine.id, machine.ip, "smb")
                 machine_db.save_domain(machine.id, domain, "smb")
             if server_name:
                 machine.hostname = server_name
@@ -569,6 +582,7 @@ class App(tk.Tk):
                 machine_db.save_web_service(machine.id, port, stdout)
                 domains = _extract_domains_from_whatweb(stdout)
                 for d in domains:
+                    domain_db.init_or_update(d, machine.id, machine.ip, "whatweb")
                     machine_db.save_domain(machine.id, d, "whatweb")
                 self.console.after(0, lambda: self.console.info(
                     f"Web scan {ip}:{port} done (whatweb)"
@@ -601,8 +615,19 @@ class App(tk.Tk):
                 ))
 
     def _cmd_bannergrab(self, args):
+        if not args:
+            self.console.body("Usage: bannergrab <ip|id> <port> | bannergrab stop")
+            return
+        sub = args[0].lower()
+        if sub == "stop":
+            if not self._bannergrab_running:
+                self.console.warning("No bannergrab is running.")
+                return
+            self._bannergrab_running = False
+            self.console.info("Bannergrab stop requested")
+            return
         if len(args) < 2:
-            self.console.body("Usage: bannergrab <ip|id> <port>")
+            self.console.body("Usage: bannergrab <ip|id> <port> | bannergrab stop")
             return
         target, port_str = args[0], args[1]
         try:
@@ -623,35 +648,101 @@ class App(tk.Tk):
             self.console.warning(f"No machine found for: {target}")
             return
         ip = machine.ip
-        threading.Thread(target=self._run_bannergrab, args=(ip, port), daemon=True).start()
-
-    def _run_bannergrab(self, ip, port):
-        self.console.after(0, lambda: self.console.info(f"Connecting to {ip}:{port}..."))
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5)
-        try:
-            sock.connect((ip, port))
-            banner = b""
-            while True:
-                try:
-                    chunk = sock.recv(4096)
-                    if not chunk:
-                        break
-                    banner += chunk
-                except socket.timeout:
-                    break
-            sock.close()
-        except Exception as e:
-            err_msg = str(e)
-            self.console.after(0, lambda m=err_msg: self.console.error(f"  {ip}:{port} connection failed: {m}"))
+        if self._bannergrab_running:
+            self.console.warning("A bannergrab is already running.")
             return
-        text = banner.decode(errors="replace").strip()
-        if text:
-            self.console.after(0, lambda: self.console.success(f"Banner from {ip}:{port}:"))
-            for line in text.split("\n"):
-                self.console.after(0, lambda l=line: self.console.body(f"  {l}"))
-        else:
-            self.console.after(0, lambda: self.console.warning(f"No banner received from {ip}:{port}"))
+        self._bannergrab_running = True
+        threading.Thread(target=self._run_bannergrab, args=(ip, port, machine), daemon=True).start()
+
+    def _run_bannergrab(self, ip, port, machine):
+        probes = [
+            ("hello\r\n", "hello"),
+            ("GET / HTTP/1.0\r\nHost: {ip}\r\n\r\n", "HTTP GET"),
+            (bytes([0x16, 0x03, 0x01, 0x00, 0x01, 0x01, 0x00, 0x03, 0x03] + [0x00]*36), "TLS ClientHello"),
+            ("SSH-2.0-OpenSSH_client\r\n", "SSH hello"),
+            ("EHLO test\r\n", "SMTP EHLO"),
+            ("USER anonymous\r\n", "FTP USER"),
+            ("PING\r\n", "Redis PING"),
+            ("CAPA\r\n", "POP3 CAPA"),
+            ("a001 CAPABILITY\r\n", "IMAP CAPABILITY"),
+            ("INFO\r\n", "Redis INFO"),
+            ("stats\r\n", "Memcached stats"),
+            ("QUIT\r\n", "QUIT"),
+            ("\x01\x00\x00\x01\x01", "RDP connect"),
+            (b"\x00\x00\x00\xa4\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x0d\x00\x00\x00\x08", "PostgreSQL startup"),
+            (b"\x00\x00\x00\x85\xffSMBr\x00\x00\x00\x00\x18", "SMB negotiate"),
+            ("RFB 003.008\n", "VNC RFB"),
+            (b"\x00" * 36, "MySQL handshake"),
+            ('{"isMaster": 1}', "MongoDB isMaster"),
+            ('{"buildinfo": 1}', "MongoDB buildInfo"),
+            ("GET /version HTTP/1.0\r\nHost: {ip}\r\n\r\n", "Docker API"),
+            ("GET /_cluster/health HTTP/1.0\r\nHost: {ip}\r\n\r\n", "Elasticsearch"),
+            ("HELP\r\n", "generic HELP"),
+            ("STATUS\r\n", "generic STATUS"),
+            ("OPTIONS / HTTP/1.0\r\nHost: {ip}\r\n\r\n", "HTTP OPTIONS"),
+            ("OPTIONS * RTSP/1.0\r\nCSeq: 1\r\n\r\n", "RTSP OPTIONS"),
+            ("OPTIONS sip:test@{ip} SIP/2.0\r\nVia: SIP/2.0/TCP test\r\nFrom: <sip:test@test>\r\nTo: <sip:test@test>\r\nCall-ID: 1@test\r\nCSeq: 1 OPTIONS\r\n\r\n", "SIP OPTIONS"),
+            ("\xff\xfb\x01\xff\xfb\x03\xff\xfd\x18", "Telnet options"),
+            ("\x00\x00\x00\x01", "MySQL login"),
+        ]
+        self.console.after(0, lambda: self.console.info(f"Bannergrab {ip}:{port} starting ({len(probes)} probes)..."))
+        try:
+            for payload, label in probes:
+                if not self._bannergrab_running:
+                    self.console.after(0, lambda: self.console.warning(f"Bannergrab {ip}:{port} stopped"))
+                    return
+                if isinstance(payload, str):
+                    payload_bytes = payload.replace("{ip}", ip).encode()
+                else:
+                    payload_bytes = payload
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(3)
+                try:
+                    sock.connect((ip, port))
+                    # Passive read first
+                    sock.setblocking(False)
+                    try:
+                        passive = sock.recv(4096)
+                    except (BlockingIOError, socket.timeout):
+                        passive = b""
+                    sock.setblocking(True)
+                    # Send probe if nothing received passively
+                    if passive:
+                        response = passive
+                    else:
+                        try:
+                            sock.sendall(payload_bytes)
+                            sock.settimeout(2)
+                            response = b""
+                            while True:
+                                try:
+                                    chunk = sock.recv(4096)
+                                    if not chunk:
+                                        break
+                                    response += chunk
+                                except socket.timeout:
+                                    break
+                        except (OSError, ConnectionError):
+                            response = b""
+                except (OSError, ConnectionError, socket.timeout) as e:
+                    self.console.after(0, lambda l=label: self.console.body(f"  [{l}] connection failed"))
+                    sock.close()
+                    continue
+                sock.close()
+                text = response.decode(errors="replace").strip()
+                if text:
+                    machine_db.save_banner(machine.id, port, text, label)
+                    self.console.after(0, lambda t=text, l=label: self._show_banner_result(ip, port, t, l))
+                else:
+                    self.console.after(0, lambda l=label: self.console.body(f"  [{l}] no response"))
+        finally:
+            self._bannergrab_running = False
+            self.console.after(0, lambda: self.console.info(f"Bannergrab {ip}:{port} finished"))
+
+    def _show_banner_result(self, ip, port, text, label):
+        self.console.after(0, lambda: self.console.success(f"Banner from {ip}:{port} ({label}):"))
+        for line in text.split("\n")[:10]:
+            self.console.after(0, lambda l=line: self.console.body(f"  {l}"))
 
     def _scan_list(self):
         machines = store.get_all_sorted()
@@ -712,6 +803,7 @@ class App(tk.Tk):
                         machine.os = os_info
                     if domain:
                         machine.domain = domain
+                        domain_db.init_or_update(domain, machine.id, machine.ip, "smb")
                         machine_db.save_domain(machine.id, domain, "smb")
                         machine.hostname = server_name
                 if result == "Linux device":
@@ -737,10 +829,112 @@ class App(tk.Tk):
     def _cmd_exit(self, args):
         self.destroy()
 
+    def _cmd_ping(self, args):
+        if not args:
+            self.console.body("Usage: ping <ip|id>")
+            return
+        target = args[0]
+        ip = target
+        if re.match(r"^\d+$", ip):
+            mid = int(ip)
+            for m in store.get_all():
+                if m.id == mid:
+                    ip = m.ip
+                    break
+            else:
+                self.console.warning(f"No machine with ID #{mid}")
+                return
+        threading.Thread(target=self._run_ping, args=(ip,), daemon=True).start()
+
+    def _run_ping(self, ip):
+        if self._is_root():
+            self._run_ping_scapy(ip)
+        elif shutil.which("ping"):
+            self._run_ping_system(ip)
+        else:
+            self.console.after(0, lambda: self.console.error(
+                "No root privileges and 'ping' command not found in system"
+            ))
+
+    def _run_ping_scapy(self, ip):
+        from scapy.all import sr1, IP, ICMP
+        self.console.after(0, lambda: self.console.info(f"Pinging {ip} (scapy ICMP)..."))
+        try:
+            start = time.monotonic()
+            reply = sr1(IP(dst=ip) / ICMP(), timeout=2, verbose=False)
+            elapsed = time.monotonic() - start
+            if reply is None:
+                self.console.after(0, lambda: self.console.warning(f"{ip} no response"))
+            else:
+                rtt_ms = elapsed * 1000
+                ttl = reply.ttl
+                self.console.after(0, lambda: self.console.success(
+                    f"Reply from {ip}: time={rtt_ms:.1f}ms  ttl={ttl}"
+                ))
+        except Exception as e:
+            self.console.after(0, lambda: self.console.error(f"Ping {ip} failed: {e}"))
+
+    def _run_ping_system(self, ip):
+        if platform.system().lower() == "windows":
+            cmd = ["ping", "-n", "1", ip]
+        else:
+            cmd = ["ping", "-c", "1", ip]
+        self.console.after(0, lambda: self.console.info(f"Pinging {ip}..."))
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            output = proc.stdout + proc.stderr
+            _dbg(f"[ping] returncode={proc.returncode}\n{output}")
+            for line_raw in output.splitlines():
+                stripped = line_raw.rstrip()
+                if stripped:
+                    self.console.after(0, lambda l=stripped: self.console.body(l))
+            if proc.returncode != 0:
+                self.console.after(0, lambda: self.console.warning(f"{ip} no response"))
+        except subprocess.TimeoutExpired:
+            self.console.after(0, lambda: self.console.warning(f"{ip} ping timed out"))
+        except Exception as e:
+            self.console.after(0, lambda: self.console.error(f"Ping {ip} failed: {e}"))
+
+    def _cmd_nslookup(self, args):
+        if not args:
+            self.console.body("Usage: nslookup <domain|ip|id>")
+            return
+        target = args[0]
+        if re.match(r"^\d+$", target):
+            mid = int(target)
+            for m in store.get_all():
+                if m.id == mid:
+                    target = m.ip
+                    break
+            else:
+                self.console.warning(f"No machine with ID #{mid}")
+                return
+        threading.Thread(target=self._run_nslookup, args=(target,), daemon=True).start()
+
+    def _run_nslookup(self, target):
+        self.console.after(0, lambda: self.console.info(f"nslookup {target}..."))
+        try:
+            proc = subprocess.run(
+                ["nslookup", target], capture_output=True, text=True, timeout=10
+            )
+            output = proc.stdout + proc.stderr
+            _dbg(f"[nslookup] returncode={proc.returncode}\n{output}")
+            for line_raw in output.splitlines():
+                stripped = line_raw.rstrip()
+                if stripped:
+                    self.console.after(0, lambda l=stripped: self.console.body(l))
+            if proc.returncode != 0:
+                self.console.after(0, lambda: self.console.warning(f"nslookup {target} failed"))
+        except subprocess.TimeoutExpired:
+            self.console.after(0, lambda: self.console.warning(f"nslookup {target} timed out"))
+        except Exception as e:
+            self.console.after(0, lambda: self.console.error(f"nslookup {target} failed: {e}"))
+
     def _cmd_delete_dbs(self, args):
         store.clear()
         wipe_mdns_cache()
         machine_db.delete_all()
+        domain_db.delete_all()
         self.console.info("All data cleared (mDNS cache + machine list + database files)")
 
     def _on_close(self):
