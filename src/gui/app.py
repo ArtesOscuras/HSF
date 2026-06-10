@@ -104,6 +104,8 @@ class App(tk.Tk):
         self.console.register_command("nslookup", self._cmd_nslookup, "DNS lookup for a domain, IP or machine ID")
         self.console.register_command("exit", self._cmd_exit, "Close the application")
 
+        self.console.set_system_handler(self._run_system)
+
     def _cmd_view(self, args):
         if not args:
             self.console.body("Usage: view <name> or view list")
@@ -828,6 +830,27 @@ class App(tk.Tk):
 
     def _cmd_exit(self, args):
         self.destroy()
+
+    def _run_system(self, cmd):
+        threading.Thread(target=self._run_system_thread, args=(cmd,), daemon=True).start()
+
+    def _run_system_thread(self, cmd):
+        try:
+            proc = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=30
+            )
+            output = proc.stdout + proc.stderr
+            _dbg(f"[system] cmd={cmd} rc={proc.returncode}\n{output}")
+            for line_raw in output.splitlines():
+                stripped = line_raw.rstrip()
+                if stripped:
+                    self.console.after(0, lambda l=stripped: self.console.body(l))
+            if proc.returncode != 0:
+                self.console.after(0, lambda: self.console.warning(f"exit code: {proc.returncode}"))
+        except subprocess.TimeoutExpired:
+            self.console.after(0, lambda: self.console.warning(f"Command timed out: {cmd}"))
+        except Exception as e:
+            self.console.after(0, lambda: self.console.error(f"System command failed: {e}"))
 
     def _cmd_ping(self, args):
         if not args:

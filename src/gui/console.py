@@ -22,6 +22,13 @@ class Console(tk.Frame):
         self._history_index = -1
         self._saved_input = ""
         self._font_size = 11
+        self._system_handler = None
+        self._is_system = False
+        self._skip_release = False
+        self._autocomplete_popup = None
+        self._autocomplete_listbox = None
+        self._autocomplete_matches = []
+        self._autocomplete_index = -1
 
         self.grid_propagate(False)
         self.config(bg=BG)
@@ -76,6 +83,10 @@ class Console(tk.Frame):
         self.input_entry.bind("<Return>", self._on_enter)
         self.input_entry.bind("<Up>", self._on_up)
         self.input_entry.bind("<Down>", self._on_down)
+        self.input_entry.bind("<KeyPress>", self._on_key_press)
+        self.input_entry.bind("<KeyRelease>", self._on_key_release)
+        self.input_entry.bind("<Tab>", self._on_tab)
+        self.input_entry.bind("<Escape>", self._on_escape)
         self.input_entry.focus()
 
         self.bind_all("<Control-plus>", lambda e: self._adjust_font(+1))
@@ -91,6 +102,9 @@ class Console(tk.Frame):
 
     def register_command(self, name, handler, help_text=""):
         self.commands[name] = {"handler": handler, "help": help_text}
+
+    def set_system_handler(self, handler):
+        self._system_handler = handler
 
     def add_help_section(self, title, items):
         self.help_sections.append((title, items))
@@ -133,6 +147,20 @@ class Console(tk.Frame):
     def _on_enter(self, event):
         raw = self.input_var.get().strip()
         self.input_var.set("")
+        if self._is_system:
+            if not raw:
+                self._is_system = False
+                self.prompt_label.config(text="HSF> ")
+                return
+            if not self._history or self._history[-1] != raw:
+                self._history.append(raw)
+            self._history_index = len(self._history)
+            self._saved_input = ""
+            self.writeln(f"! {raw}", color=FG)
+            if self._system_handler:
+                self._system_handler(raw)
+            return
+
         if not raw:
             return
         if not self._history or self._history[-1] != raw:
@@ -142,6 +170,9 @@ class Console(tk.Frame):
         self._execute(raw)
 
     def _on_up(self, event):
+        if self._autocomplete_popup:
+            self._autocomplete_navigate(-1)
+            return "break"
         if not self._history:
             return "break"
         if self._history_index == len(self._history):
@@ -153,6 +184,9 @@ class Console(tk.Frame):
         return "break"
 
     def _on_down(self, event):
+        if self._autocomplete_popup:
+            self._autocomplete_navigate(1)
+            return "break"
         if self._history_index == len(self._history):
             return "break"
         self._history_index += 1
@@ -172,6 +206,13 @@ class Console(tk.Frame):
         return "break"
 
     def _execute(self, raw):
+        if raw.startswith("!"):
+            cmd = raw[1:].strip()
+            self.writeln(f"! {cmd}", color=FG)
+            if self._system_handler and cmd:
+                self._system_handler(cmd)
+            return
+
         self.writeln(f"HSF> {raw}", color=FG)
 
         parts = raw.split()
@@ -203,3 +244,110 @@ class Console(tk.Frame):
 
     def _cmd_echo(self, args):
         self.body(" ".join(args))
+
+    def _on_key_press(self, event):
+        if self._autocomplete_popup and event.keysym not in ("Tab", "Escape"):
+            self._close_autocomplete()
+        if event.char == "!" and not self._is_system:
+            self._is_system = True
+            self.prompt_label.config(text="Local> ")
+            self._skip_release = True
+            return "break"
+
+    def _on_key_release(self, event):
+        if self._skip_release:
+            self._skip_release = False
+            return
+        if self._is_system and not self.input_var.get() and (event.char or event.keysym in ("BackSpace", "Delete")):
+            self._is_system = False
+            self.prompt_label.config(text="HSF> ")
+
+    def _on_tab(self, event):
+        if self._is_system:
+            return "break"
+        prefix = self.input_var.get().strip()
+        if not prefix:
+            return "break"
+        matches = [(n, info["help"]) for n, info in self.commands.items() if n.startswith(prefix)]
+        if not matches:
+            return "break"
+        if len(matches) == 1:
+            self.input_var.set(matches[0][0] + " ")
+            self.input_entry.icursor(tk.END)
+            self._close_autocomplete()
+            return "break"
+
+        if self._autocomplete_popup:
+            self._autocomplete_index = (self._autocomplete_index + 1) % len(self._autocomplete_matches)
+            self._autocomplete_listbox.selection_clear(0, tk.END)
+            self._autocomplete_listbox.selection_set(self._autocomplete_index)
+            self._autocomplete_listbox.activate(self._autocomplete_index)
+            return "break"
+
+        self._autocomplete_matches = matches
+        self._autocomplete_index = 0
+        self._show_autocomplete(matches)
+        return "break"
+
+    def _on_escape(self, event):
+        if self._autocomplete_popup:
+            self._close_autocomplete()
+            return "break"
+
+    def _show_autocomplete(self, matches):
+        self._close_autocomplete()
+        popup = tk.Toplevel(self)
+        popup.overrideredirect(True)
+        popup.configure(bg="#111111", highlightbackground="#333333", highlightthickness=1)
+
+        lb = tk.Listbox(popup, bg="#111111", fg="#FFFFFF", selectbackground="#333333",
+                        selectforeground="#FFFFFF", font=("Menlo", 11), borderwidth=0,
+                        highlightthickness=0, activestyle="none", exportselection=False)
+        lb.pack(fill=tk.BOTH, expand=True)
+        for name, help_text in matches:
+            lb.insert(tk.END, f"  {name:<15}{help_text}")
+        lb.selection_set(0)
+        lb.activate(0)
+        lb.bind("<ButtonRelease-1>", self._on_popup_click)
+        popup.bind("<FocusOut>", lambda e: self._close_autocomplete())
+
+        n = min(len(matches), 8)
+        item_h = 22
+        w = 420
+        h = n * item_h + 4
+        x = self.winfo_rootx() + 60
+        y = self.winfo_rooty() - h - 4
+
+        popup.geometry(f"{w}x{h}+{x}+{y}")
+        popup.lift()
+
+        self._autocomplete_popup = popup
+        self._autocomplete_listbox = lb
+
+    def _close_autocomplete(self):
+        if self._autocomplete_popup:
+            self._autocomplete_popup.destroy()
+            self._autocomplete_popup = None
+            self._autocomplete_listbox = None
+            self._autocomplete_matches = []
+            self._autocomplete_index = -1
+
+    def _autocomplete_navigate(self, delta):
+        idx = self._autocomplete_index + delta
+        if 0 <= idx < len(self._autocomplete_matches):
+            self._autocomplete_index = idx
+            self._autocomplete_listbox.selection_clear(0, tk.END)
+            self._autocomplete_listbox.selection_set(idx)
+            self._autocomplete_listbox.activate(idx)
+
+    def _autocomplete_select(self):
+        if self._autocomplete_index >= 0 and self._autocomplete_matches:
+            self.input_var.set(self._autocomplete_matches[self._autocomplete_index][0] + " ")
+            self.input_entry.icursor(tk.END)
+        self._close_autocomplete()
+
+    def _on_popup_click(self, event):
+        idx = self._autocomplete_listbox.nearest(event.y)
+        if 0 <= idx < len(self._autocomplete_matches):
+            self._autocomplete_index = idx
+            self._autocomplete_select()
