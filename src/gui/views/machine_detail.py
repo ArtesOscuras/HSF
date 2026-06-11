@@ -39,7 +39,7 @@ class MachineDetailView(BaseView):
         self._last_hash = None
 
         text_frame = tk.Frame(self, bg="#000000")
-        text_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
+        text_frame.grid(row=1, column=0, sticky="nsew", padx=(220, 20), pady=(0, 20))
         text_frame.columnconfigure(0, weight=1)
         text_frame.rowconfigure(0, weight=1)
 

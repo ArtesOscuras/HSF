@@ -29,6 +29,10 @@ class Console(tk.Frame):
         self._autocomplete_listbox = None
         self._autocomplete_matches = []
         self._autocomplete_index = -1
+        self._autocomplete_names = []
+        self._track_id = None
+        self._filter_id = None
+        self._last_popup_y = None
 
         self.grid_propagate(False)
         self.config(bg=BG)
@@ -87,6 +91,7 @@ class Console(tk.Frame):
         self.input_entry.bind("<KeyRelease>", self._on_key_release)
         self.input_entry.bind("<Tab>", self._on_tab)
         self.input_entry.bind("<Escape>", self._on_escape)
+        self.input_entry.bind("<FocusIn>", self._on_focus_in)
         self.input_entry.focus()
 
         self.bind_all("<Control-plus>", lambda e: self._adjust_font(+1))
@@ -246,13 +251,18 @@ class Console(tk.Frame):
         self.body(" ".join(args))
 
     def _on_key_press(self, event):
-        if self._autocomplete_popup and event.keysym not in ("Tab", "Escape"):
-            self._close_autocomplete()
         if event.char == "!" and not self._is_system:
             self._is_system = True
             self.prompt_label.config(text="Local> ")
             self._skip_release = True
+            self._close_autocomplete()
             return "break"
+        if event.keysym not in ("Tab", "Return", "Escape", "Up", "Down", "Shift_L", "Shift_R",
+                                "Control_L", "Control_R", "Alt_L", "Alt_R", "Meta_L", "Meta_R",
+                                "Command", "Caps_Lock", "BackSpace", "Delete"):
+            if self._filter_id:
+                self.after_cancel(self._filter_id)
+            self._filter_id = self.after(80, self._filter_autocomplete)
 
     def _on_key_release(self, event):
         if self._skip_release:
@@ -261,20 +271,24 @@ class Console(tk.Frame):
         if self._is_system and not self.input_var.get() and (event.char or event.keysym in ("BackSpace", "Delete")):
             self._is_system = False
             self.prompt_label.config(text="HSF> ")
+            return
+        if event.keysym in ("BackSpace", "Delete"):
+            if self._filter_id:
+                self.after_cancel(self._filter_id)
+            self._filter_id = self.after(80, self._filter_autocomplete)
 
     def _on_tab(self, event):
         if self._is_system:
             return "break"
         prefix = self.input_var.get().strip()
-        if not prefix:
-            return "break"
-        matches = [(n, info["help"]) for n, info in self.commands.items() if n.startswith(prefix)]
+        matches = [(n, info["help"]) for n, info in self.commands.items()
+                   if n.startswith(prefix)]
+        matches.sort(key=lambda x: x[0])
         if not matches:
             return "break"
-        if len(matches) == 1:
+        if len(matches) == 1 and prefix:
             self.input_var.set(matches[0][0] + " ")
             self.input_entry.icursor(tk.END)
-            self._close_autocomplete()
             return "break"
 
         if self._autocomplete_popup:
@@ -284,9 +298,7 @@ class Console(tk.Frame):
             self._autocomplete_listbox.activate(self._autocomplete_index)
             return "break"
 
-        self._autocomplete_matches = matches
-        self._autocomplete_index = 0
-        self._show_autocomplete(matches)
+        self._show_or_update(matches)
         return "break"
 
     def _on_escape(self, event):
@@ -296,37 +308,72 @@ class Console(tk.Frame):
 
     def _show_autocomplete(self, matches):
         self._close_autocomplete()
-        popup = tk.Toplevel(self)
-        popup.overrideredirect(True)
-        popup.configure(bg="#111111", highlightbackground="#333333", highlightthickness=1)
+        frame = tk.Frame(self.master, bg="#111111", highlightbackground="#333333", highlightthickness=1)
 
-        lb = tk.Listbox(popup, bg="#111111", fg="#FFFFFF", selectbackground="#333333",
+        lb = tk.Listbox(frame, bg="#111111", fg="#FFFFFF", selectbackground="#333333",
                         selectforeground="#FFFFFF", font=("Menlo", 11), borderwidth=0,
                         highlightthickness=0, activestyle="none", exportselection=False)
         lb.pack(fill=tk.BOTH, expand=True)
         for name, help_text in matches:
-            lb.insert(tk.END, f"  {name:<15}{help_text}")
+            lb.insert(tk.END, f"  {name}")
         lb.selection_set(0)
         lb.activate(0)
         lb.bind("<ButtonRelease-1>", self._on_popup_click)
-        popup.bind("<FocusOut>", lambda e: self._close_autocomplete())
 
-        n = min(len(matches), 8)
-        item_h = 22
-        w = 420
-        h = n * item_h + 4
-        x = self.winfo_rootx() + 60
-        y = self.winfo_rooty() - h - 4
+        n = len(matches)
+        h = n * 22 + 4
+        y = self.winfo_y() - h - 4
 
-        popup.geometry(f"{w}x{h}+{x}+{y}")
-        popup.lift()
+        frame.place(x=0, y=y, width=200, height=h)
+        frame.lift()
 
-        self._autocomplete_popup = popup
+        self._autocomplete_popup = frame
         self._autocomplete_listbox = lb
+        self._start_tracking()
+
+    def _show_or_update(self, matches):
+        names = [m[0] for m in matches]
+        if self._autocomplete_popup and names == self._autocomplete_names:
+            return
+        self._autocomplete_names = names
+        if self._autocomplete_popup:
+            lb = self._autocomplete_listbox
+            lb.delete(0, tk.END)
+            for name, help_text in matches:
+                lb.insert(tk.END, f"  {name}")
+            lb.selection_set(0)
+            lb.activate(0)
+            self._autocomplete_matches = matches
+            self._autocomplete_index = 0
+            n = len(matches)
+            h = n * 22 + 4
+            self._autocomplete_popup.place_configure(height=h)
+            self._autocomplete_popup.lift()
+        else:
+            self._show_autocomplete(matches)
+
+    def _filter_autocomplete(self):
+        if self._is_system:
+            return
+        prefix = self.input_var.get().strip()
+        matches = [(n, info["help"]) for n, info in self.commands.items()
+                   if n.startswith(prefix)]
+        matches.sort(key=lambda x: x[0])
+        if not matches:
+            self._close_autocomplete()
+            return
+        self._show_or_update(matches)
+
+    def _on_focus_in(self, event):
+        if not self._is_system:
+            self.after(50, self._filter_autocomplete)
 
     def _close_autocomplete(self):
+        if self._track_id:
+            self.after_cancel(self._track_id)
+            self._track_id = None
         if self._autocomplete_popup:
-            self._autocomplete_popup.destroy()
+            self._autocomplete_popup.place_forget()
             self._autocomplete_popup = None
             self._autocomplete_listbox = None
             self._autocomplete_matches = []
@@ -345,9 +392,29 @@ class Console(tk.Frame):
             self.input_var.set(self._autocomplete_matches[self._autocomplete_index][0] + " ")
             self.input_entry.icursor(tk.END)
         self._close_autocomplete()
+        self.input_entry.focus()
 
     def _on_popup_click(self, event):
         idx = self._autocomplete_listbox.nearest(event.y)
         if 0 <= idx < len(self._autocomplete_matches):
             self._autocomplete_index = idx
             self._autocomplete_select()
+
+    def _start_tracking(self):
+        self._stop_tracking()
+        self._track_id = self.after(100, self._track_popup)
+
+    def _stop_tracking(self):
+        if self._track_id:
+            self.after_cancel(self._track_id)
+            self._track_id = None
+
+    def _track_popup(self):
+        if not self._autocomplete_popup:
+            return
+        h = self._autocomplete_popup.winfo_height()
+        y = self.winfo_y() - h - 4
+        if y != self._last_popup_y:
+            self._last_popup_y = y
+            self._autocomplete_popup.place_configure(y=y)
+        self._track_id = self.after(100, self._track_popup)

@@ -102,6 +102,8 @@ class App(tk.Tk):
         self.console.register_command("delete-dbs", self._cmd_delete_dbs, "Wipe all stored data")
         self.console.register_command("ping", self._cmd_ping, "Ping a machine by IP or ID")
         self.console.register_command("nslookup", self._cmd_nslookup, "DNS lookup for a domain, IP or machine ID")
+        self.console.register_command("domain", self._cmd_domain, "Add a domain to the inventory")
+        self.console.register_command("fuzz", self._cmd_fuzz, "Open fuzz configuration dialog")
         self.console.register_command("exit", self._cmd_exit, "Close the application")
 
         self.console.set_system_handler(self._run_system)
@@ -952,6 +954,46 @@ class App(tk.Tk):
             self.console.after(0, lambda: self.console.warning(f"nslookup {target} timed out"))
         except Exception as e:
             self.console.after(0, lambda: self.console.error(f"nslookup {target} failed: {e}"))
+
+    def _cmd_domain(self, args):
+        if not args:
+            self.console.body("Usage: domain <name>")
+            return
+        domain = args[0].strip()
+        threading.Thread(target=self._run_domain, args=(domain,), daemon=True).start()
+
+    def _run_domain(self, domain):
+        self.console.after(0, lambda: self.console.info(f"Resolving {domain}..."))
+        try:
+            info = socket.getaddrinfo(domain, None, socket.AF_INET, socket.SOCK_STREAM)
+            if not info:
+                self.console.after(0, lambda: self.console.warning(f"{domain} could not be resolved"))
+                return
+            ip = info[0][4][0]
+        except socket.gaierror:
+            self.console.after(0, lambda: self.console.warning(f"{domain} could not be resolved"))
+            return
+
+        machine = store.get(ip)
+        if machine:
+            machine_db.save_domain(machine.id, domain, "manual")
+            domain_db.init_or_update(domain, machine.id, machine.ip, "manual")
+            self.console.after(0, lambda: self.console.success(
+                f"{domain} → {ip}  (added to machine #{machine.id})"
+            ))
+        else:
+            machine = store.add_or_update(ip=ip, method="manual")
+            machine.device_type = "device unknown"
+            machine_db.save_machine_info(machine)
+            machine_db.save_domain(machine.id, domain, "manual")
+            domain_db.init_or_update(domain, machine.id, machine.ip, "manual")
+            self.console.after(0, lambda: self.console.success(
+                f"{domain} → {ip}  (new machine #{machine.id})"
+            ))
+
+    def _cmd_fuzz(self, args):
+        from .dialogs.fuzz import FuzzDialog
+        FuzzDialog(self)
 
     def _cmd_delete_dbs(self, args):
         store.clear()
