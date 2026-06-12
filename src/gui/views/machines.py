@@ -1,18 +1,39 @@
 import os
 import re
+import shutil
 import tkinter as tk
 import tkinter.font as tkfont
 from PIL import Image, ImageTk
 from .base import BaseView
 from src.machines import store, interface_name, interface_ip
+from src.machines import machine_db
 
 MUTED = "#888888"
 BRIGHT = "#ffffff"
 
-ICON_SIZE = 32
+ICON_SIZE = 50
 COL_GAP = "   "
 
 _icon_cache = {}
+_delete_img = None
+
+
+def _load_delete_img():
+    global _delete_img
+    if _delete_img is not None:
+        return _delete_img
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "icons", "delete.png")
+    path = os.path.abspath(path)
+    if os.path.isfile(path):
+        try:
+            img = Image.open(path).convert("RGBA")
+            img = img.resize((20, 20), Image.LANCZOS)
+            _delete_img = ImageTk.PhotoImage(img)
+        except Exception:
+            _delete_img = False
+    else:
+        _delete_img = False
+    return _delete_img
 
 
 def _load_icons():
@@ -37,14 +58,26 @@ def _load_icons():
 
 
 class NetworkView(BaseView):
-    name = "network"
-    description = "Network monitoring and scanning"
+    name = "machines"
+    description = "Discovered machines"
 
     MIN_ID = 4
     MIN_HOSTNAME = 6
 
+    def _nav_btn(self, text, view_name, parent, active):
+        btn = tk.Label(
+            parent, text=f"  {text}  ",
+            font=("Menlo", 11, "bold") if active else ("Menlo", 11),
+            fg="#ffffff" if active else "#888888",
+            bg="#000000",
+            cursor="hand2",
+        )
+        btn.pack(side=tk.LEFT, padx=5)
+        btn.bind("<Button-1>", lambda e: self.master.activate_view(view_name))
+
     def _build_ui(self):
         _load_icons()
+        _load_delete_img()
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
@@ -52,9 +85,16 @@ class NetworkView(BaseView):
         header = tk.Frame(self, bg="#000000")
         header.grid(row=0, column=0, sticky="ew", pady=(15, 5))
 
+        nav_frame = tk.Frame(header, bg="#000000")
+        nav_frame.pack(pady=(0, 10))
+
+        self._nav_btn("Machines", "machines", nav_frame, True)
+        self._nav_btn("Domains", "domains", nav_frame, False)
+        self._nav_btn("Evidences", "evidences", nav_frame, False)
+
         tk.Label(
             header,
-            text="Devices",
+            text="Machines",
             font=("Menlo", 22, "bold"),
             fg="#ffffff",
             bg="#000000",
@@ -84,8 +124,8 @@ class NetworkView(BaseView):
             pady=10,
             state=tk.DISABLED,
             wrap=tk.NONE,
-            spacing1=6,
-            spacing3=6,
+            spacing1=8,
+            spacing3=8,
         )
         self.text.grid(row=0, column=0, sticky="nsew")
 
@@ -130,32 +170,39 @@ class NetworkView(BaseView):
         label = machine.model if machine.model else (machine.device_type or "device unknown")
         return re.sub(r"\s+Build\s+\d+", "", label)
 
-    def _insert_line(self, machine, w_id, w_device, w_hostname, center_pad):
+    def _insert_line(self, machine, center_pad):
         id_str = f"#{machine.id}" if machine.id else "#?"
         label = self._display_label(machine)
         hostname = machine.hostname or ""
 
         self.text.insert(tk.END, center_pad, "bright")
         self.text.insert(tk.END, id_str, "muted")
-        self.text.insert(tk.END, " " * max(1, w_id - len(id_str)))
-        self.text.insert(tk.END, COL_GAP, "bright")
+        self.text.insert(tk.END, "\t", "bright")
 
         icon = self._guess_icon(machine)
         if icon:
             self.text.image_create(tk.END, image=icon)
         else:
             self.text.insert(tk.END, "?")
-        self.text.insert(tk.END, COL_GAP, "bright")
+        self.text.insert(tk.END, "\t", "bright")
 
-        self.text.insert(tk.END, label, "bright")
-        self.text.insert(tk.END, " " * max(1, w_device - len(label)))
-        self.text.insert(tk.END, COL_GAP, "bright")
+        self.text.insert(tk.END, label[:40] + "\u2026" if len(label) > 40 else label, "bright")
+        self.text.insert(tk.END, "\t", "bright")
 
-        self.text.insert(tk.END, hostname, "muted")
-        self.text.insert(tk.END, " " * max(1, w_hostname - len(hostname)))
-        self.text.insert(tk.END, COL_GAP, "bright")
+        self.text.insert(tk.END, hostname[:30] + "\u2026" if len(hostname) > 30 else hostname, "muted")
+        self.text.insert(tk.END, "\t", "bright")
 
-        self.text.insert(tk.END, f"{machine.ip}\n", "bright")
+        self.text.insert(tk.END, f"{machine.ip}", "bright")
+        self.text.insert(tk.END, "\t", "bright")
+
+        del_img = _load_delete_img()
+        if del_img:
+            self.text.image_create(tk.END, image=del_img)
+            del_tag = f"del_{machine.ip}"
+            self.text.tag_add(del_tag, "end-2c", "end-1c")
+            self.text.tag_bind(del_tag, "<Button-1>", lambda e, m=machine: self._delete_machine(m))
+
+        self.text.insert(tk.END, "\n", "bright")
 
     def _on_line_click(self, event):
         index = self.text.index(f"@{event.x},{event.y}")
@@ -170,6 +217,10 @@ class NetworkView(BaseView):
         cursor = "hand2" if 0 <= line < len(self._machines) else ""
         self.text.configure(cursor=cursor)
 
+    def _delete_machine(self, machine):
+        machine_db.delete_machine_db(machine.id)
+        store.remove(machine.ip)
+
     def _poll(self):
         self.iface_label.config(
             text=f"{interface_name}  {interface_ip}" if interface_name else ""
@@ -182,36 +233,50 @@ class NetworkView(BaseView):
         w_id = self.MIN_ID
         w_device = 0
         w_hostname = self.MIN_HOSTNAME
+        w_ip = 7
         for m in machines:
             id_str = f"#{m.id}" if m.id else "#?"
             w_id = max(w_id, len(id_str))
             w_device = max(w_device, len(self._display_label(m)))
             w_hostname = max(w_hostname, len(m.hostname or ""))
+            w_ip = max(w_ip, len(m.ip))
 
         font = tkfont.Font(font=self.text.cget("font"))
         gap_px = font.measure(COL_GAP)
+        char_w = font.measure(" ")
 
-        row_content_px = (
-            font.measure("M" * w_id) + gap_px
-            + ICON_SIZE + gap_px
-            + font.measure("M" * w_device) + gap_px
-            + font.measure("M" * w_hostname) + gap_px
-            + font.measure("255.255.255.255")
-        )
+        def col_w(n):
+            return font.measure(" " * n)
+
+        row_content_px = col_w(w_id) + gap_px + ICON_SIZE + gap_px + col_w(w_device) + gap_px + col_w(w_hostname) + gap_px + col_w(w_ip) + gap_px + col_w(3)
 
         w = self.text.winfo_width()
-        char_w = font.measure(" ")
         if w > row_content_px:
             pad_chars = int((w - row_content_px) // 2 // char_w)
             center_pad = " " * max(0, pad_chars)
         else:
             center_pad = "  "
 
+        center_px = font.measure(center_pad)
+        tabs = []
+        t = center_px + col_w(w_id) + gap_px
+        tabs.append(t)
+        t += ICON_SIZE + gap_px
+        tabs.append(t)
+        t += col_w(w_device) + gap_px
+        tabs.append(t)
+        t += col_w(w_hostname) + gap_px
+        tabs.append(t)
+        t += col_w(w_ip) + gap_px
+        tabs.append(t)
+
+        self.text.configure(tabs=tabs)
+
         self.text.configure(state=tk.NORMAL)
         self.text.delete("1.0", tk.END)
 
         for m in machines:
-            self._insert_line(m, w_id, w_device, w_hostname, center_pad)
+            self._insert_line(m, center_pad)
 
         self.text.configure(state=tk.DISABLED)
 

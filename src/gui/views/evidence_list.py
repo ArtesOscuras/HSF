@@ -1,9 +1,9 @@
 import os
+import shutil
 import tkinter as tk
 import tkinter.font as tkfont
 from PIL import Image, ImageTk
 from .base import BaseView
-from src.machines import domain_db
 
 MUTED = "#888888"
 BRIGHT = "#ffffff"
@@ -19,7 +19,7 @@ def _load_icon():
     global _icon
     if _icon is not None:
         return _icon
-    path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "icons", "domain.png")
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "icons", "evidence.png")
     path = os.path.abspath(path)
     if os.path.isfile(path):
         try:
@@ -54,11 +54,36 @@ def _load_delete_img():
     return _delete_img
 
 
-class DomainListView(BaseView):
-    name = "domains"
-    description = "Discovered domains"
+def _get_evidence_dir():
+    base = os.path.join(os.path.dirname(__file__), "..", "..", "..", "evidence")
+    return os.path.abspath(base)
 
-    MIN_DOMAIN = 10
+
+def _list_evidences():
+    base = _get_evidence_dir()
+    result = []
+    if os.path.isdir(base):
+        for entry in sorted(os.listdir(base)):
+            entry_path = os.path.join(base, entry)
+            if os.path.isdir(entry_path):
+                session_path = os.path.join(entry_path, "session.json")
+                if os.path.isfile(session_path):
+                    try:
+                        import json
+                        with open(session_path) as f:
+                            meta = json.load(f)
+                        req_count = meta.get("request_count", 0)
+                    except Exception:
+                        req_count = 0
+                    result.append({"name": entry, "requests": req_count})
+    return result
+
+
+class EvidenceListView(BaseView):
+    name = "evidences"
+    description = "Recorded evidence sessions"
+
+    MIN_NAME = 15
 
     def _nav_btn(self, text, view_name, parent, active):
         btn = tk.Label(
@@ -85,12 +110,12 @@ class DomainListView(BaseView):
         nav_frame.pack(pady=(0, 10))
 
         self._nav_btn("Machines", "machines", nav_frame, False)
-        self._nav_btn("Domains", "domains", nav_frame, True)
-        self._nav_btn("Evidences", "evidences", nav_frame, False)
+        self._nav_btn("Domains", "domains", nav_frame, False)
+        self._nav_btn("Evidences", "evidences", nav_frame, True)
 
         tk.Label(
             header,
-            text="Domains",
+            text="Evidence",
             font=("Menlo", 22, "bold"),
             fg="#ffffff",
             bg="#000000",
@@ -126,6 +151,7 @@ class DomainListView(BaseView):
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.text.configure(yscrollcommand=scrollbar.set)
 
+        self._last_hash = None
         self._poll_id = None
 
     def on_activate(self):
@@ -139,12 +165,12 @@ class DomainListView(BaseView):
         if self._poll_id:
             self.after_cancel(self._poll_id)
             self._poll_id = None
-        self._domains = []
+        self._items = []
 
-    def _insert_line(self, domain, info, center_pad):
-        first = info.get("first_seen", "") if info else ""
-        if first and "T" in first:
-            first = first[:19].replace("T", " ")
+    def _insert_line(self, item, center_pad):
+        name = item["name"]
+        reqs = item["requests"]
+        req_text = f"{reqs} requests"
 
         self.text.insert(tk.END, center_pad, "bright")
 
@@ -155,47 +181,56 @@ class DomainListView(BaseView):
             self.text.insert(tk.END, "?")
         self.text.insert(tk.END, "\t", "bright")
 
-        self.text.insert(tk.END, domain[:50] + "\u2026" if len(domain) > 50 else domain, "bright")
+        self.text.insert(tk.END, name[:50] + "\u2026" if len(name) > 50 else name, "bright")
         self.text.insert(tk.END, "\t", "bright")
 
-        self.text.insert(tk.END, f"{first}", "muted")
+        self.text.insert(tk.END, req_text, "muted")
         self.text.insert(tk.END, "\t", "bright")
 
         del_img = _load_delete_img()
         if del_img:
             self.text.image_create(tk.END, image=del_img)
-            del_tag = f"del_{domain}"
+            del_tag = f"del_{name}"
             self.text.tag_add(del_tag, "end-2c", "end-1c")
-            self.text.tag_bind(del_tag, "<Button-1>", lambda e, d=domain: self._delete_domain(d))
+            self.text.tag_bind(del_tag, "<Button-1>", lambda e, n=name: self._delete_evidence(n))
 
         self.text.insert(tk.END, "\n", "muted")
 
     def _on_line_click(self, event):
         index = self.text.index(f"@{event.x},{event.y}")
         line = int(index.split(".")[0]) - 1
-        if self._on_domain_click and 0 <= line < len(self._domains):
-            self._on_domain_click(self._domains[line])
+        if self._on_item_click and 0 <= line < len(self._items):
+            self._on_item_click(self._items[line]["name"])
         return "break"
 
     def _on_mouse_move(self, event):
         index = self.text.index(f"@{event.x},{event.y}")
         line = int(index.split(".")[0]) - 1
-        cursor = "hand2" if 0 <= line < len(self._domains) else ""
+        cursor = "hand2" if 0 <= line < len(self._items) else ""
         self.text.configure(cursor=cursor)
 
-    def _delete_domain(self, domain):
-        domain_db.delete_domain(domain)
+    @staticmethod
+    def _delete_evidence(name):
+        base = _get_evidence_dir()
+        path = os.path.join(base, name)
+        if os.path.isdir(path):
+            shutil.rmtree(path)
 
     def _poll(self):
-        domains = domain_db.list_all()
-        domains.sort()
-        self._domains = domains
+        items = _list_evidences()
+        self._items = items
 
-        w_domain = self.MIN_DOMAIN
-        for d in domains:
-            w_domain = max(w_domain, len(d))
+        current_hash = hash(tuple((i["name"], i["requests"]) for i in items))
+        if current_hash == self._last_hash and self.text.index("end-1c") != "1.0":
+            self._poll_id = self.after(2000, self._poll)
+            return
+        self._last_hash = current_hash
 
-        w_date = 19
+        w_name = self.MIN_NAME
+        w_reqs = 10
+        for item in items:
+            w_name = max(w_name, len(item["name"]))
+            w_reqs = max(w_reqs, len(f"{item['requests']} requests"))
 
         font = tkfont.Font(font=self.text.cget("font"))
         gap_px = font.measure(COL_GAP)
@@ -204,7 +239,7 @@ class DomainListView(BaseView):
         def col_w(n):
             return font.measure(" " * n)
 
-        row_content_px = ICON_SIZE + gap_px + col_w(w_domain) + gap_px + col_w(w_date) + gap_px + col_w(3)
+        row_content_px = ICON_SIZE + gap_px + col_w(w_name) + gap_px + col_w(w_reqs) + gap_px + col_w(3)
 
         w = self.text.winfo_width()
         if w > row_content_px:
@@ -217,9 +252,9 @@ class DomainListView(BaseView):
         tabs = []
         t = center_px + ICON_SIZE + gap_px
         tabs.append(t)
-        t += col_w(w_domain) + gap_px
+        t += col_w(w_name) + gap_px
         tabs.append(t)
-        t += col_w(w_date) + gap_px
+        t += col_w(w_reqs) + gap_px
         tabs.append(t)
 
         self.text.configure(tabs=tabs)
@@ -227,14 +262,13 @@ class DomainListView(BaseView):
         self.text.configure(state=tk.NORMAL)
         self.text.delete("1.0", tk.END)
 
-        if not domains:
+        if not items:
             self.text.insert(tk.END, "\n", "bright")
             self.text.insert(tk.END, center_pad, "bright")
-            self.text.insert(tk.END, "No domains discovered yet.\n", "muted")
+            self.text.insert(tk.END, "No evidence sessions recorded yet.\n", "muted")
         else:
-            for d in domains:
-                info = domain_db.load_domain_info(d)
-                self._insert_line(d, info, center_pad)
+            for item in items:
+                self._insert_line(item, center_pad)
 
         self.text.configure(state=tk.DISABLED)
 

@@ -57,10 +57,14 @@ def init_or_update(domain, machine_id, machine_ip, source=""):
                     "UPDATE domain_info SET last_seen = ? WHERE domain = ?",
                     (now, domain),
                 )
-            conn.execute(
-                "INSERT OR REPLACE INTO domain_machines VALUES (?, ?, ?, ?)",
-                (machine_id, machine_ip, source, now),
-            )
+            existing_machine = conn.execute(
+                "SELECT 1 FROM domain_machines WHERE machine_id = ?", (machine_id,)
+            ).fetchone()
+            if not existing_machine:
+                conn.execute(
+                    "INSERT INTO domain_machines VALUES (?, ?, ?, ?)",
+                    (machine_id, machine_ip, source, now),
+                )
     except (PermissionError, OSError, sqlite3.OperationalError):
         pass
 
@@ -97,9 +101,152 @@ def load_domain_machines(domain):
         return []
 
 
+def save_subdomain(domain, subdomain, method=""):
+    _init_db_dir()
+    path = _get_path(domain)
+    now = datetime.now().isoformat()
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS subdomains (
+                    subdomain TEXT,
+                    discovered_at TEXT,
+                    method TEXT
+                )
+            """)
+            existing = conn.execute(
+                "SELECT 1 FROM subdomains WHERE subdomain = ?", (subdomain,)
+            ).fetchone()
+            if not existing:
+                conn.execute(
+                    "INSERT INTO subdomains VALUES (?, ?, ?)",
+                    (subdomain, now, method),
+                )
+    except (PermissionError, OSError, sqlite3.OperationalError):
+        pass
+
+
+def save_directory(domain, path):
+    _init_db_dir()
+    file_path = _get_path(domain)
+    now = datetime.now().isoformat()
+    try:
+        with sqlite3.connect(file_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS directories (
+                    path TEXT,
+                    discovered_at TEXT
+                )
+            """)
+            existing = conn.execute(
+                "SELECT 1 FROM directories WHERE path = ?", (path,)
+            ).fetchone()
+            if not existing:
+                conn.execute(
+                    "INSERT INTO directories VALUES (?, ?)",
+                    (path, now),
+                )
+    except (PermissionError, OSError, sqlite3.OperationalError):
+        pass
+
+
+def load_directories(domain):
+    _init_db_dir()
+    path = _get_path(domain)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS directories (
+                    path TEXT,
+                    discovered_at TEXT
+                )
+            """)
+            rows = conn.execute(
+                "SELECT path, discovered_at FROM directories ORDER BY discovered_at"
+            ).fetchall()
+            return [(r[0], r[1]) for r in rows]
+    except (sqlite3.DatabaseError, sqlite3.OperationalError):
+        return []
+
+
+def save_web_service(domain, port, output):
+    _init_db_dir()
+    path = _get_path(domain)
+    now = datetime.now().isoformat()
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS web_services (
+                    port INTEGER,
+                    output TEXT,
+                    scanned_at TEXT
+                )
+            """)
+            conn.execute("DELETE FROM web_services WHERE port = ?", (port,))
+            conn.execute("INSERT INTO web_services VALUES (?, ?, ?)", (port, output, now))
+    except (PermissionError, OSError, sqlite3.OperationalError):
+        pass
+
+
+def load_web_services(domain):
+    _init_db_dir()
+    path = _get_path(domain)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS web_services (
+                    port INTEGER,
+                    output TEXT,
+                    scanned_at TEXT
+                )
+            """)
+            rows = conn.execute(
+                "SELECT port, output FROM web_services ORDER BY port"
+            ).fetchall()
+            return [(r[0], r[1]) for r in rows]
+    except (sqlite3.DatabaseError, sqlite3.OperationalError):
+        return []
+
+
+def load_subdomains(domain):
+    _init_db_dir()
+    path = _get_path(domain)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS subdomains (
+                    subdomain TEXT,
+                    discovered_at TEXT,
+                    method TEXT
+                )
+            """)
+            rows = conn.execute(
+                "SELECT subdomain, discovered_at, method FROM subdomains ORDER BY discovered_at"
+            ).fetchall()
+            return [(r[0], r[1], r[2]) for r in rows]
+    except (sqlite3.DatabaseError, sqlite3.OperationalError):
+        return []
+
+
 def exists(domain):
     _init_db_dir()
     return os.path.isfile(_get_path(domain))
+
+
+def delete_domain(domain):
+    _init_db_dir()
+    path = _get_path(domain)
+    try:
+        if os.path.isfile(path):
+            os.remove(path)
+    except (PermissionError, OSError):
+        pass
 
 
 def list_all():

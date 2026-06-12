@@ -92,6 +92,10 @@ class MachineStore:
         self._machines.clear()
         self._next_id = 1
 
+    def remove(self, ip):
+        if ip in self._machines:
+            del self._machines[ip]
+
     def save(self):
         _init_db_path()
         try:

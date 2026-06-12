@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import netifaces
 from .console import Console
 from .visualizer import Visualizer
-from .views import NetworkView, DomainListView
+from .views import NetworkView, DomainListView, EvidenceListView
 from .dialogs import InterfaceSelector
 from src.machines import store, start_autosave as start_machines_autosave
 from src.machines import machine_db
@@ -50,12 +50,14 @@ class App(tk.Tk):
         self._active_scanner = None
         self._selected_interface = None
         self._identifying_ips = set()
+        self._system_process = None
+        self._recorder = None
         self._tcpscan_running = False
         self._tcpscan_process = None
         self._bannergrab_running = False
 
         self._register_views()
-        self.visualizer.activate_view("network")
+        self.visualizer.activate_view("machines")
         self._register_commands()
 
         load_mdns_cache()
@@ -80,15 +82,21 @@ class App(tk.Tk):
     def _register_views(self):
         net_view = NetworkView(self.visualizer)
         net_view._on_machine_click = self._open_machine_view
-        self.visualizer.register_view("network", net_view)
+        self.visualizer.register_view("machines", net_view)
 
         domain_view = DomainListView(self.visualizer)
+        domain_view._on_domain_click = self._open_domain_view
         self.visualizer.register_view("domains", domain_view)
+
+        evidence_view = EvidenceListView(self.visualizer)
+        evidence_view._on_item_click = self._open_evidence_view
+        self.visualizer.register_view("evidences", evidence_view)
 
         self.console.add_help_section("Views", [
             ("view list", "List available views"),
-            ("view network", "Network device list"),
+            ("view machines", "Machine list"),
             ("view domains", "Discovered domains list"),
+            ("view evidences", "Evidence sessions list"),
             ("view machine <id|ip>", "View machine details"),
             ("view <name>", "Switch to a view"),
         ])
@@ -104,9 +112,12 @@ class App(tk.Tk):
         self.console.register_command("nslookup", self._cmd_nslookup, "DNS lookup for a domain, IP or machine ID")
         self.console.register_command("domain", self._cmd_domain, "Add a domain to the inventory")
         self.console.register_command("fuzz", self._cmd_fuzz, "Open fuzz configuration dialog")
+        self.console.register_command("webrecorder", self._cmd_recorder, "Record browser session for a domain")
+        self.console.register_command("delete-evidence", self._cmd_delete_evidence, "Delete all evidence data")
         self.console.register_command("exit", self._cmd_exit, "Close the application")
 
         self.console.set_system_handler(self._run_system)
+        self.console.set_system_stop_handler(self._stop_system)
 
     def _cmd_view(self, args):
         if not args:
@@ -125,10 +136,11 @@ class App(tk.Tk):
                 self.console.warning("No views available.")
         elif sub == "machine":
             self._cmd_view_machine(args[1:])
+        elif sub == "domain":
+            self._cmd_view_domain(args[1:])
         else:
             try:
                 self.visualizer.activate_view(sub)
-                self.console.info(f"Switched to view: {sub}")
             except ValueError:
                 self.console.error(f"Unknown view: {sub}. Use 'view list' to see available views.")
 
@@ -153,13 +165,62 @@ class App(tk.Tk):
         if view_name not in self.visualizer.get_view_names():
             from .views import MachineDetailView
             machine_view = MachineDetailView(self.visualizer, machine)
-            machine_view._on_back_click = lambda: self.visualizer.activate_view("network")
+            machine_view._on_back_click = lambda: self.visualizer.activate_view("machines")
+            machine_view._on_domain_click = self._open_domain_view
             self.visualizer.register_view(view_name, machine_view)
         self.visualizer.activate_view(view_name)
-        self.console.info(f"Switched to view: machine_{machine.id}")
+
+    def _cmd_view_domain(self, args):
+        if not args:
+            self.console.body("Usage: view domain <domain>")
+            return
+        domain = args[0]
+        if not domain_db.exists(domain):
+            try:
+                info = socket.getaddrinfo(domain, None, socket.AF_INET, socket.SOCK_STREAM)
+                ip = info[0][4][0] if info else None
+            except Exception:
+                ip = None
+            if ip:
+                machine = store.get(ip)
+                if not machine:
+                    machine = store.add_or_update(ip=ip, method="manual")
+                    machine.device_type = "device unknown"
+                    machine_db.save_machine_info(machine)
+                domain_db.init_or_update(domain, machine.id, machine.ip, "view")
+            else:
+                domain_db.init_or_update(domain, 0, "", "view")
+        view_name = f"domain_{domain}"
+        if view_name not in self.visualizer.get_view_names():
+            from .views import DomainDetailView
+            detail_view = DomainDetailView(self.visualizer, domain)
+            detail_view._on_back_click = lambda: self.visualizer.activate_view("domains")
+            detail_view._on_subdomain_click = self._open_domain_view
+            detail_view._on_machine_click = self._open_machine_view_by_ip
+            self.visualizer.register_view(view_name, detail_view)
+        self.visualizer.activate_view(view_name)
 
     def _open_machine_view(self, machine):
         self._cmd_view_machine([str(machine.id)])
+
+    def _open_machine_view_by_ip(self, ip):
+        machine = store.get(ip)
+        if machine:
+            self._cmd_view_machine([str(machine.id)])
+        else:
+            self._cmd_view_machine([ip])
+
+    def _open_evidence_view(self, name):
+        view_name = f"evidence_{name}"
+        if view_name not in self.visualizer.get_view_names():
+            from .views import EvidenceDetailView
+            detail_view = EvidenceDetailView(self.visualizer, name)
+            detail_view._on_back_click = lambda: self.visualizer.activate_view("evidences")
+            self.visualizer.register_view(view_name, detail_view)
+        self.visualizer.activate_view(view_name)
+
+    def _open_domain_view(self, domain):
+        self._cmd_view_domain([domain])
 
     def _cmd_scan(self, args):
         if not args:
@@ -507,7 +568,7 @@ class App(tk.Tk):
             if m:
                 args = [str(m.id)]
             else:
-                self.console.body("Usage: whatweb <ip|id> [port]")
+                self.console.body("Usage: whatweb <ip|id|domain> [port]")
                 return
         target = args[0]
         port = 80
@@ -518,19 +579,40 @@ class App(tk.Tk):
                 self.console.error("Invalid port number")
                 return
         machine = None
+        domain_name = None
         if re.match(r"^\d+$", target):
             mid = int(target)
             for m in store.get_all():
                 if m.id == mid:
                     machine = m
                     break
-        else:
+        elif re.match(r"^\d+\.\d+\.\d+\.\d+$", target):
             machine = store.get(target)
+            if not machine:
+                machine = store.add_or_update(ip=target, method="manual")
+                machine.device_type = "device unknown"
+                machine_db.save_machine_info(machine)
+        else:
+            if not domain_db.exists(target):
+                domain_db.init_or_update(target, 0, "0.0.0.0", "manual")
+            domain_name = target
+            try:
+                info = socket.getaddrinfo(domain_name, None, socket.AF_INET, socket.SOCK_STREAM)
+                ip = info[0][4][0] if info else domain_name
+            except Exception:
+                ip = domain_name
+            machine = store.get(ip)
+            if not machine:
+                machine = store.add_or_update(ip=ip, method="manual")
+                machine.device_type = "device unknown"
+                machine_db.save_machine_info(machine)
+            domain_db.init_or_update(domain_name, machine.id, machine.ip, "whatweb")
+
         if not machine:
             self.console.warning(f"No machine found for: {target}")
             return
         ip = machine.ip
-        threading.Thread(target=self._run_webscan, args=(ip, port, machine), daemon=True).start()
+        threading.Thread(target=self._run_webscan, args=(ip, port, machine, domain_name), daemon=True).start()
 
     @staticmethod
     def _has_whatweb():
@@ -568,13 +650,14 @@ class App(tk.Tk):
     def _strip_ansi(text):
         return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
-    def _run_webscan(self, ip, port, machine):
+    def _run_webscan(self, ip, port, machine, domain_name=None):
+        target = domain_name or ip
         found, mode = self._has_whatweb()
         if found:
             self.console.after(0, lambda: self.console.info(
-                f"Web scanning {ip}:{port} (whatweb)..."
+                f"Web scanning {target}:{port} (whatweb)..."
             ))
-            stdout, stderr = _run_whatweb(ip, port, mode=mode)
+            stdout, stderr = _run_whatweb(target, port, mode=mode)
             stdout = self._strip_ansi(stdout)
             stderr = self._strip_ansi(stderr)
             if stderr:
@@ -584,30 +667,34 @@ class App(tk.Tk):
                 stdout = stdout + "\n" + stderr if stdout else stderr
             if stdout:
                 machine_db.save_web_service(machine.id, port, stdout)
+                if domain_name:
+                    domain_db.save_web_service(domain_name, port, stdout)
                 domains = _extract_domains_from_whatweb(stdout)
                 for d in domains:
                     domain_db.init_or_update(d, machine.id, machine.ip, "whatweb")
                     machine_db.save_domain(machine.id, d, "whatweb")
                 self.console.after(0, lambda: self.console.info(
-                    f"Web scan {ip}:{port} done (whatweb)"
+                    f"Web scan {target}:{port} done (whatweb)"
                 ))
                 for d in domains:
                     self.console.after(0, lambda dom=d: self.console.success(f"  domain: {dom}"))
             else:
                 self.console.after(0, lambda: self.console.warning(
-                    f"No web service detected at {ip}:{port}"
+                    f"No web service detected at {target}:{port}"
                 ))
         else:
             self.console.after(0, lambda: self.console.error(
                 "whatweb not found in path"
             ))
             self.console.after(0, lambda: self.console.info(
-                f"Web scanning {ip}:{port} (internal scanner)..."
+                f"Web scanning {target}:{port} (internal scanner)..."
             ))
-            output = _probe_web_internal(ip, port)
+            output = _probe_web_internal(target, port)
             engine = "internal"
             if output:
                 machine_db.save_web_service(machine.id, port, output)
+                if domain_name:
+                    domain_db.save_web_service(domain_name, port, output)
                 self.console.after(0, lambda: self.console.info(
                     f"Web scan {ip}:{port} done ({engine})"
                 ))
@@ -837,22 +924,49 @@ class App(tk.Tk):
         threading.Thread(target=self._run_system_thread, args=(cmd,), daemon=True).start()
 
     def _run_system_thread(self, cmd):
+        _dbg(f"[system] started: {cmd}")
+        args = cmd.split()
+        monitor_nmap = None
+        if args and args[0].lower() == "nmap":
+            for arg in args[1:]:
+                if re.match(r"^\d+\.\d+\.\d+\.\d+$", arg):
+                    machine = store.get(arg)
+                    if machine:
+                        monitor_nmap = machine
+                        _dbg(f"[system] nmap monitoring for machine #{machine.id} ({arg})")
+                    break
         try:
-            proc = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=30
+            shell = os.environ.get("SHELL", "/bin/sh")
+            proc = subprocess.Popen(
+                [shell, "-i", "-c", cmd],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, bufsize=1,
             )
-            output = proc.stdout + proc.stderr
-            _dbg(f"[system] cmd={cmd} rc={proc.returncode}\n{output}")
-            for line_raw in output.splitlines():
-                stripped = line_raw.rstrip()
+            self._system_process = proc
+            for line in proc.stdout:
+                stripped = line.rstrip()
                 if stripped:
                     self.console.after(0, lambda l=stripped: self.console.body(l))
+                if monitor_nmap:
+                    m = re.match(r"Discovered open port (\d+)/tcp on \S+", stripped)
+                    if m:
+                        port = int(m.group(1))
+                        if machine_db.save_tcp_port(monitor_nmap.id, port):
+                            self.console.after(0, lambda p=port, mid=monitor_nmap.id: self.console.success(
+                                f"  nmap: added port {p} to machine #{mid}"
+                            ))
+            proc.wait()
+            if self._system_process is proc:
+                self._system_process = None
             if proc.returncode != 0:
                 self.console.after(0, lambda: self.console.warning(f"exit code: {proc.returncode}"))
-        except subprocess.TimeoutExpired:
-            self.console.after(0, lambda: self.console.warning(f"Command timed out: {cmd}"))
         except Exception as e:
             self.console.after(0, lambda: self.console.error(f"System command failed: {e}"))
+
+    def _stop_system(self):
+        if self._system_process:
+            self._system_process.kill()
+            self.console.info("Process stopped")
 
     def _cmd_ping(self, args):
         if not args:
@@ -994,6 +1108,118 @@ class App(tk.Tk):
     def _cmd_fuzz(self, args):
         from .dialogs.fuzz import FuzzDialog
         FuzzDialog(self)
+
+    def _cmd_recorder(self, args):
+        if not args:
+            from src.webrecorder import find_browsers
+            from .dialogs.recorder_dialog import WebRecorderDialog
+            browsers = find_browsers()
+            if not browsers:
+                self.console.error(
+                    "No supported browser found (chromium-based). Install Chrome, Chromium, or Brave."
+                )
+                return
+            dialog = WebRecorderDialog(self, browsers)
+            if not dialog.result:
+                return
+            threading.Thread(target=self._run_recorder_dialog, args=(dialog.result,), daemon=True).start()
+            return
+        sub = args[0].lower()
+        if sub == "stop":
+            if self._recorder and self._recorder.is_running():
+                self._recorder.stop()
+                self._recorder.kill_browser()
+                self._recorder = None
+                self.console.info("Recorder stopped")
+            else:
+                self.console.warning("No webrecorder is running.")
+            return
+        target = sub
+        if re.match(r"^\d+$", target):
+            mid = int(target)
+            for m in store.get_all():
+                if m.id == mid:
+                    target = m.ip
+                    break
+            else:
+                self.console.warning(f"No machine with ID #{mid}")
+                return
+        if self._recorder and self._recorder.is_running():
+            self.console.warning("A webrecorder is already running. Use 'webrecorder stop' first.")
+            return
+        threading.Thread(target=self._run_recorder, args=(target,), daemon=True).start()
+
+    def _run_recorder_dialog(self, config):
+        from src.webrecorder import Recorder
+
+        name = config["name"]
+        target = config["target"]
+        browser_path = config["browser"]
+        scope = config.get("scope")
+
+        label = os.path.basename(browser_path)
+        self.console.after(0, lambda l=label: self.console.info(f"Using {l}"))
+
+        def on_log(text, color=None):
+            if color == "success":
+                self.console.after(0, lambda t=text: self.console.success(t.rstrip()))
+            elif color == "error":
+                self.console.after(0, lambda t=text: self.console.error(t.rstrip()))
+            elif color == "info":
+                self.console.after(0, lambda t=text: self.console.info(t.rstrip()))
+            else:
+                self.console.after(0, lambda t=text: self.console.body(t.rstrip()))
+
+        self._recorder = Recorder(target, browser_path, on_log=on_log, evidence_name=name, scope=scope)
+        self._recorder.start()
+
+    def _run_recorder(self, target):
+        from src.webrecorder import find_browsers, BrowserSelector, Recorder
+        from src.webrecorder import evidence
+
+        browsers = find_browsers()
+        if not browsers:
+            self.console.after(0, lambda: self.console.error(
+                "No supported browser found (chromium-based). Install Chrome, Chromium, or Brave."
+            ))
+            return
+
+        if len(browsers) > 1:
+            dialog = BrowserSelector(self, browsers)
+            if not dialog.result:
+                self.console.after(0, lambda: self.console.warning("Recorder cancelled."))
+                return
+            browser_path = dialog.result
+        else:
+            browser_path = list(browsers.keys())[0]
+
+        label = list(browsers.values())[0] if len(browsers) == 1 else os.path.basename(browser_path)
+        self.console.after(0, lambda l=label: self.console.info(f"Using {l}"))
+
+        def on_log(text, color=None):
+            if color == "success":
+                self.console.after(0, lambda t=text: self.console.success(t.rstrip()))
+            elif color == "error":
+                self.console.after(0, lambda t=text: self.console.error(t.rstrip()))
+            elif color == "info":
+                self.console.after(0, lambda t=text: self.console.info(t.rstrip()))
+            else:
+                self.console.after(0, lambda t=text: self.console.body(t.rstrip()))
+
+        self._recorder = Recorder(target, browser_path, on_log=on_log)
+        self._recorder.start()
+
+    def _cmd_delete_evidence(self, args):
+        import shutil
+        from src.webrecorder.evidence import target_dir
+        evidence_dir = target_dir(".")
+        evidence_dir = os.path.dirname(evidence_dir)
+        if os.path.isdir(evidence_dir):
+            shutil.rmtree(evidence_dir)
+            os.makedirs(evidence_dir, exist_ok=True)
+            self.console.info("All evidence data cleared")
+        else:
+            self.console.info("Evidence directory not found")
 
     def _cmd_delete_dbs(self, args):
         store.clear()

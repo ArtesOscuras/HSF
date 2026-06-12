@@ -15,6 +15,7 @@ class MachineDetailView(BaseView):
 
     def __init__(self, parent, machine, **kwargs):
         self._machine = machine
+        self._domain_rows = []
         super().__init__(parent, **kwargs)
 
     def _build_ui(self):
@@ -68,9 +69,13 @@ class MachineDetailView(BaseView):
         self._poll_id = None
 
     def on_activate(self):
+        self.text.bind("<Button-1>", self._on_line_click)
+        self.text.bind("<Motion>", self._on_mouse_move)
         self._poll()
 
     def on_deactivate(self):
+        self.text.unbind("<Button-1>")
+        self.text.unbind("<Motion>")
         if self._poll_id:
             self.after_cancel(self._poll_id)
             self._poll_id = None
@@ -78,6 +83,26 @@ class MachineDetailView(BaseView):
     def _on_title_click(self, event):
         if self._on_back_click:
             self._on_back_click()
+
+    def _on_line_click(self, event):
+        index = self.text.index(f"@{event.x},{event.y}")
+        line = int(index.split(".")[0])
+        for row, domain in self._domain_rows:
+            if line == row:
+                if self._on_domain_click:
+                    self._on_domain_click(domain)
+                return "break"
+        return "break"
+
+    def _on_mouse_move(self, event):
+        index = self.text.index(f"@{event.x},{event.y}")
+        line = int(index.split(".")[0])
+        cursor = ""
+        for row, _ in self._domain_rows:
+            if line == row:
+                cursor = "hand2"
+                break
+        self.text.configure(cursor=cursor)
 
     def _poll(self):
         self._refresh()
@@ -92,11 +117,12 @@ class MachineDetailView(BaseView):
         web = machine_db.load_web_services(self._machine.id)
         domains = machine_db.load_domains(self._machine.id)
         banners = machine_db.load_banners(self._machine.id)
+        directories = machine_db.load_directories(self._machine.id)
         current_hash = hash((
             self._machine.device_type, self._machine.model, self._machine.os,
             self._machine.domain, self._machine.hostname, self._machine.mac,
             tuple(ports), tuple((p, o) for p, o in web), tuple(domains),
-            tuple(banners),
+            tuple(banners), tuple(directories),
         ))
         if current_hash == self._last_hash and self.text.index("end-1c") != "1.0":
             return
@@ -133,12 +159,17 @@ class MachineDetailView(BaseView):
 
         domains = machine_db.load_domains(m.id)
         if domains:
+            self._domain_rows = []
             self.text.insert(tk.END, f"\nDomains:\n", "info")
             for d, src in domains:
+                row_start = int(self.text.index("end-1c").split(".")[0])
                 self.text.insert(tk.END, f"  {d}", "bright")
                 if src:
                     self.text.insert(tk.END, f" ({src})", "muted")
                 self.text.insert(tk.END, "\n")
+                self._domain_rows.append((row_start, d))
+        else:
+            self._domain_rows = []
 
         banners = machine_db.load_banners(m.id)
         if banners:
@@ -171,6 +202,12 @@ class MachineDetailView(BaseView):
                 self.text.insert(tk.END, f"\nWeb port {port}:\n", "info")
                 for line in output.split("\n"):
                     self.text.insert(tk.END, f"  {line}\n", "bright")
+
+        directories = machine_db.load_directories(m.id)
+        if directories:
+            self.text.insert(tk.END, f"\nDirectories ({len(directories)}):\n", "info")
+            for path, ts in directories:
+                self.text.insert(tk.END, f"  {path}\n", "bright")
 
         last_line = self.text.index("end-1c")
         total = int(last_line.split(".")[0]) if last_line else 1

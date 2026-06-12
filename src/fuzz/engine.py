@@ -7,7 +7,8 @@ from .wordlist import load_wordlist
 
 TIMEOUT = 5
 MAX_WORKERS = 20
-SHOW_CODES = {200, 301, 302, 307, 401, 403}
+SHOW_CODES = {200, 201, 204, 301, 302, 307, 400, 401, 403, 404, 405, 500, 502, 503}
+ALL_CODES = list(SHOW_CODES)
 USER_AGENT = "HSF/1.0"
 
 _ssl_context = ssl.create_default_context()
@@ -16,13 +17,17 @@ _ssl_context.verify_mode = ssl.CERT_NONE
 
 
 class FuzzEngine:
-    def __init__(self, target, wordlist_path, method, target_ip=None, on_result=None, workers=None, on_progress=None):
+    def __init__(self, target, wordlist_path, method, target_ip=None, on_result=None, workers=None, on_progress=None, on_found=None, url_template=None, show_codes=None, hide_size_range=None):
         self._target = target
         self._wordlist_path = wordlist_path
         self._method = method
         self._target_ip = target_ip
+        self._url_template = url_template
+        self._show_codes = show_codes if show_codes is not None else SHOW_CODES
+        self._hide_size_range = hide_size_range if hide_size_range is not None else None
         self._on_result = on_result
         self._on_progress = on_progress
+        self._on_found = on_found
         self._stop_flag = threading.Event()
         self._executor = None
         self._workers = workers or MAX_WORKERS
@@ -37,6 +42,11 @@ class FuzzEngine:
     def _emit(self, text, color=None):
         if self._on_result:
             self._on_result(text, color)
+
+    def _display_word(self, word):
+        if self._method == "directory" and self._url_template:
+            return self._url_template.replace("FUZZ", word).rsplit("/", 1)[-1]
+        return word
 
     def _run(self):
         words = load_wordlist(self._wordlist_path)
@@ -62,9 +72,18 @@ class FuzzEngine:
             done += 1
             try:
                 status, length = fut.result()
-                if status and status in SHOW_CODES:
-                    found += 1
-                    self._emit(f"  [{status}] {word:<40} {length:>6}B\n", "success")
+                if status and status in self._show_codes:
+                    skip = False
+                    if self._hide_size_range:
+                        lo, hi = self._hide_size_range
+                        if lo <= length <= hi:
+                            skip = True
+                    if not skip:
+                        found += 1
+                        display = self._display_word(word)
+                        self._emit(f"  [{status}] {display:<40} {length:>6} bytes\n", "success")
+                        if self._on_found:
+                            self._on_found(word, display)
             except Exception:
                 pass
             if done % 50 == 0 and self._on_progress:
@@ -91,7 +110,10 @@ class FuzzEngine:
         method = self._method
         target = self._target
         if method == "directory":
-            url = f"http://{target}/{word}/"
+            if self._url_template:
+                url = self._url_template.replace("FUZZ", word)
+            else:
+                url = f"http://{target}/{word}/"
             return urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         elif method == "vhost":
             ip = self._target_ip or target

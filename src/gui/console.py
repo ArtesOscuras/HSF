@@ -23,6 +23,7 @@ class Console(tk.Frame):
         self._saved_input = ""
         self._font_size = 11
         self._system_handler = None
+        self._system_stop_handler = None
         self._is_system = False
         self._skip_release = False
         self._autocomplete_popup = None
@@ -92,6 +93,7 @@ class Console(tk.Frame):
         self.input_entry.bind("<Tab>", self._on_tab)
         self.input_entry.bind("<Escape>", self._on_escape)
         self.input_entry.bind("<FocusIn>", self._on_focus_in)
+        self.input_entry.bind("<FocusOut>", self._on_focus_out)
         self.input_entry.focus()
 
         self.bind_all("<Control-plus>", lambda e: self._adjust_font(+1))
@@ -110,6 +112,9 @@ class Console(tk.Frame):
 
     def set_system_handler(self, handler):
         self._system_handler = handler
+
+    def set_system_stop_handler(self, handler):
+        self._system_stop_handler = handler
 
     def add_help_section(self, title, items):
         self.help_sections.append((title, items))
@@ -153,9 +158,14 @@ class Console(tk.Frame):
         raw = self.input_var.get().strip()
         self.input_var.set("")
         if self._is_system:
-            if not raw:
+            if raw == "stop":
                 self._is_system = False
                 self.prompt_label.config(text="HSF> ")
+                self.writeln(f"! stop", color=FG)
+                if self._system_stop_handler:
+                    self._system_stop_handler()
+                return
+            if not raw:
                 return
             if not self._history or self._history[-1] != raw:
                 self._history.append(raw)
@@ -175,9 +185,6 @@ class Console(tk.Frame):
         self._execute(raw)
 
     def _on_up(self, event):
-        if self._autocomplete_popup:
-            self._autocomplete_navigate(-1)
-            return "break"
         if not self._history:
             return "break"
         if self._history_index == len(self._history):
@@ -189,9 +196,6 @@ class Console(tk.Frame):
         return "break"
 
     def _on_down(self, event):
-        if self._autocomplete_popup:
-            self._autocomplete_navigate(1)
-            return "break"
         if self._history_index == len(self._history):
             return "break"
         self._history_index += 1
@@ -268,7 +272,7 @@ class Console(tk.Frame):
         if self._skip_release:
             self._skip_release = False
             return
-        if self._is_system and not self.input_var.get() and (event.char or event.keysym in ("BackSpace", "Delete")):
+        if self._is_system and not self.input_var.get() and event.keysym in ("BackSpace", "Delete"):
             self._is_system = False
             self.prompt_label.config(text="HSF> ")
             return
@@ -367,6 +371,9 @@ class Console(tk.Frame):
     def _on_focus_in(self, event):
         if not self._is_system:
             self.after(50, self._filter_autocomplete)
+
+    def _on_focus_out(self, event):
+        self.after(150, self._close_autocomplete)
 
     def _close_autocomplete(self):
         if self._track_id:

@@ -1,9 +1,14 @@
 import os
+import re
+import socket
 import tkinter as tk
 from tkinter import ttk
+from urllib.parse import urlparse
 
 from src.fuzz import FuzzEngine
+from src.fuzz.engine import ALL_CODES
 from src.machines import store
+from src.machines import machine_db
 from src.machines import domain_db
 
 BG = "#111111"
@@ -16,10 +21,149 @@ ERR_COLOR = "#f44747"
 INFO_COLOR = "#5ba3ec"
 
 
+class _TargetSection:
+    def __init__(self, parent, row, mode="both", on_select=None):
+        self._target_keys = []
+        self._on_select = on_select
+        self._mode = mode
+
+        tk.Label(
+            parent, text="Target", font=("Menlo", 11, "bold"),
+            fg=FG, bg=BG,
+        ).grid(row=row, column=0, sticky="nw", padx=15, pady=(10, 5))
+
+        mode_frame = tk.Frame(parent, bg=BG)
+        if mode != "domains":
+            mode_frame.grid(row=row, column=1, sticky="w", padx=15, pady=(10, 5))
+        else:
+            mode_frame.grid(row=row, column=1, sticky="w", padx=15, pady=(10, 5))
+
+        self._target_mode = tk.StringVar(value="machine" if mode == "both" else "domain")
+
+        if mode == "both":
+            machine_radio = tk.Radiobutton(
+                mode_frame, text="  Machine  ", variable=self._target_mode, value="machine",
+                bg=BG, fg=FG, selectcolor=BG, font=("Menlo", 10),
+                activebackground=BG, activeforeground=FG,
+                indicatoron=False, relief=tk.FLAT,
+                command=self._populate,
+            )
+            machine_radio.pack(side=tk.LEFT, padx=(0, 5))
+
+            domain_radio = tk.Radiobutton(
+                mode_frame, text="  Domain  ", variable=self._target_mode, value="domain",
+                bg=BG, fg=FG, selectcolor=BG, font=("Menlo", 10),
+                activebackground=BG, activeforeground=FG,
+                indicatoron=False, relief=tk.FLAT,
+                command=self._populate,
+            )
+            domain_radio.pack(side=tk.LEFT)
+
+        frame = tk.Frame(parent, bg=BG_WIDGET)
+        frame.grid(row=row + 1, column=0, columnspan=2, sticky="nsew", padx=15, pady=(0, 5))
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        self._listbox = tk.Listbox(
+            frame, bg=BG_WIDGET, fg=FG,
+            selectbackground=SEL_BG, selectforeground=FG,
+            font=("Menlo", 11), borderwidth=0, highlightthickness=0,
+            activestyle="none", exportselection=False, height=3,
+        )
+        self._listbox.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = tk.Scrollbar(frame, orient=tk.VERTICAL, command=self._listbox.yview)
+        scrollbar.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
+                            width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self._listbox.configure(yscrollcommand=scrollbar.set)
+
+        self._listbox.bind("<<ListboxSelect>>", self._on_list_select)
+        self._populate()
+        self._listbox.bind("<Return>", lambda e: self._start if hasattr(self, '_start') else None)
+
+    def _on_list_select(self, event):
+        if self._on_select:
+            target = self.selected()
+            if target:
+                self._on_select(target[1])
+
+    def _populate(self):
+        self._listbox.delete(0, tk.END)
+        self._target_keys = []
+
+        if self._target_mode.get() == "machine":
+            machines = store.get_all_sorted()
+            for m in machines:
+                if m.ip in ("127.0.0.1", "::1") or m.ip.startswith("127."):
+                    continue
+                label = f"{m.ip:<18}{m.hostname or ''}".rstrip()
+                self._listbox.insert(tk.END, f"  {label}")
+                self._target_keys.append(("machine", m.ip, m.hostname, m.ip))
+        else:
+            domains = domain_db.list_all()
+            domains.sort()
+            for d in domains:
+                self._listbox.insert(tk.END, f"  {d}")
+                self._target_keys.append(("domain", d, d, None))
+
+        if self._target_keys:
+            self._listbox.selection_set(0)
+            self._on_list_select(None)
+
+    def selected(self):
+        sel = self._listbox.curselection()
+        if not sel:
+            return None
+        return self._target_keys[sel[0]]
+
+
+class _WordlistSection:
+    def __init__(self, parent, row):
+        tk.Label(
+            parent, text="Wordlist", font=("Menlo", 11, "bold"),
+            fg=FG, bg=BG,
+        ).grid(row=row, column=0, sticky="nw", padx=15, pady=(10, 5))
+
+        frame = tk.Frame(parent, bg=BG_WIDGET)
+        frame.grid(row=row, column=1, sticky="nsew", padx=15, pady=(10, 5))
+        frame.columnconfigure(0, weight=1)
+        frame.rowconfigure(0, weight=1)
+
+        self._listbox = tk.Listbox(
+            frame, bg=BG_WIDGET, fg=FG,
+            selectbackground=SEL_BG, selectforeground=FG,
+            font=("Menlo", 11), borderwidth=0, highlightthickness=0,
+            activestyle="none", exportselection=False, height=3,
+        )
+        self._listbox.grid(row=0, column=0, sticky="nsew")
+
+        self._files = []
+        lst_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "lst")
+        lst_dir = os.path.abspath(lst_dir)
+        if os.path.isdir(lst_dir):
+            for fname in sorted(os.listdir(lst_dir)):
+                if os.path.isfile(os.path.join(lst_dir, fname)):
+                    self._files.append(os.path.join(lst_dir, fname))
+                    self._listbox.insert(tk.END, f"  {fname}")
+        if self._files:
+            self._listbox.selection_set(0)
+
+    def selected(self):
+        sel = self._listbox.curselection()
+        if not sel:
+            return None
+        return self._files[sel[0]]
+
+
 class FuzzDialog(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self._engine = None
+        self._dir_results = []
+        self._dir_url_template = None
+        self._vhost_results = []
+        self._dns_results = []
 
         self.title("Fuzz")
         self.geometry("800x700")
@@ -30,197 +174,208 @@ class FuzzDialog(tk.Toplevel):
 
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=1)
-        self.rowconfigure(0, weight=0)
-        self.rowconfigure(1, weight=0)
-        self.rowconfigure(2, weight=1)
-        self.rowconfigure(3, weight=1)
-        self.rowconfigure(4, weight=0)
-        self.rowconfigure(5, weight=0)
-        self.rowconfigure(6, weight=1)
-        self.rowconfigure(7, weight=0)
 
-        tk.Label(
-            self, text="Fuzz Configuration", font=("Menlo", 16, "bold"),
-            fg=FG, bg=BG,
-        ).grid(row=0, column=0, columnspan=2, sticky="w", padx=15, pady=(15, 10))
+        self._notebook = ttk.Notebook(self)
+        self._notebook.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=(15, 0))
 
-        self._build_target_section()
-        self._build_wordlist_section()
-        self._build_method_section()
-        self._build_progress_section()
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure("TNotebook", background=BG, borderwidth=0)
+        style.configure("TNotebook.Tab", background="#222222", foreground=FG,
+                        padding=[20, 6], font=("Menlo", 10))
+        style.map("TNotebook.Tab", background=[("selected", "#333333")])
+
+        self._tab_dir = tk.Frame(self._notebook, bg=BG)
+        self._tab_vhost = tk.Frame(self._notebook, bg=BG)
+        self._tab_dns = tk.Frame(self._notebook, bg=BG)
+
+        self._notebook.add(self._tab_dir, text="Directory")
+        self._notebook.add(self._tab_vhost, text="Vhost subdomain")
+        self._notebook.add(self._tab_dns, text="DNS subdomain")
+        self._notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+        self._tab_dir.columnconfigure(0, weight=1)
+        self._tab_dir.columnconfigure(1, weight=1)
+        self._tab_vhost.columnconfigure(0, weight=1)
+        self._tab_vhost.columnconfigure(1, weight=1)
+        self._tab_dns.columnconfigure(0, weight=1)
+        self._tab_dns.columnconfigure(1, weight=1)
+
+        self._build_directory_tab()
+        self._build_vhost_tab()
+        self._build_dns_tab()
         self._build_output_section()
         self._build_buttons()
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-    def _build_target_section(self):
+    def _build_directory_tab(self):
+        tab = self._tab_dir
+
+        self._url_var = tk.StringVar()
+
+        def _on_target_change(value):
+            if not value:
+                return
+            current = self._url_var.get()
+            if "://" in current:
+                prefix, rest = current.split("://", 1)
+                if "/" in rest:
+                    _, path = rest.split("/", 1)
+                else:
+                    path = "FUZZ"
+                self._url_var.set(f"{prefix}://{value}/{path}")
+            else:
+                self._url_var.set(f"http://{value}/FUZZ")
+
+        self._target_dir = _TargetSection(tab, 0, mode="both", on_select=_on_target_change)
+
         tk.Label(
-            self, text="Target", font=("Menlo", 11, "bold"),
+            tab, text="URL", font=("Menlo", 11, "bold"),
             fg=FG, bg=BG,
-        ).grid(row=1, column=0, sticky="w", padx=15, pady=(0, 5))
+        ).grid(row=2, column=0, sticky="w", padx=15, pady=(10, 0))
 
-        mode_frame = tk.Frame(self, bg=BG)
-        mode_frame.grid(row=1, column=1, sticky="w", padx=15, pady=(0, 5))
-
-        self._target_mode = tk.StringVar(value="machine")
-
-        machine_radio = tk.Radiobutton(
-            mode_frame, text="  Machine  ", variable=self._target_mode, value="machine",
-            bg=BG, fg=FG, selectcolor=BG, font=("Menlo", 10),
-            activebackground=BG, activeforeground=FG,
-            indicatoron=False, relief=tk.FLAT,
-            command=self._switch_target_mode,
-        )
-        machine_radio.pack(side=tk.LEFT, padx=(0, 5))
-
-        domain_radio = tk.Radiobutton(
-            mode_frame, text="  Domain  ", variable=self._target_mode, value="domain",
-            bg=BG, fg=FG, selectcolor=BG, font=("Menlo", 10),
-            activebackground=BG, activeforeground=FG,
-            indicatoron=False, relief=tk.FLAT,
-            command=self._switch_target_mode,
-        )
-        domain_radio.pack(side=tk.LEFT)
-
-        frame = tk.Frame(self, bg=BG_WIDGET)
-        frame.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=15, pady=(0, 5))
-        frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(0, weight=1)
-
-        self._target_listbox = tk.Listbox(
-            frame, bg=BG_WIDGET, fg=FG,
-            selectbackground=SEL_BG, selectforeground=FG,
-            font=("Menlo", 11), borderwidth=0, highlightthickness=0,
-            activestyle="none", exportselection=False, height=5,
-        )
-        self._target_listbox.grid(row=0, column=0, sticky="nsew")
-
-        scrollbar = tk.Scrollbar(frame, orient=tk.VERTICAL, command=self._target_listbox.yview)
-        scrollbar.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
-                            width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self._target_listbox.configure(yscrollcommand=scrollbar.set)
-
-        self._populate_targets()
-
-    def _switch_target_mode(self):
-        self._populate_targets()
-
-    def _populate_targets(self):
-        self._target_listbox.delete(0, tk.END)
-        self._target_keys = []
-
-        if self._target_mode.get() == "machine":
-            machines = store.get_all_sorted()
-            for m in machines:
-                if m.ip in ("127.0.0.1", "::1") or m.ip.startswith("127."):
-                    continue
-                label = f"{m.ip:<18}{m.hostname or ''}".rstrip()
-                self._target_listbox.insert(tk.END, f"  {label}")
-                self._target_keys.append(("machine", m.ip, m.hostname, m.ip))
-        else:
-            domains = domain_db.list_all()
-            domains.sort()
-            for d in domains:
-                self._target_listbox.insert(tk.END, f"  {d}")
-                self._target_keys.append(("domain", d, d, None))
-
-        if self._target_keys:
-            self._target_listbox.selection_set(0)
-
-    def _build_wordlist_section(self):
-        tk.Label(
-            self, text="Wordlist", font=("Menlo", 11, "bold"),
-            fg=FG, bg=BG,
-        ).grid(row=3, column=0, sticky="nw", padx=15, pady=(5, 5))
-
-        frame = tk.Frame(self, bg=BG_WIDGET)
-        frame.grid(row=3, column=1, sticky="nsew", padx=15, pady=(5, 5))
-        frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(0, weight=1)
-
-        self._wordlist_listbox = tk.Listbox(
-            frame, bg=BG_WIDGET, fg=FG,
-            selectbackground=SEL_BG, selectforeground=FG,
-            font=("Menlo", 11), borderwidth=0, highlightthickness=0,
-            activestyle="none", exportselection=False, height=3,
-        )
-        self._wordlist_listbox.grid(row=0, column=0, sticky="nsew")
-
-        self._wordlist_files = []
-        lst_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "lst")
-        lst_dir = os.path.abspath(lst_dir)
-        if os.path.isdir(lst_dir):
-            for fname in sorted(os.listdir(lst_dir)):
-                if os.path.isfile(os.path.join(lst_dir, fname)):
-                    self._wordlist_files.append(os.path.join(lst_dir, fname))
-                    self._wordlist_listbox.insert(tk.END, f"  {fname}")
-        if self._wordlist_files:
-            self._wordlist_listbox.selection_set(0)
-
-    def _build_method_section(self):
-        tk.Label(
-            self, text="Method", font=("Menlo", 11, "bold"),
-            fg=FG, bg=BG,
-        ).grid(row=4, column=0, sticky="nw", padx=15, pady=(5, 0))
-
-        method_frame = tk.Frame(self, bg=BG)
-        method_frame.grid(row=4, column=1, sticky="w", padx=15, pady=(5, 0))
-
-        self._method_var = tk.StringVar(value="directory")
-
-        methods = [
-            ("  Directory  ", "directory"),
-            ("  Vhost subdomain  ", "vhost"),
-            ("  DNS subdomain  ", "dns"),
-        ]
-
-        for text, value in methods:
-            btn = tk.Radiobutton(
-                method_frame, text=text, variable=self._method_var, value=value,
-                bg=BG, fg=FG, selectcolor=BG, font=("Menlo", 10),
-                activebackground=BG, activeforeground=FG,
-                indicatoron=False, relief=tk.FLAT,
-            )
-            btn.pack(side=tk.LEFT, padx=(0, 5))
-
-        self._thread_var = tk.StringVar(value="20")
-        tk.Label(
-            method_frame, text=" Threads:", font=("Menlo", 10),
-            fg=FG_DIM, bg=BG,
-        ).pack(side=tk.LEFT, padx=(15, 5))
-        thread_entry = tk.Entry(
-            method_frame, textvariable=self._thread_var, width=4,
+        self._url_entry = tk.Entry(
+            tab, textvariable=self._url_var,
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
-            font=("Menlo", 10), borderwidth=1, relief=tk.FLAT,
+            font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         )
-        thread_entry.pack(side=tk.LEFT)
+        self._url_entry.grid(row=2, column=1, sticky="ew", padx=15, pady=(10, 0))
 
-    def _build_progress_section(self):
-        frame = tk.Frame(self, bg=BG)
-        frame.grid(row=5, column=0, columnspan=2, sticky="ew", padx=15, pady=(5, 2))
+        self._wl_dir = _WordlistSection(tab, 3)
 
-        self._progress_var = tk.IntVar(value=0)
-        self._progress_bar = ttk.Progressbar(
-            frame, variable=self._progress_var, maximum=100,
-        )
-        self._progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        thread_row = 4
+        tk.Label(
+            tab, text="Threads", font=("Menlo", 11, "bold"),
+            fg=FG, bg=BG,
+        ).grid(row=thread_row, column=0, sticky="w", padx=15, pady=(10, 0))
+        self._thread_dir_var = tk.StringVar(value="20")
+        tk.Entry(
+            tab, textvariable=self._thread_dir_var, width=6,
+            bg=BG_WIDGET, fg=FG, insertbackground=FG,
+            font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
+            highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
+        ).grid(row=thread_row, column=1, sticky="w", padx=15, pady=(10, 0))
 
-        self._progress_label = tk.Label(
-            frame, text="  Ready", font=("Menlo", 9),
-            fg=FG_DIM, bg=BG,
-        )
-        self._progress_label.pack(side=tk.LEFT, padx=(8, 0))
+        row = 5
+        tk.Label(
+            tab, text="Show codes", font=("Menlo", 11, "bold"),
+            fg=FG, bg=BG,
+        ).grid(row=row, column=0, sticky="w", padx=15, pady=(10, 0))
+        self._filter_dir_var = tk.StringVar(value=",".join(str(c) for c in ALL_CODES))
+        tk.Entry(
+            tab, textvariable=self._filter_dir_var,
+            bg=BG_WIDGET, fg=FG, insertbackground=FG,
+            font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
+            highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
+        ).grid(row=row, column=1, sticky="ew", padx=15, pady=(10, 0))
+
+        row += 1
+        tk.Label(
+            tab, text="Hide size range", font=("Menlo", 11, "bold"),
+            fg=FG, bg=BG,
+        ).grid(row=row, column=0, sticky="w", padx=15, pady=(10, 0))
+        self._range_dir_var = tk.StringVar()
+        tk.Entry(
+            tab, textvariable=self._range_dir_var,
+            bg=BG_WIDGET, fg=FG, insertbackground=FG,
+            font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
+            highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
+        ).grid(row=row, column=1, sticky="ew", padx=15, pady=(10, 0))
+
+    def _build_vhost_tab(self):
+        tab = self._tab_vhost
+        self._target_vhost = _TargetSection(tab, 0, mode="domains")
+
+        self._wl_vhost = _WordlistSection(tab, 2)
+
+        tk.Label(
+            tab, text="Threads", font=("Menlo", 11, "bold"),
+            fg=FG, bg=BG,
+        ).grid(row=3, column=0, sticky="w", padx=15, pady=(10, 0))
+        self._thread_vhost_var = tk.StringVar(value="20")
+        tk.Entry(
+            tab, textvariable=self._thread_vhost_var, width=6,
+            bg=BG_WIDGET, fg=FG, insertbackground=FG,
+            font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
+            highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
+        ).grid(row=3, column=1, sticky="w", padx=15, pady=(10, 0))
+
+        tk.Label(
+            tab, text="Show codes", font=("Menlo", 11, "bold"),
+            fg=FG, bg=BG,
+        ).grid(row=4, column=0, sticky="w", padx=15, pady=(10, 0))
+        self._filter_vhost_var = tk.StringVar(value=",".join(str(c) for c in ALL_CODES))
+        tk.Entry(
+            tab, textvariable=self._filter_vhost_var,
+            bg=BG_WIDGET, fg=FG, insertbackground=FG,
+            font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
+            highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
+        ).grid(row=4, column=1, sticky="ew", padx=15, pady=(10, 0))
+
+        tk.Label(
+            tab, text="Hide size range", font=("Menlo", 11, "bold"),
+            fg=FG, bg=BG,
+        ).grid(row=5, column=0, sticky="w", padx=15, pady=(10, 0))
+        self._range_vhost_var = tk.StringVar()
+        tk.Entry(
+            tab, textvariable=self._range_vhost_var,
+            bg=BG_WIDGET, fg=FG, insertbackground=FG,
+            font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
+            highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
+        ).grid(row=5, column=1, sticky="ew", padx=15, pady=(10, 0))
+
+    def _build_dns_tab(self):
+        tab = self._tab_dns
+        self._target_dns = _TargetSection(tab, 0, mode="domains")
+
+        self._wl_dns = _WordlistSection(tab, 2)
+
+        tk.Label(
+            tab, text="Threads", font=("Menlo", 11, "bold"),
+            fg=FG, bg=BG,
+        ).grid(row=3, column=0, sticky="w", padx=15, pady=(10, 0))
+        self._thread_dns_var = tk.StringVar(value="20")
+        tk.Entry(
+            tab, textvariable=self._thread_dns_var, width=6,
+            bg=BG_WIDGET, fg=FG, insertbackground=FG,
+            font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
+            highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
+        ).grid(row=3, column=1, sticky="w", padx=15, pady=(10, 0))
+
+        tk.Label(
+            tab, text="Show codes", font=("Menlo", 11, "bold"),
+            fg=FG, bg=BG,
+        ).grid(row=4, column=0, sticky="w", padx=15, pady=(10, 0))
+        self._filter_dns_var = tk.StringVar(value=",".join(str(c) for c in ALL_CODES))
+        tk.Entry(
+            tab, textvariable=self._filter_dns_var,
+            bg=BG_WIDGET, fg=FG, insertbackground=FG,
+            font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
+            highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
+        ).grid(row=4, column=1, sticky="ew", padx=15, pady=(10, 0))
+
+        tk.Label(
+            tab, text="Hide size range", font=("Menlo", 11, "bold"),
+            fg=FG, bg=BG,
+        ).grid(row=5, column=0, sticky="w", padx=15, pady=(10, 0))
+        self._range_dns_var = tk.StringVar()
+        tk.Entry(
+            tab, textvariable=self._range_dns_var,
+            bg=BG_WIDGET, fg=FG, insertbackground=FG,
+            font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
+            highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
+        ).grid(row=5, column=1, sticky="ew", padx=15, pady=(10, 0))
 
     def _build_output_section(self):
         tk.Label(
             self, text="Output", font=("Menlo", 11, "bold"),
             fg=FG, bg=BG,
-        ).grid(row=6, column=0, sticky="nw", padx=15, pady=(10, 5))
+        ).grid(row=1, column=0, sticky="nw", padx=15, pady=(10, 5))
 
         frame = tk.Frame(self, bg=BG_WIDGET)
-        frame.grid(row=6, column=0, columnspan=2, sticky="nsew", padx=15, pady=(0, 5))
+        frame.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=15, pady=(0, 5))
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
 
@@ -241,54 +396,96 @@ class FuzzDialog(tk.Toplevel):
         self._output_text.tag_configure("error", foreground=ERR_COLOR)
         self._output_text.tag_configure("info", foreground=INFO_COLOR)
 
-    def _build_buttons(self):
-        btn_frame = tk.Frame(self, bg=BG)
-        btn_frame.grid(row=7, column=0, columnspan=2, sticky="ew", padx=15, pady=(10, 15))
+        self.rowconfigure(1, weight=1)
 
-        self._close_btn = tk.Label(
+    def _build_buttons(self):
+        row = 2
+        self._progress_var = tk.IntVar(value=0)
+        self._progress_bar = ttk.Progressbar(
+            self, variable=self._progress_var, maximum=100,
+        )
+        self._progress_bar.grid(row=row, column=0, columnspan=2, sticky="ew", padx=15, pady=(5, 2))
+
+        row = 3
+        self._progress_label = tk.Label(
+            self, text="Ready", font=("Menlo", 9),
+            fg=FG_DIM, bg=BG, anchor="w",
+        )
+        self._progress_label.grid(row=row, column=0, columnspan=2, sticky="ew", padx=15)
+
+        row = 4
+        btn_frame = tk.Frame(self, bg=BG)
+        btn_frame.grid(row=row, column=0, columnspan=2, sticky="ew", padx=15, pady=(10, 15))
+
+        close_btn = tk.Label(
             btn_frame, text="  Close  ", bg="#222222", fg=FG,
             font=("Menlo", 10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="hand2",
         )
-        self._close_btn.pack(side=tk.RIGHT, padx=(5, 0))
-        self._close_btn.bind("<Button-1>", lambda e: self._on_close())
-        self._close_btn.bind("<Enter>", lambda e: self._close_btn.config(bg="#333333"))
-        self._close_btn.bind("<Leave>", lambda e: self._close_btn.config(bg="#222222"))
+        close_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        close_btn.bind("<Button-1>", lambda e: self._on_close())
+        close_btn.bind("<Enter>", lambda e: close_btn.config(bg="#333333"))
+        close_btn.bind("<Leave>", lambda e: close_btn.config(bg="#222222"))
+        self._close_btn = close_btn
 
-        self._stop_btn = tk.Label(
+        self._save_dir_btn = tk.Label(
+            btn_frame, text="  Save  ", bg="#222222", fg=FG,
+            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6, cursor="hand2",
+        )
+        self._save_dir_btn.bind("<Button-1>", lambda e: self._save_dir_results())
+        self._save_dir_btn.bind("<Enter>", lambda e: self._save_dir_btn.config(bg="#333333"))
+        self._save_dir_btn.bind("<Leave>", lambda e: self._save_dir_btn.config(bg="#222222"))
+
+        self._save_vhost_btn = tk.Label(
+            btn_frame, text="  Save  ", bg="#222222", fg=FG,
+            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6, cursor="hand2",
+        )
+        self._save_vhost_btn.bind("<Button-1>", lambda e: self._save_vhost_results())
+        self._save_vhost_btn.bind("<Enter>", lambda e: self._save_vhost_btn.config(bg="#333333"))
+        self._save_vhost_btn.bind("<Leave>", lambda e: self._save_vhost_btn.config(bg="#222222"))
+
+        self._save_dns_btn = tk.Label(
+            btn_frame, text="  Save  ", bg="#222222", fg=FG,
+            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6, cursor="hand2",
+        )
+        self._save_dns_btn.bind("<Button-1>", lambda e: self._save_dns_results())
+        self._save_dns_btn.bind("<Enter>", lambda e: self._save_dns_btn.config(bg="#333333"))
+        self._save_dns_btn.bind("<Leave>", lambda e: self._save_dns_btn.config(bg="#222222"))
+
+        self._save_buttons = [self._save_dir_btn, self._save_vhost_btn, self._save_dns_btn]
+
+        clear_btn = tk.Label(
+            btn_frame, text="  Clear  ", bg="#222222", fg=FG,
+            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6, cursor="hand2",
+        )
+        clear_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        clear_btn.bind("<Button-1>", lambda e: self._clear())
+        clear_btn.bind("<Enter>", lambda e: clear_btn.config(bg="#333333"))
+        clear_btn.bind("<Leave>", lambda e: clear_btn.config(bg="#222222"))
+
+        stop_btn = tk.Label(
             btn_frame, text="  Stop  ", bg="#222222", fg=FG,
             font=("Menlo", 10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="hand2",
         )
-        self._stop_btn.pack(side=tk.RIGHT, padx=(5, 0))
-        self._stop_btn.bind("<Button-1>", lambda e: self._stop())
-        self._stop_btn.bind("<Enter>", lambda e: self._stop_btn.config(bg="#333333"))
-        self._stop_btn.bind("<Leave>", lambda e: self._stop_btn.config(bg="#222222"))
+        stop_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        stop_btn.bind("<Button-1>", lambda e: self._stop())
+        stop_btn.bind("<Enter>", lambda e: stop_btn.config(bg="#333333"))
+        stop_btn.bind("<Leave>", lambda e: stop_btn.config(bg="#222222"))
 
-        self._start_btn = tk.Label(
+        start_btn = tk.Label(
             btn_frame, text="  Start  ", bg="#222222", fg=FG,
             font=("Menlo", 10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="hand2",
         )
-        self._start_btn.pack(side=tk.RIGHT, padx=(5, 0))
-        self._start_btn.bind("<Button-1>", lambda e: self._start())
-        self._start_btn.bind("<Enter>", lambda e: self._start_btn.config(bg="#333333"))
-        self._start_btn.bind("<Leave>", lambda e: self._start_btn.config(bg="#222222"))
-
-        self._target_listbox.bind("<Return>", lambda e: self._start())
-        self._wordlist_listbox.bind("<Return>", lambda e: self._start())
-
-    def _selected_target(self):
-        sel = self._target_listbox.curselection()
-        if not sel:
-            return None
-        return self._target_keys[sel[0]]
-
-    def _selected_wordlist(self):
-        sel = self._wordlist_listbox.curselection()
-        if not sel:
-            return None
-        return self._wordlist_files[sel[0]]
+        start_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        start_btn.bind("<Button-1>", lambda e: self._start())
+        start_btn.bind("<Enter>", lambda e: start_btn.config(bg="#333333"))
+        start_btn.bind("<Leave>", lambda e: start_btn.config(bg="#222222"))
 
     def _write_output(self, text, color=None):
         self.after(0, lambda: self._do_write(text, color))
@@ -307,40 +504,78 @@ class FuzzDialog(tk.Toplevel):
         self._output_text.configure(state=tk.DISABLED)
 
     def _start(self):
-        target = self._selected_target()
-        wordlist = self._selected_wordlist()
-        if not target or not wordlist:
-            return
+        tab = self._notebook.index(self._notebook.select())
 
-        target_type, target_val, target_label, target_ip = target
-        method = self._method_var.get()
-        wordlist_name = os.path.basename(wordlist)
-        try:
-            workers = int(self._thread_var.get())
-        except ValueError:
-            workers = 20
+        if tab == 0:
+            target = self._target_dir.selected()
+            wordlist = self._wl_dir.selected()
+            if not target or not wordlist:
+                return
+            target_type, target_val, target_label, target_ip = target
+            try:
+                workers = int(self._thread_dir_var.get())
+            except ValueError:
+                workers = 20
+            url_template = self._url_var.get()
+            self._dir_url_template = url_template
+            self._dir_results = []
+            show_codes = self._parse_codes(self._filter_dir_var.get()) or None
+            hide_size = self._parse_range(self._range_dir_var.get())
 
-        self._write_output(f"\n[*] Starting fuzz: target={target_label} method={method} wordlist={wordlist_name} threads={workers}\n", "info")
-
-        if method == "directory":
-            fuzz_target = target_val if target_type == "machine" and target_ip else target_val
+            self._write_output(f"\n[*] Starting directory fuzz: url={url_template} wordlist={os.path.basename(wordlist)} threads={workers} codes={show_codes}\n", "info")
             self._engine = FuzzEngine(
-                target=fuzz_target, wordlist_path=wordlist, method="directory",
-                target_ip=None, on_result=self._write_output, workers=workers,
-                on_progress=self._on_progress,
+                target=target_val, wordlist_path=wordlist, method="directory",
+                url_template=url_template, on_result=self._write_output,
+                workers=workers, on_progress=self._on_progress,
+                on_found=self._on_found, show_codes=show_codes,
+                hide_size_range=hide_size,
             )
-        elif method == "vhost":
+        elif tab == 1:
+            target = self._target_vhost.selected()
+            wordlist = self._wl_vhost.selected()
+            if not target or not wordlist:
+                return
+            target_type, target_val, target_label, target_ip = target
+            try:
+                workers = int(self._thread_vhost_var.get())
+            except ValueError:
+                workers = 20
+
             ip = target_ip if target_type == "machine" and target_ip else target_val
+            self._vhost_results = []
+            show_codes = self._parse_codes(self._filter_vhost_var.get()) or None
+            hide_size = self._parse_range(self._range_vhost_var.get())
+
+            self._write_output(f"\n[*] Starting vhost fuzz: target={target_label} wordlist={os.path.basename(wordlist)} threads={workers} codes={show_codes}\n", "info")
             self._engine = FuzzEngine(
                 target=target_val, wordlist_path=wordlist, method="vhost",
                 target_ip=ip, on_result=self._write_output, workers=workers,
                 on_progress=self._on_progress,
+                on_found=self._on_found, show_codes=show_codes,
+                hide_size_range=hide_size,
             )
         else:
+            target = self._target_dns.selected()
+            wordlist = self._wl_dns.selected()
+            if not target or not wordlist:
+                return
+            target_type, target_val, target_label, target_ip = target
+            try:
+                workers = int(self._thread_dns_var.get())
+            except ValueError:
+                workers = 20
+
+            self._dns_results = []
+            show_codes = self._parse_codes(self._filter_dns_var.get()) or None
+            hide_size = self._parse_range(self._range_dns_var.get())
+
+            self._write_output(f"\n[*] Starting dns fuzz: target={target_label} wordlist={os.path.basename(wordlist)} threads={workers} codes={show_codes}\n", "info")
             self._engine = FuzzEngine(
                 target=target_val, wordlist_path=wordlist, method="dns",
-                target_ip=None, on_result=self._write_output, workers=workers,
+                on_result=self._write_output, workers=workers,
                 on_progress=self._on_progress,
+                on_found=self._on_found, show_codes=show_codes,
+                hide_size_range=hide_size,
             )
         self._engine.start()
 
@@ -349,10 +584,124 @@ class FuzzDialog(tk.Toplevel):
             self._engine.stop()
 
     def _on_progress(self, done, total, found):
+        if not self.winfo_exists():
+            return
         self.after(0, lambda: self._progress_var.set(int(done * 100 / max(total, 1))))
         self.after(0, lambda: self._progress_label.config(
-            text=f" {done}/{total}  found: {found}"
+            text=f"  {done}/{total}  found: {found}"
         ))
+
+    def _on_found(self, word, display):
+        tab = self._notebook.index(self._notebook.select())
+        if tab == 0:
+            if self._dir_url_template:
+                full_url = self._dir_url_template.replace("FUZZ", word)
+                self._dir_results.append((display, full_url))
+        elif tab == 1:
+            target = self._target_vhost.selected()
+            if target:
+                self._vhost_results.append((word, target))
+        else:
+            target = self._target_dns.selected()
+            if target:
+                self._dns_results.append((word, target))
+
+    def _on_tab_changed(self, event):
+        for btn in self._save_buttons:
+            btn.pack_forget()
+        tab = self._notebook.index(self._notebook.select())
+        self._save_buttons[tab].pack(side=tk.LEFT, padx=(0, 5))
+
+    def _save_dir_results(self):
+        if not self._dir_results:
+            return
+        self._write_output(f"\n[*] Saving {len(self._dir_results)} directory results...\n", "info")
+        for display, full_url in self._dir_results:
+            parsed = urlparse(full_url)
+            host = parsed.hostname
+            path = parsed.path or "/"
+            if not host:
+                self._write_output(f"  [!] Cannot parse URL: {full_url}\n", "error")
+                continue
+
+            if re.match(r"^\d+\.\d+\.\d+\.\d+$", host):
+                machine = store.get(host)
+                if not machine:
+                    machine = store.add_or_update(ip=host, method="manual")
+                    machine.device_type = "device unknown"
+                    machine_db.save_machine_info(machine)
+                machine_db.save_directory(machine.id, path)
+                self._write_output(f"  [+] {path} → machine #{machine.id} ({host})\n", "success")
+            else:
+                if not domain_db.exists(host):
+                    try:
+                        info = socket.getaddrinfo(host, None, socket.AF_INET, socket.SOCK_STREAM)
+                        ip = info[0][4][0] if info else None
+                    except Exception:
+                        ip = None
+                    if ip:
+                        machine = store.get(ip)
+                        if not machine:
+                            machine = store.add_or_update(ip=ip, method="manual")
+                            machine.device_type = "device unknown"
+                            machine_db.save_machine_info(machine)
+                        domain_db.init_or_update(host, machine.id, machine.ip, "fuzz")
+                        machine_db.save_domain(machine.id, host, "fuzz")
+                domain_db.save_directory(host, path)
+                self._write_output(f"  [+] {path} → domain {host}\n", "success")
+        self._write_output("[*] Done.\n", "info")
+
+    def _save_vhost_results(self):
+        if not self._vhost_results:
+            return
+        self._write_output(f"\n[*] Saving {len(self._vhost_results)} vhost results...\n", "info")
+        for word, target in self._vhost_results:
+            target_type, target_val, target_label, target_ip = target
+            subdomain = f"{word}.{target_val}"
+            domain_db.save_subdomain(target_val, subdomain, "vhost")
+            self._write_output(f"  [+] {subdomain} → domain {target_val}\n", "success")
+        self._write_output("[*] Done.\n", "info")
+
+    def _save_dns_results(self):
+        if not self._dns_results:
+            return
+        self._write_output(f"\n[*] Saving {len(self._dns_results)} dns results...\n", "info")
+        for word, target in self._dns_results:
+            target_type, target_val, target_label, target_ip = target
+            subdomain = f"{word}.{target_val}"
+            domain_db.save_subdomain(target_val, subdomain, "dns")
+            self._write_output(f"  [+] {subdomain} → domain {target_val}\n", "success")
+        self._write_output("[*] Done.\n", "info")
+
+    def _clear(self):
+        self._output_text.configure(state=tk.NORMAL)
+        self._output_text.delete("1.0", tk.END)
+        self._output_text.configure(state=tk.DISABLED)
+        self._progress_var.set(0)
+        self._progress_label.config(text="Ready")
+
+    @staticmethod
+    def _parse_codes(text):
+        codes = set()
+        for part in text.split(","):
+            part = part.strip()
+            if part.isdigit():
+                codes.add(int(part))
+        return codes
+
+    @staticmethod
+    def _parse_range(text):
+        text = text.strip()
+        if not text:
+            return None
+        if "-" in text:
+            parts = text.split("-", 1)
+            if parts[0].isdigit() and parts[1].isdigit():
+                return (int(parts[0]), int(parts[1]))
+        if text.isdigit():
+            n = int(text)
+            return (n, n)
+        return None
 
     def _on_close(self):
         self._stop()

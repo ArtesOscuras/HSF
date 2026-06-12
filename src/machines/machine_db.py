@@ -82,6 +82,78 @@ def save_tcp_ports(machine_id, ports):
         pass
 
 
+def save_tcp_port(machine_id, port):
+    _init_db_dir()
+    path = _get_path(machine_id)
+    now = datetime.now().isoformat()
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS tcp_ports (
+                    port INTEGER,
+                    service TEXT,
+                    discovered_at TEXT
+                )
+            """)
+            existing = conn.execute(
+                "SELECT 1 FROM tcp_ports WHERE port = ?", (port,)
+            ).fetchone()
+            if not existing:
+                conn.execute(
+                    "INSERT INTO tcp_ports VALUES (?, ?, ?)",
+                    (port, "", now),
+                )
+                return True
+    except (PermissionError, OSError, sqlite3.OperationalError):
+        pass
+    return False
+
+
+def save_directory(machine_id, path):
+    _init_db_dir()
+    path_file = _get_path(machine_id)
+    now = datetime.now().isoformat()
+    try:
+        with sqlite3.connect(path_file) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS directories (
+                    path TEXT,
+                    discovered_at TEXT
+                )
+            """)
+            existing = conn.execute(
+                "SELECT 1 FROM directories WHERE path = ?", (path,)
+            ).fetchone()
+            if not existing:
+                conn.execute(
+                    "INSERT INTO directories VALUES (?, ?)",
+                    (path, now),
+                )
+    except (PermissionError, OSError, sqlite3.OperationalError):
+        pass
+
+
+def load_directories(machine_id):
+    _init_db_dir()
+    path = _get_path(machine_id)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS directories (
+                    path TEXT,
+                    discovered_at TEXT
+                )
+            """)
+            rows = conn.execute(
+                "SELECT path, discovered_at FROM directories ORDER BY discovered_at"
+            ).fetchall()
+            return [(r[0], r[1]) for r in rows]
+    except (sqlite3.DatabaseError, sqlite3.OperationalError):
+        return []
+
+
 def load_tcp_ports(machine_id):
     _init_db_dir()
     path = _get_path(machine_id)

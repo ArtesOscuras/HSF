@@ -24,3 +24,6 @@ Thumbs.db
 # Databases
 databases/
 wfuzz/
+
+chrome_profile/
+evidence/
