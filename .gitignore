@@ -27,3 +27,4 @@ wfuzz/
 
 chrome_profile/
 evidence/
+credentials.dbs

@@ -127,7 +127,7 @@ class App(tk.Tk):
         self.console.register_command("delete-credentials", self._cmd_delete_creds, "Delete all credentials")
         self.console.register_command("ping", self._cmd_ping, "Ping a machine by IP or ID")
         self.console.register_command("nslookup", self._cmd_nslookup, "DNS lookup for a domain, IP or machine ID")
-        self.console.register_command("domain", self._cmd_domain, "Add a domain to the inventory")
+        self.console.register_command("add-domain", self._cmd_domain, "Add a domain to the inventory")
         self.console.register_command("fuzz", self._cmd_fuzz, "Open fuzz configuration dialog")
         self.console.register_command("webrecorder", self._cmd_recorder, "Record browser session for a domain")
         self.console.register_command("delete-evidence", self._cmd_delete_evidence, "Delete all evidence data")
@@ -1106,7 +1106,7 @@ class App(tk.Tk):
 
     def _cmd_domain(self, args):
         if not args:
-            self.console.body("Usage: domain <name>")
+            self.console.body("Usage: add-domain <name>")
             return
         domain = args[0].strip()
         threading.Thread(target=self._run_domain, args=(domain,), daemon=True).start()

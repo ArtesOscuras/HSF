@@ -1,9 +1,62 @@
+import struct
 import tkinter as tk
 from .base import BaseView
 from src.machines import credential_db
 
 BRIGHT = "#ffffff"
 INFO = "#5ba3ec"
+MUTED = "#888888"
+
+
+def _ntlm_hash(password):
+    if not password:
+        return ""
+    data = password.encode("utf-16-le")
+
+    def _left_rotate(x, n):
+        return ((x << n) | (x >> (32 - n))) & 0xFFFFFFFF
+
+    def _md4(msg):
+        A = 0x67452301
+        B = 0xEFCDAB89
+        C = 0x98BADCFE
+        D = 0x10325476
+
+        padded = msg + b"\x80"
+        while (len(padded) % 64) != 56:
+            padded += b"\x00"
+        padded += struct.pack("<Q", len(msg) * 8)
+
+        for i in range(0, len(padded), 64):
+            X = list(struct.unpack("<16I", padded[i:i+64]))
+            AA, BB, CC, DD = A, B, C, D
+
+            for rnd, (order, shifts, constant, func) in enumerate([
+                ([0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15],
+                 [3,7,11,19,3,7,11,19,3,7,11,19,3,7,11,19],
+                 0, lambda b,c,d: (b & c) | ((~b) & d)),
+                ([0,4,8,12,1,5,9,13,2,6,10,14,3,7,11,15],
+                 [3,5,9,13,3,5,9,13,3,5,9,13,3,5,9,13],
+                 0x5A827999, lambda b,c,d: (b & c) | (b & d) | (c & d)),
+                ([0,8,4,12,2,10,6,14,1,9,5,13,3,11,7,15],
+                 [3,9,11,15,3,9,11,15,3,9,11,15,3,9,11,15],
+                 0x6ED9EBA1, lambda b,c,d: b ^ c ^ d),
+            ]):
+                for j in range(16):
+                    k = order[j]
+                    s = shifts[j]
+                    F = func(B, C, D)
+                    a_new = _left_rotate((A + F + X[k] + constant) & 0xFFFFFFFF, s)
+                    A, B, C, D = D, a_new, B, C
+
+            A = (A + AA) & 0xFFFFFFFF
+            B = (B + BB) & 0xFFFFFFFF
+            C = (C + CC) & 0xFFFFFFFF
+            D = (D + DD) & 0xFFFFFFFF
+
+        return struct.pack("<4I", A, B, C, D).hex()
+
+    return _md4(data)
 
 
 class UserPassView(BaseView):
@@ -181,22 +234,14 @@ class UserPassView(BaseView):
             self._last_pwds = lines
 
     def _open_generator(self):
-        dialog = _CredentialGenerator(self)
-        if dialog.result:
-            credential_db.save_credential(
-                dialog.result["user"],
-                dialog.result["password"],
-                dialog.result.get("domain", ""),
-                dialog.result.get("hash_nt", ""),
-            )
-            if self._on_cred_created:
-                self._on_cred_created(dialog.result["user"], dialog.result["password"])
+        _CredentialGenerator(self, on_created=self._on_cred_created)
 
 
 class _CredentialGenerator(tk.Toplevel):
-    def __init__(self, parent):
+    def __init__(self, parent, on_created=None):
         super().__init__(parent)
         self.result = None
+        self._on_created = on_created
 
         self.title("Generate Credentials")
         self.geometry("600x500")
@@ -271,6 +316,14 @@ class _CredentialGenerator(tk.Toplevel):
             font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).pack(fill=tk.X)
+        self._auto_hash_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            hash_frame, text="  Auto NTLM",
+            variable=self._auto_hash_var,
+            bg="#111111", fg=MUTED, selectcolor="#111111",
+            font=("Menlo", 10),
+            activebackground="#111111", activeforeground=MUTED,
+        ).pack(anchor="w", pady=(5, 0))
 
         self._feedback_label = tk.Label(
             self, text="", font=("Menlo", 11),
@@ -337,7 +390,10 @@ class _CredentialGenerator(tk.Toplevel):
     def _on_pwd_select(self, event):
         idx = self._pwd_listbox.curselection()
         if idx:
-            self._sel_pwd = self._pwd_listbox.get(idx[0]).strip()
+            pwd = self._pwd_listbox.get(idx[0]).strip()
+            self._sel_pwd = pwd
+            if self._auto_hash_var.get():
+                self._hash_var.set(_ntlm_hash(pwd))
 
     def _on_dialog_click(self, event):
         w = event.widget
@@ -363,9 +419,10 @@ class _CredentialGenerator(tk.Toplevel):
         self.result = {
             "user": self._sel_user,
             "password": pwd,
-            "domain": self._domain_var.get().strip(),
-            "hash_nt": hnt,
         }
+
+        if self._on_created:
+            self._on_created(self._sel_user, pwd)
 
         self._feedback_label.config(text="Done.")
         self.after(1500, lambda: self._feedback_label.config(text=""))
