@@ -1,2 +1,2 @@
-from .recorder import Recorder
 from .browsers import find_browsers, BrowserSelector
+from .recorder import Recorder

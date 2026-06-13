@@ -10,3 +10,4 @@ from .credential_detail import CredentialDetailView
 from .user_pass import UserPassView
 from .hash_list import HashListView
 from .hash_detail import HashDetailView
+from .tools import ToolsView

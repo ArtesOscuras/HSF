@@ -9,7 +9,7 @@ import time
 import urllib.request
 from urllib.parse import urlparse
 
-from src.identifier import _dbg
+from src.tools.scanner.identifier import _dbg
 from src.machines import store
 from src.machines import machine_db
 from src.machines import domain_db
@@ -18,7 +18,7 @@ from .cdp import CDPClient
 from .evidence import save_session_meta, update_session_count, save_request, target_dir
 
 DEBUG_PORT = 9222
-USER_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "chrome_profile")
+USER_DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "..", "chrome_profile")
 USER_DATA_DIR = os.path.abspath(USER_DATA_DIR)
 
 
@@ -53,6 +53,25 @@ class Recorder:
         if len(url) > 80:
             return url[:80] + "..."
         return url
+
+    @staticmethod
+    def _should_fetch_body(method):
+        return method in ("POST", "PUT", "PATCH")
+
+    def _try_fetch_post_data(self, r, rid, stage):
+        if not self._should_fetch_body(r.get("method", "")):
+            return
+        if r.get("postData"):
+            return
+        try:
+            result = self._cdp.call("Network.getRequestPostData", {"requestId": rid})
+            if result and result.get("postData"):
+                r["postData"] = result.get("postData", "")
+                _dbg(f"[webrecorder] postData fetched [{stage}] rid={rid} method={r['method']} len={len(r['postData'])}")
+            else:
+                _dbg(f"[webrecorder] postData empty [{stage}] rid={rid} method={r['method']} url={r.get('url','')[:80]}")
+        except Exception as e:
+            _dbg(f"[webrecorder] postData error [{stage}] rid={rid}: {e}")
 
     def _run(self):
         url = self._target if "://" in self._target else f"http://{self._target}"
@@ -93,7 +112,8 @@ class Recorder:
 
             cdp_commands = [
                 ("Network.enable", {"maxTotalBufferSize": 100000000,
-                                     "maxResourceBufferSize": 50000000}),
+                                     "maxResourceBufferSize": 50000000,
+                                     "maxPostDataSize": 65536}),
                 ("Network.setCacheDisabled", {"cacheDisabled": True}),
                 ("Page.enable", {}),
                 ("Security.enable", {}),
@@ -115,23 +135,15 @@ class Recorder:
                     redirect = params.get("redirectResponse")
                     if redirect:
                         redirect_url = redirect.get("url", "")
+                        redirect_status = redirect.get("status", 302)
                         for rid, r in list(requests.items()):
                             if r["url"] == redirect_url:
-                                r["status"] = redirect.get("status", 302)
+                                r["status"] = redirect_status
+                                r["redirectStatus"] = redirect_status
                                 r["respHeaders"] = dict(redirect.get("headers", {}))
                                 r["mimeType"] = redirect.get("mimeType", "")
                                 set_cookie = r["respHeaders"].get("set-cookie") or r["respHeaders"].get("Set-Cookie") or ""
                                 r["respCookies"] = self._parse_cookies(set_cookie)
-
-                                if r["method"] in ("POST", "PUT", "PATCH") and not r["postData"]:
-                                    try:
-                                        result = self._cdp.call("Network.getRequestPostData",
-                                                                {"requestId": rid})
-                                        if result:
-                                            r["postData"] = result.get("postData", "")
-                                        _dbg(f"[webrecorder] redirect postData fetch: rid={rid} method={r['method']} result={'found' if result else 'none'} postData_len={len(r['postData'])}")
-                                    except Exception as e:
-                                        _dbg(f"[webrecorder] redirect postData error: {e}")
 
                                 index += 1
                                 save_request(tdir, index,
@@ -148,6 +160,7 @@ class Recorder:
                                 del requests[rid]
                                 update_session_count(tdir, index)
                                 self._save_url_to_inventory(r["url"])
+                                _dbg(f"[webrecorder] redirect saved [{r['method']}] {r['url'][:80]} status={r['status']} postData_len={len(r.get('postData',''))}")
                                 break
 
                     req = params.get("request", {})
@@ -155,13 +168,14 @@ class Recorder:
                         "url": req.get("url", ""),
                         "method": req.get("method", "GET"),
                         "headers": dict(req.get("headers", {})),
-                        "postData": params.get("postData", ""),
+                        "postData": req.get("postData", ""),
                         "cookies": [],
                         "timing": params.get("wallTime", 0),
                         "respHeaders": {},
                         "respCookies": [],
                         "status": 0,
                         "mimeType": "",
+                        "redirectStatus": 0,
                     }
                     self._save_url_to_inventory(requests[req_id]["url"])
 
@@ -204,28 +218,23 @@ class Recorder:
                 elif method == "Network.loadingFinished":
                     if req_id in requests:
                         r = requests[req_id]
-                        try:
-                            result = self._cdp.call("Network.getResponseBody",
-                                                    {"requestId": req_id})
-                            if result:
-                                body_raw = result.get("body", "")
-                                if result.get("base64Encoded"):
-                                    body = base64.b64decode(body_raw)
-                                else:
-                                    body = body_raw.encode(errors="replace")
-                            else:
-                                body = b""
-                        except Exception:
-                            body = b""
-
-                        if r["method"] in ("POST", "PUT", "PATCH") and not r["postData"]:
+                        redirect_status = r.get("redirectStatus", 0)
+                        body = b""
+                        if redirect_status not in (301, 302, 303, 307, 308):
                             try:
-                                result = self._cdp.call("Network.getRequestPostData",
+                                result = self._cdp.call("Network.getResponseBody",
                                                         {"requestId": req_id})
                                 if result:
-                                    r["postData"] = result.get("postData", "")
+                                    body_raw = result.get("body", "")
+                                    if result.get("base64Encoded"):
+                                        body = base64.b64decode(body_raw)
+                                    else:
+                                        body = body_raw.encode(errors="replace")
                             except Exception:
                                 pass
+
+                        if self._should_fetch_body(r["method"]) and not r["postData"]:
+                            self._try_fetch_post_data(r, req_id, "loadingFinished")
 
                         index += 1
                         save_request(tdir, index,

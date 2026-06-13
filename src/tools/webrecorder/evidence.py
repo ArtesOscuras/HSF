@@ -60,6 +60,6 @@ def sanitize_name(target):
 
 
 def target_dir(target):
-    base = os.path.join(os.path.dirname(__file__), "..", "..", "evidence")
+    base = os.path.join(os.path.dirname(__file__), "..", "..", "..", "evidence")
     base = os.path.abspath(base)
     return os.path.join(base, sanitize_name(target))

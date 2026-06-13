@@ -78,7 +78,7 @@ class PassiveMDNSScanner:
                 continue
             txt = txts.get(instance_name, {})
 
-            from src.scanner.mdns_cache import add_service
+            from src.tools.scanner.mdns_cache import add_service
             add_service(ip, service_type + ".", hostname=target_host, txt=txt)
             self.on_host(ip=ip, hostname=target_host, method="mDNS-Passive")
 

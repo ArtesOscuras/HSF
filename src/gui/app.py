@@ -12,15 +12,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import netifaces
 from .console import Console
 from .visualizer import Visualizer
-from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UserPassView, HashListView
+from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UserPassView, HashListView, ToolsView
 from .dialogs import InterfaceSelector
 from src.machines import store, start_autosave as start_machines_autosave
 from src.machines import machine_db
 from src.machines import domain_db
 import src.machines
-from src.scanner import PassiveMDNSScanner, ActiveScanner
-from src.scanner.mdns_cache import load as load_mdns_cache, save as save_mdns_cache, start_autosave, wipe as wipe_mdns_cache
-from src.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _probe_smb_info, _probe_ssh_banner, _parse_ssh_banner, _probe_ttl, _run_whatweb, _probe_web_internal, _identify_linux_distro, _extract_domains_from_whatweb, _dbg
+from src.tools.scanner import PassiveMDNSScanner, ActiveScanner
+from src.tools.scanner.mdns_cache import load as load_mdns_cache, save as save_mdns_cache, start_autosave, wipe as wipe_mdns_cache
+from src.tools.scanner.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _probe_smb_info, _probe_ssh_banner, _parse_ssh_banner, _probe_ttl, _run_whatweb, _probe_web_internal, _identify_linux_distro, _extract_domains_from_whatweb, _dbg
 
 
 class App(tk.Tk):
@@ -57,7 +57,7 @@ class App(tk.Tk):
         self._bannergrab_running = False
 
         self._register_views()
-        self.visualizer.activate_view("machines")
+        self.visualizer.activate_view("tools")
         self._register_commands()
 
         load_mdns_cache()
@@ -107,10 +107,15 @@ class App(tk.Tk):
         hash_view._on_hash_click = self._open_hash_view
         self.visualizer.register_view("hashes", hash_view)
 
+        tools_view = ToolsView(self.visualizer)
+        tools_view._on_tool_click = self._on_tool_click
+        self.visualizer.register_view("tools", tools_view)
+
         self.console.add_help_section("Views", [
             ("view list", "List available views"),
             ("view machines", "Machine list"),
             ("view domains", "Discovered domains list"),
+            ("view tools", "Available tools"),
             ("view evidences", "Evidence sessions list"),
             ("view credentials", "Stored credentials"),
             ("view machine <id|ip>", "View machine details"),
@@ -254,6 +259,16 @@ class App(tk.Tk):
             self.visualizer.register_view(view_name, detail_view)
         self.visualizer.activate_view(view_name)
 
+    def _on_tool_click(self, action):
+        if action == "scanner":
+            self._scan_active()
+            if self._active_scanner and self._active_scanner.is_running:
+                self.visualizer.activate_view("machines")
+        elif action == "fuzzer":
+            self._cmd_fuzz([])
+        elif action == "webrecorder":
+            self._cmd_recorder([])
+
     def _open_domain_view(self, domain):
         self._cmd_view_domain([domain])
 
@@ -379,7 +394,7 @@ class App(tk.Tk):
         gateway = get_gateway_ip()
         result = identify_device(ip, gateway_ip=gateway, hostname="")
         ttl = _probe_ttl(ip)
-        from src.scanner.mdns_cache import get_services
+        from src.tools.scanner.mdns_cache import get_services
         mds = get_services(ip)
         has_evidence = result != "device unknown" or ttl is not None or bool(mds)
         _dbg(f"[scan-ip] result={result} ttl={ttl} mds={sorted(mds.keys()) if mds else []} evidence={has_evidence}")
@@ -1146,7 +1161,7 @@ class App(tk.Tk):
 
     def _cmd_recorder(self, args):
         if not args:
-            from src.webrecorder import find_browsers
+            from src.tools.webrecorder import find_browsers
             from .dialogs.recorder_dialog import WebRecorderDialog
             browsers = find_browsers()
             if not browsers:
@@ -1185,7 +1200,7 @@ class App(tk.Tk):
         threading.Thread(target=self._run_recorder, args=(target,), daemon=True).start()
 
     def _run_recorder_dialog(self, config):
-        from src.webrecorder import Recorder
+        from src.tools.webrecorder import Recorder
 
         name = config["name"]
         target = config["target"]
@@ -1209,8 +1224,8 @@ class App(tk.Tk):
         self._recorder.start()
 
     def _run_recorder(self, target):
-        from src.webrecorder import find_browsers, BrowserSelector, Recorder
-        from src.webrecorder import evidence
+        from src.tools.webrecorder import find_browsers, BrowserSelector, Recorder
+        from src.tools.webrecorder import evidence
 
         browsers = find_browsers()
         if not browsers:
@@ -1251,7 +1266,7 @@ class App(tk.Tk):
 
     def _cmd_delete_evidence(self, args):
         import shutil
-        from src.webrecorder.evidence import target_dir
+        from src.tools.webrecorder.evidence import target_dir
         evidence_dir = target_dir(".")
         evidence_dir = os.path.dirname(evidence_dir)
         if os.path.isdir(evidence_dir):

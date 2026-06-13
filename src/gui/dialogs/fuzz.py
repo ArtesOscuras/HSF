@@ -5,8 +5,8 @@ import tkinter as tk
 from tkinter import ttk
 from urllib.parse import urlparse
 
-from src.fuzz import FuzzEngine
-from src.fuzz.engine import ALL_CODES
+from src.tools.fuzz import FuzzEngine
+from src.tools.fuzz.engine import ALL_CODES
 from src.machines import store
 from src.machines import machine_db
 from src.machines import domain_db

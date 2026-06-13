@@ -84,6 +84,7 @@ class CredentialListView(BaseView):
 
         nav_frame = tk.Frame(header, bg="#000000")
         nav_frame.pack(pady=(0, 10))
+        self._nav_btn("Tools", "tools", nav_frame, False)
         self._nav_btn("Machines", "machines", nav_frame, False)
         self._nav_btn("Domains", "domains", nav_frame, False)
         self._nav_btn("Evidences", "evidences", nav_frame, False)

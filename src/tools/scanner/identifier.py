@@ -125,7 +125,7 @@ def _probe_port(ip, port):
 
 
 def _probe_mdns_service(ip, service_name):
-    from src.scanner.mdns_cache import has_service, add_service as cache_add
+    from src.tools.scanner.mdns_cache import has_service, add_service as cache_add
 
     cached = has_service(ip, service_name)
     if cached:
@@ -327,7 +327,7 @@ class ProbeContext:
 
     def mdns_txt(self, service_name):
         if service_name not in self._mdns_txt_records:
-            from src.scanner.mdns_cache import get_txt
+            from src.tools.scanner.mdns_cache import get_txt
             txt = get_txt(self.ip, service_name)
             if txt:
                 self._mdns_txt_records[service_name] = txt
@@ -339,7 +339,7 @@ class ProbeContext:
         import socket
         import threading as _th
         from zeroconf import Zeroconf, ServiceBrowser
-        from src.scanner.mdns_cache import add_service, decode_properties
+        from src.tools.scanner.mdns_cache import add_service, decode_properties
 
         zc = Zeroconf()
         result = {}
@@ -373,7 +373,7 @@ class ProbeContext:
         return result
 
     def mdns_all_services(self):
-        from src.scanner.mdns_cache import get_services
+        from src.tools.scanner.mdns_cache import get_services
         return get_services(self.ip)
 
     def warmup(self):
@@ -414,7 +414,7 @@ class ProbeContext:
         _dbg(f"  ttl={self._ttl}")
         _dbg(f"  cached mDNS services={found_services}")
         _dbg(f"  open ports={open_ports}")
-        from src.scanner.mdns_cache import get_services as _gs
+        from src.tools.scanner.mdns_cache import get_services as _gs
         all_gs = _gs(self.ip)
         _dbg(f"  global cache services={sorted(all_gs.keys())}")
         for svc_name, svc_info in all_gs.items():
@@ -643,7 +643,7 @@ def _resolve_model_via_mdns(ip, service_name, model_keys):
     import socket
     import threading as _th
     from zeroconf import Zeroconf, ServiceBrowser
-    from src.scanner.mdns_cache import add_service, decode_properties
+    from src.tools.scanner.mdns_cache import add_service, decode_properties
 
     zc = Zeroconf()
     result = {}
@@ -682,7 +682,7 @@ def _resolve_model_via_mdns(ip, service_name, model_keys):
 
 
 def extract_model_for_ip(ip, resolve=False):
-    from src.scanner.mdns_cache import get_services
+    from src.tools.scanner.mdns_cache import get_services
     for service_name, info in get_services(ip).items():
         model = info.get("txt", {}).get("model", "").strip()
         if model:
