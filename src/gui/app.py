@@ -19,7 +19,7 @@ from src.machines import machine_db
 from src.machines import domain_db
 import src.machines
 from src.tools.scanner import PassiveMDNSScanner, ActiveScanner
-from src.tools.scanner.mdns_cache import load as load_mdns_cache, save as save_mdns_cache, start_autosave, wipe as wipe_mdns_cache
+from src.tools.scanner.mdns_cache import load as load_mdns_cache, save as save_mdns_cache, start_autosave, clear as clear_mdns_cache, wipe as wipe_mdns_cache
 from src.tools.scanner.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _probe_smb_info, _probe_ssh_banner, _parse_ssh_banner, _probe_ttl, _run_whatweb, _probe_web_internal, _identify_linux_distro, _extract_domains_from_whatweb, _dbg
 
 
@@ -65,9 +65,16 @@ class App(tk.Tk):
         store.load()
         start_machines_autosave(store)
 
-        self.after(500, self._start_passive_scanner)
+        self.after(500, self._run_init_checks)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _run_init_checks(self):
+        from .dialogs.init_dialog import InitDialog
+        dialog = InitDialog(self)
+        self.wait_window(dialog)
+        if self._passive_scanner is None or not self._passive_scanner.is_running:
+            self._start_passive_scanner()
 
     def _set_initial_sash(self):
         self.update_idletasks()
@@ -136,6 +143,7 @@ class App(tk.Tk):
         self.console.register_command("fuzz", self._cmd_fuzz, "Open fuzz configuration dialog")
         self.console.register_command("webrecorder", self._cmd_recorder, "Record browser session for a domain")
         self.console.register_command("delete-evidence", self._cmd_delete_evidence, "Delete all evidence data")
+        self.console.register_command("init", self._cmd_init, "Re-run initialization checks")
         self.console.register_command("exit", self._cmd_exit, "Close the application")
 
         self.console.set_system_handler(self._run_system)
@@ -967,6 +975,9 @@ class App(tk.Tk):
         finally:
             self._identifying_ips.discard(machine.ip)
 
+    def _cmd_init(self, args):
+        self._run_init_checks()
+
     def _cmd_exit(self, args):
         self.destroy()
 
@@ -1278,11 +1289,12 @@ class App(tk.Tk):
 
     def _cmd_delete_dbs(self, args):
         store.clear()
-        wipe_mdns_cache()
+        clear_mdns_cache()
         machine_db.delete_all()
         domain_db.delete_all()
         from src.machines.credential_db import delete_all as del_creds
         del_creds()
+        wipe_mdns_cache()
         self.console.info("All data cleared (mDNS cache + machine list + database files)")
 
     def _on_close(self):

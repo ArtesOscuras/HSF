@@ -7,7 +7,7 @@ import threading
 _cache = {}
 _save_lock = threading.Lock()
 
-_proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 _DB_DIR = os.path.join(_proj_root, "databases")
 _CACHE_FILE = os.path.join(_DB_DIR, "mdns_cache.json")
 _MAX_AGE = 24 * 3600

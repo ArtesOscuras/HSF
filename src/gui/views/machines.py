@@ -162,6 +162,8 @@ class NetworkView(BaseView):
         dt = (machine.device_type or "device unknown").lower()
         if dt == "device unknown":
             return _icon_cache.get("question")
+        if dt == "gateway":
+            return _icon_cache.get("router") or _icon_cache.get("question")
         for name in sorted(_icon_cache, key=lambda n: -len(n)):
             if name in dt or dt in name:
                 return _icon_cache[name]

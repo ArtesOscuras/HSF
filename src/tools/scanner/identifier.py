@@ -8,7 +8,7 @@ from scapy.all import IP, ICMP, TCP, UDP, DNS, DNSQR, sr1, RandShort
 
 
 # --- debug logging -----------------------------------------------------------
-_proj_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 _DBG_FILE = os.path.join(_proj_root, "databases", "debugging_logs")
 _DBG_LOCK = __import__("threading").Lock()
 

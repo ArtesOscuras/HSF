@@ -104,22 +104,23 @@ class MachineStore:
                 columns = [r[1] for r in cur.fetchall()]
                 if columns and "id" not in columns:
                     conn.execute("DROP TABLE machines")
-                conn.execute("""
-                    CREATE TABLE IF NOT EXISTS machines (
-                        id INTEGER PRIMARY KEY,
-                        ip TEXT UNIQUE,
-                        hostname TEXT,
-                        mac TEXT,
-                        device_type TEXT,
-                        model TEXT,
-                        os TEXT,
-                        domain TEXT,
-                        methods TEXT,
-                        first_seen TEXT,
-                        last_seen TEXT
-                    )
-                """)
-                for m in self._machines.values():
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS machines (
+                    id INTEGER PRIMARY KEY,
+                    ip TEXT UNIQUE,
+                    hostname TEXT,
+                    mac TEXT,
+                    device_type TEXT,
+                    model TEXT,
+                    os TEXT,
+                    domain TEXT,
+                    methods TEXT,
+                    first_seen TEXT,
+                    last_seen TEXT
+                )
+            """)
+            conn.execute("DELETE FROM machines")
+            for m in self._machines.values():
                     conn.execute(
                         """INSERT OR REPLACE INTO machines
                            (id, ip, hostname, mac, device_type, model, os, domain, methods, first_seen, last_seen)
