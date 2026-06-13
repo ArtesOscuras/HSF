@@ -100,7 +100,7 @@ class InterfaceSelector(tk.Toplevel):
             bd=1,
             padx=15,
             pady=6,
-            cursor="hand2",
+            cursor="",
         )
         cancel_btn.pack(side=tk.RIGHT, padx=(5, 0))
         cancel_btn.bind("<Button-1>", lambda e: self._cancel())
@@ -117,7 +117,7 @@ class InterfaceSelector(tk.Toplevel):
             bd=1,
             padx=15,
             pady=6,
-            cursor="hand2",
+            cursor="",
         )
         select_btn.pack(side=tk.RIGHT)
         select_btn.bind("<Button-1>", lambda e: self._select())

@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import netifaces
 from .console import Console
 from .visualizer import Visualizer
-from .views import NetworkView, DomainListView, EvidenceListView
+from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UserPassView, HashListView
 from .dialogs import InterfaceSelector
 from src.machines import store, start_autosave as start_machines_autosave
 from src.machines import machine_db
@@ -44,7 +44,7 @@ class App(tk.Tk):
         self.console = Console(self._pane)
         self._pane.add(self.console, stretch="always")
 
-        self.after(100, self._set_initial_sash)
+        self.after(300, self._set_initial_sash)
 
         self._passive_scanner = None
         self._active_scanner = None
@@ -70,6 +70,7 @@ class App(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _set_initial_sash(self):
+        self.update_idletasks()
         h = self.winfo_height()
         if h > 100:
             self._pane.sash_place(0, 0, h * 2 // 3)
@@ -92,11 +93,26 @@ class App(tk.Tk):
         evidence_view._on_item_click = self._open_evidence_view
         self.visualizer.register_view("evidences", evidence_view)
 
+        cred_view = CredentialListView(self.visualizer)
+        cred_view._on_cred_click = self._open_credential_view
+        self.visualizer.register_view("credentials", cred_view)
+
+        user_pass_view = UserPassView(self.visualizer)
+        def _log_cred(user, pwd):
+            self.console.info(f"credentials {user} / {pwd} created")
+        user_pass_view._on_cred_created = _log_cred
+        self.visualizer.register_view("user-pass", user_pass_view)
+
+        hash_view = HashListView(self.visualizer)
+        hash_view._on_hash_click = self._open_hash_view
+        self.visualizer.register_view("hashes", hash_view)
+
         self.console.add_help_section("Views", [
             ("view list", "List available views"),
             ("view machines", "Machine list"),
             ("view domains", "Discovered domains list"),
             ("view evidences", "Evidence sessions list"),
+            ("view credentials", "Stored credentials"),
             ("view machine <id|ip>", "View machine details"),
             ("view <name>", "Switch to a view"),
         ])
@@ -108,6 +124,7 @@ class App(tk.Tk):
         self.console.register_command("whatweb", self._cmd_whatweb, "Web technology scan on a port")
         self.console.register_command("bannergrab", self._cmd_bannergrab, "Grab service banner from a port")
         self.console.register_command("delete-dbs", self._cmd_delete_dbs, "Wipe all stored data")
+        self.console.register_command("delete-credentials", self._cmd_delete_creds, "Delete all credentials")
         self.console.register_command("ping", self._cmd_ping, "Ping a machine by IP or ID")
         self.console.register_command("nslookup", self._cmd_nslookup, "DNS lookup for a domain, IP or machine ID")
         self.console.register_command("domain", self._cmd_domain, "Add a domain to the inventory")
@@ -216,6 +233,24 @@ class App(tk.Tk):
             from .views import EvidenceDetailView
             detail_view = EvidenceDetailView(self.visualizer, name)
             detail_view._on_back_click = lambda: self.visualizer.activate_view("evidences")
+            self.visualizer.register_view(view_name, detail_view)
+        self.visualizer.activate_view(view_name)
+
+    def _open_credential_view(self, cred_id):
+        view_name = f"credential_{cred_id}"
+        if view_name not in self.visualizer.get_view_names():
+            from .views import CredentialDetailView
+            detail_view = CredentialDetailView(self.visualizer, cred_id)
+            detail_view._on_back_click = lambda: self.visualizer.activate_view("credentials")
+            self.visualizer.register_view(view_name, detail_view)
+        self.visualizer.activate_view(view_name)
+
+    def _open_hash_view(self, hash_id):
+        view_name = f"hash_{hash_id}"
+        if view_name not in self.visualizer.get_view_names():
+            from .views import HashDetailView
+            detail_view = HashDetailView(self.visualizer, hash_id)
+            detail_view._on_back_click = lambda: self.visualizer.activate_view("hashes")
             self.visualizer.register_view(view_name, detail_view)
         self.visualizer.activate_view(view_name)
 
@@ -1209,6 +1244,11 @@ class App(tk.Tk):
         self._recorder = Recorder(target, browser_path, on_log=on_log)
         self._recorder.start()
 
+    def _cmd_delete_creds(self, args):
+        from src.machines.credential_db import delete_all
+        delete_all()
+        self.console.info("All credentials data cleared")
+
     def _cmd_delete_evidence(self, args):
         import shutil
         from src.webrecorder.evidence import target_dir
@@ -1226,6 +1266,8 @@ class App(tk.Tk):
         wipe_mdns_cache()
         machine_db.delete_all()
         domain_db.delete_all()
+        from src.machines.credential_db import delete_all as del_creds
+        del_creds()
         self.console.info("All data cleared (mDNS cache + machine list + database files)")
 
     def _on_close(self):

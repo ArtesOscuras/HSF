@@ -101,7 +101,7 @@ class BrowserSelector(tk.Toplevel):
         cancel_btn = tk.Label(
             btn_frame, text="  Cancel  ", bg="#222222", fg="#ffffff",
             font=("Menlo", 10), relief=tk.RAISED, bd=1,
-            padx=15, pady=6, cursor="hand2",
+            padx=15, pady=6, cursor="",
         )
         cancel_btn.pack(side=tk.RIGHT, padx=(5, 0))
         cancel_btn.bind("<Button-1>", lambda e: self.destroy())
@@ -111,7 +111,7 @@ class BrowserSelector(tk.Toplevel):
         select_btn = tk.Label(
             btn_frame, text="  Select  ", bg="#222222", fg="#ffffff",
             font=("Menlo", 10), relief=tk.RAISED, bd=1,
-            padx=15, pady=6, cursor="hand2",
+            padx=15, pady=6, cursor="",
         )
         select_btn.pack(side=tk.RIGHT)
         select_btn.bind("<Button-1>", lambda e: self._select())

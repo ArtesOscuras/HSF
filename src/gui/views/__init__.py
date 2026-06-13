@@ -5,3 +5,8 @@ from .domain_list import DomainListView
 from .domain_detail import DomainDetailView
 from .evidence_list import EvidenceListView
 from .evidence_detail import EvidenceDetailView
+from .credential_list import CredentialListView
+from .credential_detail import CredentialDetailView
+from .user_pass import UserPassView
+from .hash_list import HashListView
+from .hash_detail import HashDetailView

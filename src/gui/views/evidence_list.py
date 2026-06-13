@@ -91,10 +91,11 @@ class EvidenceListView(BaseView):
             font=("Menlo", 11, "bold") if active else ("Menlo", 11),
             fg="#ffffff" if active else "#888888",
             bg="#000000",
-            cursor="hand2",
         )
         btn.pack(side=tk.LEFT, padx=5)
         btn.bind("<Button-1>", lambda e: self.master.activate_view(view_name))
+        btn.bind("<Enter>", lambda e: btn.config(font=("Menlo", 11, "bold", "underline") if active else ("Menlo", 11, "underline")))
+        btn.bind("<Leave>", lambda e: btn.config(font=("Menlo", 11, "bold") if active else ("Menlo", 11)))
 
     def _build_ui(self):
         _load_icon()
@@ -112,6 +113,7 @@ class EvidenceListView(BaseView):
         self._nav_btn("Machines", "machines", nav_frame, False)
         self._nav_btn("Domains", "domains", nav_frame, False)
         self._nav_btn("Evidences", "evidences", nav_frame, True)
+        self._nav_btn("Credentials", "credentials", nav_frame, False)
 
         tk.Label(
             header,
@@ -135,6 +137,7 @@ class EvidenceListView(BaseView):
             highlightthickness=0,
             pady=10,
             state=tk.DISABLED,
+            cursor="",
             wrap=tk.NONE,
             spacing1=8,
             spacing3=8,
@@ -155,13 +158,9 @@ class EvidenceListView(BaseView):
         self._poll_id = None
 
     def on_activate(self):
-        self.text.bind("<Button-1>", self._on_line_click)
-        self.text.bind("<Motion>", self._on_mouse_move)
         self.after(100, self._poll)
 
     def on_deactivate(self):
-        self.text.unbind("<Button-1>")
-        self.text.unbind("<Motion>")
         if self._poll_id:
             self.after_cancel(self._poll_id)
             self._poll_id = None
@@ -181,7 +180,13 @@ class EvidenceListView(BaseView):
             self.text.insert(tk.END, "?")
         self.text.insert(tk.END, "\t", "bright")
 
-        self.text.insert(tk.END, name[:50] + "\u2026" if len(name) > 50 else name, "bright")
+        tag = f"e_{name}"
+        self.text.tag_configure(tag, underline=False)
+        self.text.insert(tk.END, name[:50] + "\u2026" if len(name) > 50 else name, ("bright", tag))
+        self.text.tag_bind(tag, "<Button-1>", lambda e, n=name: (
+            self._on_item_click and self._on_item_click(n)))
+        self.text.tag_bind(tag, "<Enter>", lambda e, t=tag: self.text.tag_configure(t, underline=True))
+        self.text.tag_bind(tag, "<Leave>", lambda e, t=tag: self.text.tag_configure(t, underline=False))
         self.text.insert(tk.END, "\t", "bright")
 
         self.text.insert(tk.END, req_text, "muted")
@@ -192,22 +197,10 @@ class EvidenceListView(BaseView):
             self.text.image_create(tk.END, image=del_img)
             del_tag = f"del_{name}"
             self.text.tag_add(del_tag, "end-2c", "end-1c")
-            self.text.tag_bind(del_tag, "<Button-1>", lambda e, n=name: self._delete_evidence(n))
+            self.text.tag_bind(del_tag, "<Button-1>", lambda e, n=name: (
+                self._delete_evidence(n), "break")[-1])
 
         self.text.insert(tk.END, "\n", "muted")
-
-    def _on_line_click(self, event):
-        index = self.text.index(f"@{event.x},{event.y}")
-        line = int(index.split(".")[0]) - 1
-        if self._on_item_click and 0 <= line < len(self._items):
-            self._on_item_click(self._items[line]["name"])
-        return "break"
-
-    def _on_mouse_move(self, event):
-        index = self.text.index(f"@{event.x},{event.y}")
-        line = int(index.split(".")[0]) - 1
-        cursor = "hand2" if 0 <= line < len(self._items) else ""
-        self.text.configure(cursor=cursor)
 
     @staticmethod
     def _delete_evidence(name):
@@ -259,6 +252,8 @@ class EvidenceListView(BaseView):
 
         self.text.configure(tabs=tabs)
 
+        scroll_pos = self.text.yview()[0]
+
         self.text.configure(state=tk.NORMAL)
         self.text.delete("1.0", tk.END)
 
@@ -270,6 +265,7 @@ class EvidenceListView(BaseView):
             for item in items:
                 self._insert_line(item, center_pad)
 
+        self.text.yview_moveto(scroll_pos)
         self.text.configure(state=tk.DISABLED)
 
         self._poll_id = self.after(2000, self._poll)

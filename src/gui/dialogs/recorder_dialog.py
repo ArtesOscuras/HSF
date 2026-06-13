@@ -228,7 +228,7 @@ class WebRecorderDialog(tk.Toplevel):
         cancel_btn = tk.Label(
             btn_frame, text="  Cancel  ", bg="#222222", fg=FG,
             font=("Menlo", 10), relief=tk.RAISED, bd=1,
-            padx=15, pady=6, cursor="hand2",
+            padx=15, pady=6, cursor="",
         )
         cancel_btn.pack(side=tk.RIGHT, padx=(5, 0))
         cancel_btn.bind("<Button-1>", lambda e: self.destroy())
@@ -238,7 +238,7 @@ class WebRecorderDialog(tk.Toplevel):
         start_btn = tk.Label(
             btn_frame, text="  Start  ", bg="#222222", fg=FG,
             font=("Menlo", 10), relief=tk.RAISED, bd=1,
-            padx=15, pady=6, cursor="hand2",
+            padx=15, pady=6, cursor="",
         )
         start_btn.pack(side=tk.RIGHT)
         start_btn.bind("<Button-1>", lambda e: self._start())

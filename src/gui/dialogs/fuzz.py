@@ -420,7 +420,7 @@ class FuzzDialog(tk.Toplevel):
         close_btn = tk.Label(
             btn_frame, text="  Close  ", bg="#222222", fg=FG,
             font=("Menlo", 10), relief=tk.RAISED, bd=1,
-            padx=15, pady=6, cursor="hand2",
+            padx=15, pady=6, cursor="",
         )
         close_btn.pack(side=tk.RIGHT, padx=(5, 0))
         close_btn.bind("<Button-1>", lambda e: self._on_close())
@@ -431,7 +431,7 @@ class FuzzDialog(tk.Toplevel):
         self._save_dir_btn = tk.Label(
             btn_frame, text="  Save  ", bg="#222222", fg=FG,
             font=("Menlo", 10), relief=tk.RAISED, bd=1,
-            padx=15, pady=6, cursor="hand2",
+            padx=15, pady=6, cursor="",
         )
         self._save_dir_btn.bind("<Button-1>", lambda e: self._save_dir_results())
         self._save_dir_btn.bind("<Enter>", lambda e: self._save_dir_btn.config(bg="#333333"))
@@ -440,7 +440,7 @@ class FuzzDialog(tk.Toplevel):
         self._save_vhost_btn = tk.Label(
             btn_frame, text="  Save  ", bg="#222222", fg=FG,
             font=("Menlo", 10), relief=tk.RAISED, bd=1,
-            padx=15, pady=6, cursor="hand2",
+            padx=15, pady=6, cursor="",
         )
         self._save_vhost_btn.bind("<Button-1>", lambda e: self._save_vhost_results())
         self._save_vhost_btn.bind("<Enter>", lambda e: self._save_vhost_btn.config(bg="#333333"))
@@ -449,7 +449,7 @@ class FuzzDialog(tk.Toplevel):
         self._save_dns_btn = tk.Label(
             btn_frame, text="  Save  ", bg="#222222", fg=FG,
             font=("Menlo", 10), relief=tk.RAISED, bd=1,
-            padx=15, pady=6, cursor="hand2",
+            padx=15, pady=6, cursor="",
         )
         self._save_dns_btn.bind("<Button-1>", lambda e: self._save_dns_results())
         self._save_dns_btn.bind("<Enter>", lambda e: self._save_dns_btn.config(bg="#333333"))
@@ -460,7 +460,7 @@ class FuzzDialog(tk.Toplevel):
         clear_btn = tk.Label(
             btn_frame, text="  Clear  ", bg="#222222", fg=FG,
             font=("Menlo", 10), relief=tk.RAISED, bd=1,
-            padx=15, pady=6, cursor="hand2",
+            padx=15, pady=6, cursor="",
         )
         clear_btn.pack(side=tk.RIGHT, padx=(5, 0))
         clear_btn.bind("<Button-1>", lambda e: self._clear())
@@ -470,7 +470,7 @@ class FuzzDialog(tk.Toplevel):
         stop_btn = tk.Label(
             btn_frame, text="  Stop  ", bg="#222222", fg=FG,
             font=("Menlo", 10), relief=tk.RAISED, bd=1,
-            padx=15, pady=6, cursor="hand2",
+            padx=15, pady=6, cursor="",
         )
         stop_btn.pack(side=tk.RIGHT, padx=(5, 0))
         stop_btn.bind("<Button-1>", lambda e: self._stop())
@@ -480,7 +480,7 @@ class FuzzDialog(tk.Toplevel):
         start_btn = tk.Label(
             btn_frame, text="  Start  ", bg="#222222", fg=FG,
             font=("Menlo", 10), relief=tk.RAISED, bd=1,
-            padx=15, pady=6, cursor="hand2",
+            padx=15, pady=6, cursor="",
         )
         start_btn.pack(side=tk.RIGHT, padx=(5, 0))
         start_btn.bind("<Button-1>", lambda e: self._start())

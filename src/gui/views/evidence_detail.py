@@ -68,10 +68,11 @@ class EvidenceDetailView(BaseView):
             header, text="",
             font=("Menlo", 22, "bold"),
             fg="#ffffff", bg="#000000",
-            cursor="hand2",
         )
         self._title_label.pack(anchor="center")
         self._title_label.bind("<Button-1>", self._on_title_click)
+        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=("Menlo", 22, "bold", "underline")))
+        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=("Menlo", 22, "bold")))
         self._on_back_click = None
 
         text_frame = tk.Frame(self, bg="#000000")
@@ -83,7 +84,7 @@ class EvidenceDetailView(BaseView):
             text_frame,
             bg="#000000", fg=BRIGHT,
             font=("Menlo", 13), borderwidth=0, highlightthickness=0,
-            state=tk.DISABLED, wrap=tk.WORD,
+            state=tk.DISABLED, cursor="", wrap=tk.WORD,
         )
         self.text.grid(row=0, column=0, sticky="nsew")
 

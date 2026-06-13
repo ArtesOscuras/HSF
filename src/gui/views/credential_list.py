@@ -3,7 +3,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from PIL import Image, ImageTk
 from .base import BaseView
-from src.machines import domain_db
+from src.machines import credential_db
 
 MUTED = "#888888"
 BRIGHT = "#ffffff"
@@ -13,13 +13,14 @@ ICON_SIZE = 50
 COL_GAP = "   "
 
 _icon = None
+_delete_img = None
 
 
 def _load_icon():
     global _icon
     if _icon is not None:
         return _icon
-    path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "icons", "domain.png")
+    path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "icons", "credential.png")
     path = os.path.abspath(path)
     if os.path.isfile(path):
         try:
@@ -31,9 +32,6 @@ def _load_icon():
     else:
         _icon = False
     return _icon
-
-
-_delete_img = None
 
 
 def _load_delete_img():
@@ -54,11 +52,11 @@ def _load_delete_img():
     return _delete_img
 
 
-class DomainListView(BaseView):
-    name = "domains"
-    description = "Discovered domains"
+class CredentialListView(BaseView):
+    name = "credentials"
+    description = "Stored credentials"
 
-    MIN_DOMAIN = 10
+    MIN_NAME = 10
 
     def _nav_btn(self, text, view_name, parent, active):
         btn = tk.Label(
@@ -77,25 +75,23 @@ class DomainListView(BaseView):
         _load_delete_img()
 
         self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=0)
         self.rowconfigure(1, weight=1)
+        self.rowconfigure(2, weight=0)
 
         header = tk.Frame(self, bg="#000000")
         header.grid(row=0, column=0, sticky="ew", pady=(15, 5))
 
         nav_frame = tk.Frame(header, bg="#000000")
         nav_frame.pack(pady=(0, 10))
-
         self._nav_btn("Machines", "machines", nav_frame, False)
-        self._nav_btn("Domains", "domains", nav_frame, True)
+        self._nav_btn("Domains", "domains", nav_frame, False)
         self._nav_btn("Evidences", "evidences", nav_frame, False)
-        self._nav_btn("Credentials", "credentials", nav_frame, False)
+        self._nav_btn("Credentials", "credentials", nav_frame, True)
 
         tk.Label(
-            header,
-            text="Domains",
-            font=("Menlo", 22, "bold"),
-            fg="#ffffff",
-            bg="#000000",
+            header, text="Credentials",
+            font=("Menlo", 22, "bold"), fg="#ffffff", bg="#000000",
         ).pack(anchor="center")
 
         text_frame = tk.Frame(self, bg="#000000")
@@ -105,17 +101,10 @@ class DomainListView(BaseView):
 
         self.text = tk.Text(
             text_frame,
-            bg="#000000",
-            fg=BRIGHT,
-            font=("Menlo", 16),
-            borderwidth=0,
-            highlightthickness=0,
-            pady=10,
-            state=tk.DISABLED,
-            cursor="",
-            wrap=tk.NONE,
-            spacing1=8,
-            spacing3=8,
+            bg="#000000", fg=BRIGHT,
+            font=("Menlo", 16), borderwidth=0, highlightthickness=0,
+            pady=10, state=tk.DISABLED, cursor="",
+            wrap=tk.NONE, spacing1=8, spacing3=8,
         )
         self.text.grid(row=0, column=0, sticky="nsew")
 
@@ -129,6 +118,31 @@ class DomainListView(BaseView):
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.text.configure(yscrollcommand=scrollbar.set)
 
+        btn_frame = tk.Frame(self, bg="#000000")
+        btn_frame.grid(row=2, column=0, pady=(15, 15))
+
+        usr_btn = tk.Label(
+            btn_frame, text="  Users / Passwords  ", bg="#222222", fg=BRIGHT,
+            font=("Menlo", 12), relief=tk.RAISED, bd=1,
+            padx=15, pady=6,
+        )
+        usr_btn.pack(side=tk.LEFT, padx=(0, 10))
+
+        hash_btn = tk.Label(
+            btn_frame, text="  Hashes  ", bg="#222222", fg=BRIGHT,
+            font=("Menlo", 12), relief=tk.RAISED, bd=1,
+            padx=15, pady=6,
+        )
+        hash_btn.pack(side=tk.LEFT)
+
+        usr_btn.bind("<Button-1>", lambda e: self.master.activate_view("user-pass"))
+        usr_btn.bind("<Enter>", lambda e: usr_btn.config(bg="#333333"))
+        usr_btn.bind("<Leave>", lambda e: usr_btn.config(bg="#222222"))
+        hash_btn.bind("<Button-1>", lambda e: self.master.activate_view("hashes"))
+        hash_btn.bind("<Enter>", lambda e: hash_btn.config(bg="#333333"))
+        hash_btn.bind("<Leave>", lambda e: hash_btn.config(bg="#222222"))
+
+        self._last_hash = None
         self._poll_id = None
 
     def on_activate(self):
@@ -138,12 +152,11 @@ class DomainListView(BaseView):
         if self._poll_id:
             self.after_cancel(self._poll_id)
             self._poll_id = None
-        self._domains = []
+        self._items = []
 
-    def _insert_line(self, domain, info, center_pad):
-        first = info.get("first_seen", "") if info else ""
-        if first and "T" in first:
-            first = first[:19].replace("T", " ")
+    def _insert_line(self, item, w_name, w_pass, center_pad):
+        user = item.get("username", "") or ""
+        pwd = item.get("password", "") or item.get("hash_nt", "") or ""
 
         self.text.insert(tk.END, center_pad, "bright")
 
@@ -154,41 +167,45 @@ class DomainListView(BaseView):
             self.text.insert(tk.END, "?")
         self.text.insert(tk.END, "\t", "bright")
 
-        tag = f"d_{domain}"
+        tag = f"cred_{item['id']}"
         self.text.tag_configure(tag, underline=False)
-        self.text.insert(tk.END, domain[:50] + "\u2026" if len(domain) > 50 else domain, ("bright", tag))
-        self.text.tag_bind(tag, "<Button-1>", lambda e, d=domain: (
-            self._on_domain_click and self._on_domain_click(d)))
+        self.text.insert(tk.END, user[:40] + "\u2026" if len(user) > 40 else user, ("bright", tag))
+        self.text.tag_bind(tag, "<Button-1>", lambda e, cid=item["id"]: (
+            self._on_cred_click and self._on_cred_click(cid)))
         self.text.tag_bind(tag, "<Enter>", lambda e, t=tag: self.text.tag_configure(t, underline=True))
         self.text.tag_bind(tag, "<Leave>", lambda e, t=tag: self.text.tag_configure(t, underline=False))
         self.text.insert(tk.END, "\t", "bright")
 
-        self.text.insert(tk.END, f"{first}", "muted")
+        self.text.insert(tk.END, pwd[:16] + "\u2026" if len(pwd) > 16 else pwd, "muted")
         self.text.insert(tk.END, "\t", "bright")
 
         del_img = _load_delete_img()
         if del_img:
             self.text.image_create(tk.END, image=del_img)
-            del_tag = f"del_{domain}"
+            del_tag = f"delc_{item['id']}"
             self.text.tag_add(del_tag, "end-2c", "end-1c")
-            self.text.tag_bind(del_tag, "<Button-1>", lambda e, d=domain: (
-                self._delete_domain(d), "break")[-1])
+            self.text.tag_bind(del_tag, "<Button-1>", lambda e, cid=item["id"]: (
+                credential_db.delete_credential(cid), "break")[-1])
 
-        self.text.insert(tk.END, "\n", "muted")
-
-    def _delete_domain(self, domain):
-        domain_db.delete_domain(domain)
+        self.text.insert(tk.END, "\n", "bright")
 
     def _poll(self):
-        domains = domain_db.list_all()
-        domains.sort()
-        self._domains = domains
+        items = credential_db.load_credentials()
+        self._items = items
 
-        w_domain = self.MIN_DOMAIN
-        for d in domains:
-            w_domain = max(w_domain, len(d))
+        current_hash = hash(tuple((i["id"], i.get("username", ""), i.get("password", ""), i.get("hash_nt", "")) for i in items))
+        if current_hash == self._last_hash and self.text.index("end-1c") != "1.0":
+            self._poll_id = self.after(2000, self._poll)
+            return
+        self._last_hash = current_hash
 
-        w_date = 19
+        w_name = self.MIN_NAME
+        w_pass = 8
+        for item in items:
+            user = item.get("username", "") or ""
+            w_name = max(w_name, len(user))
+            pwd = item.get("password", "") or item.get("hash_nt", "") or ""
+            w_pass = max(w_pass, min(len(pwd), 17))
 
         font = tkfont.Font(font=self.text.cget("font"))
         gap_px = font.measure(COL_GAP)
@@ -197,7 +214,7 @@ class DomainListView(BaseView):
         def col_w(n):
             return font.measure(" " * n)
 
-        row_content_px = ICON_SIZE + gap_px + col_w(w_domain) + gap_px + col_w(w_date) + gap_px + col_w(3)
+        row_content_px = ICON_SIZE + gap_px + col_w(w_name) + gap_px + col_w(w_pass) + char_w + 20
 
         w = self.text.winfo_width()
         if w > row_content_px:
@@ -210,26 +227,23 @@ class DomainListView(BaseView):
         tabs = []
         t = center_px + ICON_SIZE + gap_px
         tabs.append(t)
-        t += col_w(w_domain) + gap_px
+        t += col_w(w_name) + gap_px
         tabs.append(t)
-        t += col_w(w_date) + gap_px
+        t += col_w(w_pass) + char_w
         tabs.append(t)
-
-        self.text.configure(tabs=tabs)
 
         scroll_pos = self.text.yview()[0]
 
-        self.text.configure(state=tk.NORMAL)
+        self.text.configure(state=tk.NORMAL, tabs=tabs)
         self.text.delete("1.0", tk.END)
 
-        if not domains:
+        if not items:
             self.text.insert(tk.END, "\n", "bright")
             self.text.insert(tk.END, center_pad, "bright")
-            self.text.insert(tk.END, "No domains discovered yet.\n", "muted")
+            self.text.insert(tk.END, "No credentials stored yet.\n", "muted")
         else:
-            for d in domains:
-                info = domain_db.load_domain_info(d)
-                self._insert_line(d, info, center_pad)
+            for item in items:
+                self._insert_line(item, w_name, w_pass, center_pad)
 
         self.text.yview_moveto(scroll_pos)
         self.text.configure(state=tk.DISABLED)

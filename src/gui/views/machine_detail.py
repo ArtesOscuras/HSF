@@ -15,7 +15,6 @@ class MachineDetailView(BaseView):
 
     def __init__(self, parent, machine, **kwargs):
         self._machine = machine
-        self._domain_rows = []
         super().__init__(parent, **kwargs)
 
     def _build_ui(self):
@@ -32,10 +31,11 @@ class MachineDetailView(BaseView):
             font=("Menlo", 22, "bold"),
             fg="#ffffff",
             bg="#000000",
-            cursor="hand2",
         )
         self._title_label.pack(anchor="center")
         self._title_label.bind("<Button-1>", self._on_title_click)
+        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=("Menlo", 22, "bold", "underline")))
+        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=("Menlo", 22, "bold")))
         self._on_back_click = None
         self._last_hash = None
 
@@ -52,6 +52,7 @@ class MachineDetailView(BaseView):
             borderwidth=0,
             highlightthickness=0,
             state=tk.DISABLED,
+            cursor="",
             wrap=tk.WORD,
         )
         self.text.grid(row=0, column=0, sticky="nsew")
@@ -69,13 +70,9 @@ class MachineDetailView(BaseView):
         self._poll_id = None
 
     def on_activate(self):
-        self.text.bind("<Button-1>", self._on_line_click)
-        self.text.bind("<Motion>", self._on_mouse_move)
         self._poll()
 
     def on_deactivate(self):
-        self.text.unbind("<Button-1>")
-        self.text.unbind("<Motion>")
         if self._poll_id:
             self.after_cancel(self._poll_id)
             self._poll_id = None
@@ -83,26 +80,6 @@ class MachineDetailView(BaseView):
     def _on_title_click(self, event):
         if self._on_back_click:
             self._on_back_click()
-
-    def _on_line_click(self, event):
-        index = self.text.index(f"@{event.x},{event.y}")
-        line = int(index.split(".")[0])
-        for row, domain in self._domain_rows:
-            if line == row:
-                if self._on_domain_click:
-                    self._on_domain_click(domain)
-                return "break"
-        return "break"
-
-    def _on_mouse_move(self, event):
-        index = self.text.index(f"@{event.x},{event.y}")
-        line = int(index.split(".")[0])
-        cursor = ""
-        for row, _ in self._domain_rows:
-            if line == row:
-                cursor = "hand2"
-                break
-        self.text.configure(cursor=cursor)
 
     def _poll(self):
         self._refresh()
@@ -159,17 +136,18 @@ class MachineDetailView(BaseView):
 
         domains = machine_db.load_domains(m.id)
         if domains:
-            self._domain_rows = []
             self.text.insert(tk.END, f"\nDomains:\n", "info")
             for d, src in domains:
-                row_start = int(self.text.index("end-1c").split(".")[0])
-                self.text.insert(tk.END, f"  {d}", "bright")
+                tag = f"dom_{d}"
+                self.text.tag_configure(tag, underline=False)
+                self.text.insert(tk.END, f"  {d}", ("bright", tag))
+                self.text.tag_bind(tag, "<Button-1>", lambda e, dm=d: (
+                    self._on_domain_click and self._on_domain_click(dm)))
+                self.text.tag_bind(tag, "<Enter>", lambda e, t=tag: self.text.tag_configure(t, underline=True))
+                self.text.tag_bind(tag, "<Leave>", lambda e, t=tag: self.text.tag_configure(t, underline=False))
                 if src:
                     self.text.insert(tk.END, f" ({src})", "muted")
                 self.text.insert(tk.END, "\n")
-                self._domain_rows.append((row_start, d))
-        else:
-            self._domain_rows = []
 
         banners = machine_db.load_banners(m.id)
         if banners:

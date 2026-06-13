@@ -14,8 +14,6 @@ class DomainDetailView(BaseView):
     def __init__(self, parent, domain, **kwargs):
         self._domain = domain
         self._last_hash = None
-        self._subdomain_rows = []
-        self._machine_rows = []
         super().__init__(parent, **kwargs)
 
     def _build_ui(self):
@@ -32,10 +30,11 @@ class DomainDetailView(BaseView):
             font=("Menlo", 22, "bold"),
             fg="#ffffff",
             bg="#000000",
-            cursor="hand2",
         )
         self._title_label.pack(anchor="center")
         self._title_label.bind("<Button-1>", self._on_title_click)
+        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=("Menlo", 22, "bold", "underline")))
+        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=("Menlo", 22, "bold")))
         self._on_back_click = None
 
         text_frame = tk.Frame(self, bg="#000000")
@@ -51,6 +50,7 @@ class DomainDetailView(BaseView):
             borderwidth=0,
             highlightthickness=0,
             state=tk.DISABLED,
+            cursor="",
             wrap=tk.WORD,
         )
         self.text.grid(row=0, column=0, sticky="nsew")
@@ -68,13 +68,9 @@ class DomainDetailView(BaseView):
         self._poll_id = None
 
     def on_activate(self):
-        self.text.bind("<Button-1>", self._on_line_click)
-        self.text.bind("<Motion>", self._on_mouse_move)
         self._poll()
 
     def on_deactivate(self):
-        self.text.unbind("<Button-1>")
-        self.text.unbind("<Motion>")
         if self._poll_id:
             self.after_cancel(self._poll_id)
             self._poll_id = None
@@ -82,36 +78,6 @@ class DomainDetailView(BaseView):
     def _on_title_click(self, event):
         if self._on_back_click:
             self._on_back_click()
-
-    def _on_line_click(self, event):
-        index = self.text.index(f"@{event.x},{event.y}")
-        line = int(index.split(".")[0])
-        for row, sub in self._subdomain_rows:
-            if line == row:
-                if self._on_subdomain_click:
-                    self._on_subdomain_click(sub)
-                return "break"
-        for row, ip in self._machine_rows:
-            if line == row:
-                if self._on_machine_click:
-                    self._on_machine_click(ip)
-                return "break"
-        return "break"
-
-    def _on_mouse_move(self, event):
-        index = self.text.index(f"@{event.x},{event.y}")
-        line = int(index.split(".")[0])
-        cursor = ""
-        for row, _ in self._subdomain_rows:
-            if line == row:
-                cursor = "hand2"
-                break
-        if not cursor:
-            for row, _ in self._machine_rows:
-                if line == row:
-                    cursor = "hand2"
-                    break
-        self.text.configure(cursor=cursor)
 
     def _poll(self):
         self._refresh()
@@ -159,27 +125,34 @@ class DomainDetailView(BaseView):
             self.text.insert(tk.END, f"{value or '-'}\n", "bright")
 
         if subdomains:
-            self._subdomain_rows = []
             self.text.insert(tk.END, f"\nSubdomains ({len(subdomains)}):\n", "info")
             sub_w = max(len(s[0]) for s in subdomains) + 2
             for sub, ts, method in subdomains:
-                row_start = int(self.text.index("end-1c").split(".")[0])
-                self.text.insert(tk.END, f"  {sub:<{sub_w}}", "bright")
+                tag = f"sub_{sub}"
+                self.text.tag_configure(tag, underline=False)
+                self.text.insert(tk.END, f"  {sub:<{sub_w}}", ("bright", tag))
+                self.text.tag_bind(tag, "<Button-1>", lambda e, s=sub: (
+                    self._on_subdomain_click and self._on_subdomain_click(s)))
+                self.text.tag_bind(tag, "<Enter>", lambda e, t=tag: self.text.tag_configure(t, underline=True))
+                self.text.tag_bind(tag, "<Leave>", lambda e, t=tag: self.text.tag_configure(t, underline=False))
                 if method:
                     self.text.insert(tk.END, f" ({method})", "muted")
                 t = ts.replace("T", " ") if "T" in ts else ts
                 self.text.insert(tk.END, f"  {t}\n", "muted")
-                self._subdomain_rows.append((row_start, sub))
         else:
-            self._subdomain_rows = []
             parts = self._domain.split(".")
             if len(parts) > 2:
                 parent = ".".join(parts[1:])
                 if domain_db.exists(parent):
                     self.text.insert(tk.END, f"\nParent domain:\n", "info")
-                    row_start = int(self.text.index("end-1c").split(".")[0])
-                    self.text.insert(tk.END, f"  {parent}\n", "bright")
-                    self._subdomain_rows.append((row_start, parent))
+                    tag = f"sub_{parent}"
+                    self.text.tag_configure(tag, underline=False)
+                    self.text.insert(tk.END, f"  {parent}", ("bright", tag))
+                    self.text.tag_bind(tag, "<Button-1>", lambda e, p=parent: (
+                        self._on_subdomain_click and self._on_subdomain_click(p)))
+                    self.text.tag_bind(tag, "<Enter>", lambda e, t=tag: self.text.tag_configure(t, underline=True))
+                    self.text.tag_bind(tag, "<Leave>", lambda e, t=tag: self.text.tag_configure(t, underline=False))
+                    self.text.insert(tk.END, "\n", "muted")
             else:
                 self.text.insert(tk.END, "\nSubdomains: (none found yet)\n", "muted")
 
@@ -197,17 +170,20 @@ class DomainDetailView(BaseView):
                     self.text.insert(tk.END, f"  {line}\n", "bright")
 
         if machines:
-            self._machine_rows = []
             self.text.insert(tk.END, f"\nMachines ({len(machines)}):\n", "info")
             for m in machines:
-                row_start = int(self.text.index("end-1c").split(".")[0])
-                self.text.insert(tk.END, f"  #{m['machine_id']:<4} {m['machine_ip']}", "bright")
+                ip = m["machine_ip"]
+                tag = f"mch_{ip}"
+                self.text.tag_configure(tag, underline=False)
+                self.text.insert(tk.END, f"  #{m['machine_id']:<4} {ip}", ("bright", tag))
+                self.text.tag_bind(tag, "<Button-1>", lambda e, i=ip: (
+                    self._on_machine_click and self._on_machine_click(i)))
+                self.text.tag_bind(tag, "<Enter>", lambda e, t=tag: self.text.tag_configure(t, underline=True))
+                self.text.tag_bind(tag, "<Leave>", lambda e, t=tag: self.text.tag_configure(t, underline=False))
                 if m.get("source"):
                     self.text.insert(tk.END, f" ({m['source']})", "muted")
                 self.text.insert(tk.END, "\n")
-                self._machine_rows.append((row_start, m["machine_ip"]))
         else:
-            self._machine_rows = []
             self.text.insert(tk.END, "\nMachines: (none)\n", "muted")
 
         self.text.configure(state=tk.DISABLED)
