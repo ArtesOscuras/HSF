@@ -28,3 +28,6 @@ wfuzz/
 chrome_profile/
 evidence/
 credentials/credentials.dbs
+
+# External tools
+Villain/

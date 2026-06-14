@@ -6,6 +6,24 @@ import time as _time
 from datetime import datetime
 
 
+# --- debug logging -----------------------------------------------------------
+_proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_DBG_FILE = os.path.join(_proj_root, "databases", "debugging_logs")
+_DBG_LOCK = threading.Lock()
+
+
+def _dbg(msg):
+    line = f"{_time.strftime('%H:%M:%S')}  {msg}\n"
+    try:
+        with _DBG_LOCK:
+            os.makedirs(os.path.dirname(_DBG_FILE), exist_ok=True)
+            with open(_DBG_FILE, "a") as f:
+                f.write(line)
+    except (PermissionError, OSError):
+        pass
+# ---------------------------------------------------------------------------
+
+
 _DB_FILE = None
 _AUTOSAVE_INTERVAL = 10
 _autosave_running = False
@@ -97,6 +115,7 @@ class MachineStore:
             del self._machines[ip]
 
     def save(self):
+        _dbg(f"[store.save] saving {len(self._machines)} machines")
         _init_db_path()
         try:
             with _save_lock, sqlite3.connect(_DB_FILE) as conn:
@@ -104,23 +123,23 @@ class MachineStore:
                 columns = [r[1] for r in cur.fetchall()]
                 if columns and "id" not in columns:
                     conn.execute("DROP TABLE machines")
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS machines (
-                    id INTEGER PRIMARY KEY,
-                    ip TEXT UNIQUE,
-                    hostname TEXT,
-                    mac TEXT,
-                    device_type TEXT,
-                    model TEXT,
-                    os TEXT,
-                    domain TEXT,
-                    methods TEXT,
-                    first_seen TEXT,
-                    last_seen TEXT
-                )
-            """)
-            conn.execute("DELETE FROM machines")
-            for m in self._machines.values():
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS machines (
+                        id INTEGER PRIMARY KEY,
+                        ip TEXT UNIQUE,
+                        hostname TEXT,
+                        mac TEXT,
+                        device_type TEXT,
+                        model TEXT,
+                        os TEXT,
+                        domain TEXT,
+                        methods TEXT,
+                        first_seen TEXT,
+                        last_seen TEXT
+                    )
+                """)
+                conn.execute("DELETE FROM machines")
+                for m in self._machines.values():
                     conn.execute(
                         """INSERT OR REPLACE INTO machines
                            (id, ip, hostname, mac, device_type, model, os, domain, methods, first_seen, last_seen)
@@ -139,24 +158,28 @@ class MachineStore:
                             m.last_seen.isoformat(),
                         ),
                     )
+                _dbg(f"[store.save] done")
         except (PermissionError, OSError, sqlite3.OperationalError):
-            pass
+            _dbg(f"[store.save] error")
 
     def load(self):
         _init_db_path()
         if not os.path.isfile(_DB_FILE):
+            _dbg("[store.load] no file, starting fresh")
             return
         try:
             with sqlite3.connect(_DB_FILE) as conn:
                 cur = conn.execute("PRAGMA table_info(machines)")
                 columns = [r[1] for r in cur.fetchall()]
                 if "id" not in columns:
+                    _dbg("[store.load] no id column, skipping")
                     self._next_id = 1
                     return
                 rows = conn.execute(
                     "SELECT id, ip, hostname, mac, device_type, model, os, domain, methods, first_seen, last_seen FROM machines"
                 ).fetchall()
         except (sqlite3.DatabaseError, sqlite3.OperationalError):
+            _dbg("[store.load] db error")
             return
 
         max_id = 0
@@ -187,6 +210,7 @@ class MachineStore:
                 pass
             self._machines[ip] = m
         self._next_id = max_id + 1
+        _dbg(f"[store.load] loaded {len(self._machines)} machines")
 
 
 def start_autosave(store_instance):

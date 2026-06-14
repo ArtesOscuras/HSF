@@ -174,6 +174,76 @@ def load_tcp_ports(machine_id):
         return []
 
 
+def save_udp_ports(machine_id, ports):
+    _init_db_dir()
+    path = _get_path(machine_id)
+    now = datetime.now().isoformat()
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS udp_ports (
+                    port INTEGER,
+                    service TEXT,
+                    discovered_at TEXT
+                )
+            """)
+            conn.execute("DELETE FROM udp_ports")
+            for p in ports:
+                conn.execute(
+                    "INSERT INTO udp_ports VALUES (?, ?, ?)",
+                    (p, "", now),
+                )
+    except (PermissionError, OSError, sqlite3.OperationalError):
+        pass
+
+
+def save_udp_port(machine_id, port):
+    _init_db_dir()
+    path = _get_path(machine_id)
+    now = datetime.now().isoformat()
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS udp_ports (
+                    port INTEGER,
+                    service TEXT,
+                    discovered_at TEXT
+                )
+            """)
+            existing = conn.execute(
+                "SELECT 1 FROM udp_ports WHERE port = ?", (port,)
+            ).fetchone()
+            if not existing:
+                conn.execute(
+                    "INSERT INTO udp_ports VALUES (?, ?, ?)",
+                    (port, "", now),
+                )
+                return True
+    except (PermissionError, OSError, sqlite3.OperationalError):
+        pass
+    return False
+
+
+def load_udp_ports(machine_id):
+    _init_db_dir()
+    path = _get_path(machine_id)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS udp_ports (
+                    port INTEGER,
+                    service TEXT,
+                    discovered_at TEXT
+                )
+            """)
+            rows = conn.execute("SELECT port FROM udp_ports ORDER BY port").fetchall()
+            return [r[0] for r in rows]
+    except (sqlite3.DatabaseError, sqlite3.OperationalError):
+        return []
+
+
 def save_web_service(machine_id, port, output):
     _init_db_dir()
     path = _get_path(machine_id)

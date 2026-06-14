@@ -91,6 +91,7 @@ class MachineDetailView(BaseView):
             self._machine = m
 
         ports = machine_db.load_tcp_ports(self._machine.id)
+        udp_ports = machine_db.load_udp_ports(self._machine.id)
         web = machine_db.load_web_services(self._machine.id)
         domains = machine_db.load_domains(self._machine.id)
         banners = machine_db.load_banners(self._machine.id)
@@ -98,8 +99,8 @@ class MachineDetailView(BaseView):
         current_hash = hash((
             self._machine.device_type, self._machine.model, self._machine.os,
             self._machine.domain, self._machine.hostname, self._machine.mac,
-            tuple(ports), tuple((p, o) for p, o in web), tuple(domains),
-            tuple(banners), tuple(directories),
+            tuple(ports), tuple(udp_ports), tuple((p, o) for p, o in web),
+            tuple(domains), tuple(banners), tuple(directories),
         ))
         if current_hash == self._last_hash and self.text.index("end-1c") != "1.0":
             return
@@ -173,6 +174,16 @@ class MachineDetailView(BaseView):
                 self.text.insert(tk.END, f"{_service_name(p)}\n", "bright")
         else:
             self.text.insert(tk.END, "\nTCP ports: (not scanned yet)\n", "muted")
+
+        udp_ports = machine_db.load_udp_ports(m.id)
+        if udp_ports:
+            self.text.insert(tk.END, f"\nUDP ports ({len(udp_ports)}):\n", "info")
+            port_w = max(len(str(p)) for p in udp_ports) + 2
+            for p in udp_ports:
+                self.text.insert(tk.END, f"  {str(p):<{port_w}}", "muted")
+                self.text.insert(tk.END, f"{_service_name(p)}\n", "bright")
+        else:
+            self.text.insert(tk.END, "\nUDP ports: (not scanned yet)\n", "muted")
 
         web = machine_db.load_web_services(m.id)
         if web:

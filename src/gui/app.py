@@ -12,15 +12,16 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import netifaces
 from .console import Console
 from .visualizer import Visualizer
-from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UserPassView, HashListView, ToolsView
-from .dialogs import InterfaceSelector
-from src.machines import store, start_autosave as start_machines_autosave
+from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UserPassView, HashListView, ShellListView, ToolsView
+from .dialogs import ScanDialog
+from src.machines import store, start_autosave as start_machines_autosave, stop_autosave as stop_machines_autosave
 from src.machines import machine_db
 from src.machines import domain_db
 import src.machines
 from src.tools.scanner import PassiveMDNSScanner, ActiveScanner
 from src.tools.scanner.mdns_cache import load as load_mdns_cache, save as save_mdns_cache, start_autosave, clear as clear_mdns_cache, wipe as wipe_mdns_cache
 from src.tools.scanner.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _probe_smb_info, _probe_ssh_banner, _parse_ssh_banner, _probe_ttl, _run_whatweb, _probe_web_internal, _identify_linux_distro, _extract_domains_from_whatweb, _dbg
+from src.shells import ShellListener, shell_db
 
 
 class App(tk.Tk):
@@ -54,7 +55,9 @@ class App(tk.Tk):
         self._recorder = None
         self._tcpscan_running = False
         self._tcpscan_process = None
+        self._udpscan_running = False
         self._bannergrab_running = False
+        self._shell_listener = None
 
         self._register_views()
         self.visualizer.activate_view("tools")
@@ -75,6 +78,8 @@ class App(tk.Tk):
         self.wait_window(dialog)
         if self._passive_scanner is None or not self._passive_scanner.is_running:
             self._start_passive_scanner()
+        if self._shell_listener is None or not self._shell_listener.is_running:
+            self._start_shell_listener()
 
     def _set_initial_sash(self):
         self.update_idletasks()
@@ -86,6 +91,15 @@ class App(tk.Tk):
         self._passive_scanner = PassiveMDNSScanner(on_host_callback=self._on_host_discovered)
         self._passive_scanner.start()
         self.console.info("Passive listening mDNS started")
+
+    def _start_shell_listener(self):
+        port = 443 if self._is_root() else 8443
+        self._shell_listener = ShellListener(
+            port=port,
+            on_new_session=self._on_shell_session,
+        )
+        self._shell_listener.start()
+        self.console.info(f"Reverse shell listener started on port {port}")
 
     def _register_views(self):
         net_view = NetworkView(self.visualizer)
@@ -118,11 +132,16 @@ class App(tk.Tk):
         tools_view._on_tool_click = self._on_tool_click
         self.visualizer.register_view("tools", tools_view)
 
+        shell_view = ShellListView(self.visualizer)
+        shell_view._on_shell_click = self._open_shell_view
+        self.visualizer.register_view("shells", shell_view)
+
         self.console.add_help_section("Views", [
             ("view list", "List available views"),
             ("view machines", "Machine list"),
-            ("view domains", "Discovered domains list"),
             ("view tools", "Available tools"),
+            ("view shells", "Reverse shell sessions"),
+            ("view domains", "Discovered domains list"),
             ("view evidences", "Evidence sessions list"),
             ("view credentials", "Stored credentials"),
             ("view machine <id|ip>", "View machine details"),
@@ -133,6 +152,7 @@ class App(tk.Tk):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
         self.console.register_command("scan", self._cmd_scan, "Network scanning commands")
         self.console.register_command("tcpscan", self._cmd_tcpscan, "Scan TCP ports on an IP")
+        self.console.register_command("udpscan", self._cmd_udpscan, "Scan UDP ports on an IP")
         self.console.register_command("whatweb", self._cmd_whatweb, "Web technology scan on a port")
         self.console.register_command("bannergrab", self._cmd_bannergrab, "Grab service banner from a port")
         self.console.register_command("delete-dbs", self._cmd_delete_dbs, "Wipe all stored data")
@@ -144,6 +164,8 @@ class App(tk.Tk):
         self.console.register_command("webrecorder", self._cmd_recorder, "Record browser session for a domain")
         self.console.register_command("delete-evidence", self._cmd_delete_evidence, "Delete all evidence data")
         self.console.register_command("init", self._cmd_init, "Re-run initialization checks")
+        self.console.register_command("start-listener", self._cmd_start_listener, "Start reverse shell listener")
+        self.console.register_command("stop-listener", self._cmd_stop_listener, "Stop reverse shell listener")
         self.console.register_command("exit", self._cmd_exit, "Close the application")
 
         self.console.set_system_handler(self._run_system)
@@ -280,6 +302,55 @@ class App(tk.Tk):
     def _open_domain_view(self, domain):
         self._cmd_view_domain([domain])
 
+    def _open_shell_view(self, sid):
+        view_name = f"shell_{sid}"
+        if view_name not in self.visualizer.get_view_names():
+            from .views import ShellDetailView
+            detail_view = ShellDetailView(self.visualizer, sid)
+            detail_view._on_back_click = lambda: self.visualizer.activate_view("shells")
+            self.visualizer.register_view(view_name, detail_view)
+        self.visualizer.activate_view(view_name)
+
+    def _cmd_start_listener(self, args):
+        if self._shell_listener and self._shell_listener.is_running:
+            if args:
+                self.console.warning(f"Shell listener already running on port {self._shell_listener.port}. Use stop-listener first.")
+            else:
+                self.console.warning(f"Shell listener already running on port {self._shell_listener.port}")
+            return
+        if args:
+            try:
+                port = int(args[0])
+            except ValueError:
+                self.console.error("Invalid port")
+                return
+            self._shell_listener = ShellListener(
+                port=port,
+                on_new_session=self._on_shell_session,
+            )
+            self._shell_listener.start()
+            self.console.info(f"Reverse shell listener started on port {port}")
+        else:
+            self._start_shell_listener()
+
+    def _cmd_stop_listener(self, args):
+        if self._shell_listener and self._shell_listener.is_running:
+            self._shell_listener.stop()
+            self._shell_listener = None
+            self.console.info("Reverse shell listener stopped")
+        else:
+            self.console.warning("No shell listener is running")
+
+    def _on_shell_session(self, **kwargs):
+        if "error" in kwargs:
+            self.console.after(0, lambda: self.console.error(f"Shell listener error: {kwargs['error']}"))
+            return
+        session = kwargs.get("session")
+        if session:
+            self.console.after(0, lambda s=session: self.console.success(
+                f"New shell #{s['id']} from {s['ip']}:{s['source_port']}"
+            ))
+
     def _cmd_scan(self, args):
         if not args:
             self._scan_active()
@@ -343,44 +414,57 @@ class App(tk.Tk):
         self.console.info("Passive listening mDNS started")
 
     def _scan_active(self):
-        if self._active_scanner and self._active_scanner.is_running:
-            self.console.warning("Active scan is already running.")
+        result = self._show_scan_dialog()
+        if not result:
+            self.console.warning("Scan cancelled")
             return
 
-        iface = self._show_interface_dialog()
+        action = result.get("action")
+        ip = result.get("ip")
 
-        if not iface:
-            self.console.warning("Scan cancelled: no interface selected")
-            return
+        if action == "scan":
+            if ip:
+                self._scan_ip(ip)
+                return
+            iface = result.get("iface")
+            if not iface:
+                return
 
-        if iface[0] == "ip":
-            self._scan_ip(iface[1])
-            return
+            if self._active_scanner and self._active_scanner.is_running:
+                self.console.warning("Active scan is already running.")
+                return
 
-        self._selected_interface = iface
-        src.machines.interface_name = iface[0]
-        src.machines.interface_ip = iface[1]
-        iface_name = iface[0]
-        try:
-            self._active_scanner = ActiveScanner(
-                on_host_callback=self._on_host_discovered,
-                interface_name=iface_name,
-            )
-            self._active_scanner.start()
-            self.console.info("Active scan started")
-            nmap_status = "enabled" if self._active_scanner.has_nmap else "disabled"
-            self.console.body(
-                f"    Interface: {self._active_scanner.interface_name}  "
-                f"Network: {self._active_scanner.network_cidr}  "
-                f"Nmap: {nmap_status}"
-            )
-            if not self._active_scanner.has_nmap:
-                self.console.warning("python-nmap not found: pip install python-nmap")
-        except RuntimeError as e:
-            self.console.error(str(e))
+            self._selected_interface = iface
+            src.machines.interface_name = iface[0]
+            src.machines.interface_ip = iface[1]
+            iface_name = iface[0]
+            try:
+                self._active_scanner = ActiveScanner(
+                    on_host_callback=self._on_host_discovered,
+                    interface_name=iface_name,
+                )
+                self._active_scanner.start()
+                self.console.info("Active scan started")
+                nmap_status = "enabled" if self._active_scanner.has_nmap else "disabled"
+                self.console.body(
+                    f"    Interface: {self._active_scanner.interface_name}  "
+                    f"Network: {self._active_scanner.network_cidr}  "
+                    f"Nmap: {nmap_status}"
+                )
+                if not self._active_scanner.has_nmap:
+                    self.console.warning("python-nmap not found: pip install python-nmap")
+            except RuntimeError as e:
+                self.console.error(str(e))
 
-    def _show_interface_dialog(self):
-        dialog = InterfaceSelector(self)
+        elif action == "tcpscan":
+            self._cmd_tcpscan([ip])
+        elif action == "udpscan":
+            self._cmd_udpscan([ip])
+        elif action == "bannergrab":
+            self._cmd_bannergrab([ip, str(result.get("port", 80))])
+
+    def _show_scan_dialog(self):
+        dialog = ScanDialog(self)
         return dialog.result
 
     def _scan_stop(self):
@@ -608,6 +692,9 @@ class App(tk.Tk):
         if self._tcpscan_running:
             self.console.warning("A TCP scan is already running.")
             return
+        if self._udpscan_running:
+            self._udpscan_running = False
+            self.console.info("UDP scan stopped")
         _dbg(f"[tcpscan] requested for {ip}")
         if self._active_scanner and self._active_scanner.is_running:
             self._active_scanner.stop()
@@ -619,6 +706,181 @@ class App(tk.Tk):
             method = "connect" + (" (no root)" if not self._is_root() else "")
         self.console.info(f"TCP scanning {ip}  ({method})...")
         threading.Thread(target=self._run_tcpscan, args=(ip, method), daemon=True).start()
+
+    UDP_PORTS_COMMON = [
+        7, 9, 11, 13, 17, 19, 37, 42, 49, 53,
+        67, 68, 69, 80, 88, 111, 113, 119, 123, 135,
+        136, 137, 138, 139, 143, 158, 161, 162, 177, 194,
+        201, 209, 213, 218, 220, 259, 264, 318, 323, 383,
+        389, 401, 427, 443, 445, 464, 465, 497, 500, 512,
+        513, 514, 515, 517, 518, 520, 521, 525, 529, 531,
+        532, 533, 534, 540, 546, 547, 554, 563, 587, 591,
+        593, 604, 623, 631, 636, 639, 646, 647, 648, 651,
+        660, 666, 674, 691, 700, 702, 706, 711, 712, 720,
+        749, 750, 751, 752, 753, 754, 758, 760, 782, 829,
+        847, 848, 853, 859, 860, 861, 862, 873, 953, 989,
+        990, 991, 992, 993, 995, 1001, 1062, 1194, 1434, 1521,
+        1645, 1646, 1701, 1718, 1719, 1720, 1723, 1812, 1813, 1900,
+        1901, 2000, 2049, 2082, 2083, 2222, 2223, 2427, 2727, 2967,
+        3000, 3031, 3050, 3128, 3130, 3283, 3306, 3389, 3455, 3478,
+        3632, 3689, 4000, 4001, 4063, 4105, 4369, 4444, 4500, 4569,
+        4662, 4672, 4949, 5000, 5001, 5004, 5005, 5030, 5050, 5060,
+        5080, 5093, 5190, 5222, 5223, 5269, 5298, 5351, 5353, 5355,
+        5405, 5432, 5480, 5500, 5510, 5550, 5555, 5631, 5632, 5672,
+        5683, 5713, 5721, 5722, 5746, 5800, 5863, 5900, 5984, 5985,
+        6000, 6001, 6070, 6086, 6129, 6257, 6346, 6347, 6379, 6502,
+        6544, 6665, 6666, 6667, 6668, 6669, 6881, 6900, 6980, 7000,
+        7070, 7100, 7170, 7676, 7777, 7937, 8000, 8002, 8010, 8074,
+        8080, 8081, 8086, 8087, 8200, 8443, 8765, 8888, 9000, 9001,
+        9030, 9090, 9100, 9101, 9102, 9103, 9119, 9160, 9200, 9306,
+        9312, 9418, 9443, 9535, 9536, 9875, 9898, 9981, 10000, 10080,
+        11371, 12345, 13720, 13721, 14567, 15104, 17007, 19283, 19813, 20000,
+        20720, 21000, 21554, 22273, 23073, 23399, 23456, 25565, 27000, 27017,
+        27374, 28119, 31337, 33434, 34861, 37777, 40193, 41524, 45678, 49152,
+        49153, 49167, 50000, 55553, 55555, 62078,
+    ]
+
+    def _udp_scan_connect(self, ip, ports, port_callback=None):
+        open_ports = []
+        def _check(p):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(1.5)
+            try:
+                sock.sendto(b"", (ip, p))
+                sock.recvfrom(1024)
+                open_ports.append(p)
+                if port_callback:
+                    port_callback(p)
+            except socket.timeout:
+                pass
+            except (ConnectionRefusedError, OSError):
+                pass
+            finally:
+                sock.close()
+        with ThreadPoolExecutor(max_workers=100) as exe:
+            futures = [exe.submit(_check, p) for p in ports]
+            for f in as_completed(futures):
+                if not self._udpscan_running:
+                    break
+        return sorted(open_ports)
+
+    def _udp_scapy_probe(self, ip, ports):
+        from scapy.all import IP, UDP, ICMP, sr1, RandShort
+        open_ports = []
+        for p in ports:
+            if not self._udpscan_running:
+                break
+            try:
+                pkt = IP(dst=ip) / UDP(sport=RandShort(), dport=p)
+                reply = sr1(pkt, timeout=1.5, verbose=0)
+                if reply is None:
+                    open_ports.append(p)
+                elif reply.haslayer(ICMP) and reply[ICMP].type == 3 and reply[ICMP].code == 3:
+                    pass
+                else:
+                    open_ports.append(p)
+            except Exception:
+                pass
+        return sorted(open_ports)
+
+    def _udp_scan(self, ip, ports, port_callback=None):
+        if self._is_root():
+            return self._udp_scapy_probe(ip, ports)
+        return self._udp_scan_connect(ip, ports, port_callback=port_callback)
+
+    def _run_udpscan(self, ip):
+        machine = store.get(ip)
+        self._udpscan_running = True
+        all_ports = []
+        try:
+            def _save_ports():
+                if machine and machine.id:
+                    machine_db.save_udp_ports(machine.id, sorted(all_ports))
+
+            def _on_port(p):
+                if p not in all_ports:
+                    all_ports.append(p)
+                _save_ports()
+
+            method = "scapy" if self._is_root() else "connect"
+            self.console.after(0, lambda: self.console.info(
+                f"UDP scanning {ip} ({method})..."
+            ))
+
+            open_ports = self._udp_scan(ip, self.UDP_PORTS_COMMON, port_callback=_on_port)
+            for p in open_ports:
+                if p not in all_ports:
+                    all_ports.append(p)
+            _save_ports()
+            for p in open_ports:
+                self.console.after(0, lambda port=p: self.console.success(
+                    f"  {ip}  UDP {port} open"
+                ))
+
+            if not self._udpscan_running:
+                self.console.after(0, lambda: self.console.warning(f"UDP scan {ip} stopped"))
+                return
+
+            self.console.after(0, lambda: self.console.info(
+                f"UDP common ports ({len(self.UDP_PORTS_COMMON)}) done. Continuing full scan (65535)..."
+            ))
+
+            common_set = set(self.UDP_PORTS_COMMON)
+            remaining = [p for p in range(1, 65536) if p not in common_set]
+            more = self._udp_scan(ip, remaining, port_callback=_on_port)
+            for p in more:
+                if p not in all_ports:
+                    all_ports.append(p)
+            _save_ports()
+            for p in more:
+                self.console.after(0, lambda port=p: self.console.success(
+                    f"  {ip}  UDP {port} open"
+                ))
+            self.console.after(0, lambda: self.console.info(
+                f"UDP scan {ip} finished ({65535} ports): {len(all_ports)} open"
+            ))
+        finally:
+            self._udpscan_running = False
+
+    def _cmd_udpscan(self, args):
+        if not args:
+            m = self._get_active_machine()
+            if m:
+                args = [str(m.id)]
+            else:
+                self.console.body("Usage: udpscan <ip|id> | udpscan stop")
+                return
+        sub = args[0].lower()
+        if sub == "stop":
+            if not self._udpscan_running:
+                self.console.warning("No UDP scan is running.")
+                return
+            self._udpscan_running = False
+            self.console.info("UDP scan stop requested")
+            return
+        ip = sub
+        if re.match(r"^\d+$", ip):
+            machine_id = int(ip)
+            machine = None
+            for m in store.get_all():
+                if m.id == machine_id:
+                    machine = m
+                    break
+            if machine:
+                ip = machine.ip
+            else:
+                self.console.warning(f"No machine with ID #{machine_id}")
+                return
+        if self._udpscan_running:
+            self.console.warning("A UDP scan is already running.")
+            return
+        if self._tcpscan_running:
+            self._tcpscan_running = False
+            if self._tcpscan_process:
+                self._tcpscan_process.kill()
+            self.console.info("TCP scan stopped")
+        _dbg(f"[udpscan] requested for {ip}")
+        threading.Thread(target=self._run_udpscan, args=(ip,), daemon=True).start()
 
     def _cmd_whatweb(self, args):
         m = self._get_active_machine()
@@ -1009,13 +1271,20 @@ class App(tk.Tk):
                 if stripped:
                     self.console.after(0, lambda l=stripped: self.console.body(l))
                 if monitor_nmap:
-                    m = re.match(r"Discovered open port (\d+)/tcp on \S+", stripped)
+                    m = re.match(r"Discovered open port (\d+)/(tcp|udp) on \S+", stripped)
                     if m:
                         port = int(m.group(1))
-                        if machine_db.save_tcp_port(monitor_nmap.id, port):
-                            self.console.after(0, lambda p=port, mid=monitor_nmap.id: self.console.success(
-                                f"  nmap: added port {p} to machine #{mid}"
-                            ))
+                        proto = m.group(2)
+                        if proto == "udp":
+                            if machine_db.save_udp_port(monitor_nmap.id, port):
+                                self.console.after(0, lambda p=port, mid=monitor_nmap.id: self.console.success(
+                                    f"  nmap: added UDP port {p} to machine #{mid}"
+                                ))
+                        else:
+                            if machine_db.save_tcp_port(monitor_nmap.id, port):
+                                self.console.after(0, lambda p=port, mid=monitor_nmap.id: self.console.success(
+                                    f"  nmap: added port {p} to machine #{mid}"
+                                ))
             proc.wait()
             if self._system_process is proc:
                 self._system_process = None
@@ -1295,6 +1564,8 @@ class App(tk.Tk):
         from src.machines.credential_db import delete_all as del_creds
         del_creds()
         wipe_mdns_cache()
+        stop_machines_autosave()
+        start_machines_autosave(store)
         self.console.info("All data cleared (mDNS cache + machine list + database files)")
 
     def _on_close(self):
@@ -1302,6 +1573,11 @@ class App(tk.Tk):
             self._passive_scanner.stop()
         if self._active_scanner:
             self._active_scanner.stop()
+        if self._shell_listener:
+            self._shell_listener.stop()
+        self._udpscan_running = False
+        self._tcpscan_running = False
+        stop_machines_autosave()
         store.save()
         save_mdns_cache()
         self.destroy()

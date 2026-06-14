@@ -257,6 +257,7 @@ class InitDialog(tk.Toplevel):
         self._done = 0
 
         self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.bind("<Return>", lambda e: self.destroy())
         self.after(50, self._start_checks)
 
     def _start_checks(self):

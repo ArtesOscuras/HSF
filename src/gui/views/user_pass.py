@@ -1,6 +1,7 @@
 import struct
 import tkinter as tk
 from .base import BaseView
+from .nav import build as build_nav
 from src.machines import credential_db
 
 BRIGHT = "#ffffff"
@@ -63,18 +64,6 @@ class UserPassView(BaseView):
     name = "user-pass"
     description = "Users and passwords"
 
-    def _nav_btn(self, text, view_name, parent, active):
-        btn = tk.Label(
-            parent, text=f"  {text}  ",
-            font=("Menlo", 11, "bold") if active else ("Menlo", 11),
-            fg="#ffffff" if active else "#888888",
-            bg="#000000",
-        )
-        btn.pack(side=tk.LEFT, padx=5)
-        btn.bind("<Button-1>", lambda e: self.master.activate_view(view_name))
-        btn.bind("<Enter>", lambda e: btn.config(font=("Menlo", 11, "bold", "underline") if active else ("Menlo", 11, "underline")))
-        btn.bind("<Leave>", lambda e: btn.config(font=("Menlo", 11, "bold") if active else ("Menlo", 11)))
-
     def _build_ui(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=0)
@@ -86,11 +75,8 @@ class UserPassView(BaseView):
 
         nav_frame = tk.Frame(header, bg="#000000")
         nav_frame.pack(pady=(0, 10))
-        self._nav_btn("Tools", "tools", nav_frame, False)
-        self._nav_btn("Machines", "machines", nav_frame, False)
-        self._nav_btn("Domains", "domains", nav_frame, False)
-        self._nav_btn("Evidences", "evidences", nav_frame, False)
-        self._nav_btn("Credentials", "credentials", nav_frame, True)
+
+        build_nav(header, "credentials", self.master)
 
         self._title_label = tk.Label(
             header, text="Users & Passwords",

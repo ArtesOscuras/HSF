@@ -614,12 +614,35 @@ def get_identifiers():
     return list(_pre_ttl_identifiers) + list(_post_ttl_identifiers)
 
 
+def _is_firewall_honeypot(ip, context):
+    import random
+    ports = sorted(random.sample(range(3000, 50001), 3))
+    _dbg(f"  [firewall-check] probing random ports: {ports}")
+    open_count = 0
+    for p in ports:
+        result = context.port(p)
+        if result and result.get("open"):
+            open_count += 1
+            _dbg(f"  [firewall-check] port {p}: OPEN ({open_count}/3)")
+        else:
+            _dbg(f"  [firewall-check] port {p}: closed")
+    if open_count == 3:
+        _dbg(f"  [firewall-check] ALL 3 random ports open — likely firewall/honeypot")
+        return True
+    _dbg(f"  [firewall-check] passed ({open_count}/3 open)")
+    return False
+
+
 def identify_device(ip, gateway_ip=None, hostname=""):
     _dbg(f"")
     _dbg(f"=== IDENTIFY {ip}  hostname={hostname}  gateway={gateway_ip} ===")
 
     context = ProbeContext(ip)
     context.warmup()
+
+    if _is_firewall_honeypot(ip, context):
+        _dbg(f"  FINAL: device unknown (firewall/honeypot detected)")
+        return "device unknown"
 
     for identifier in _pre_ttl_identifiers:
         result = identifier.identify(ip, context, gateway_ip=gateway_ip, hostname=hostname)

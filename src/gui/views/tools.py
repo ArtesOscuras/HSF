@@ -3,6 +3,7 @@ import tkinter as tk
 import tkinter.font as tkfont
 from PIL import Image, ImageTk
 from .base import BaseView
+from .nav import build as build_nav
 
 MUTED = "#888888"
 BRIGHT = "#ffffff"
@@ -47,18 +48,6 @@ class ToolsView(BaseView):
 
     MIN_NAME = 14
 
-    def _nav_btn(self, text, view_name, parent, active):
-        btn = tk.Label(
-            parent, text=f"  {text}  ",
-            font=("Menlo", 11, "bold") if active else ("Menlo", 11),
-            fg="#ffffff" if active else "#888888",
-            bg="#000000",
-        )
-        btn.pack(side=tk.LEFT, padx=5)
-        btn.bind("<Button-1>", lambda e: self.master.activate_view(view_name))
-        btn.bind("<Enter>", lambda e: btn.config(font=("Menlo", 11, "bold", "underline") if active else ("Menlo", 11, "underline")))
-        btn.bind("<Leave>", lambda e: btn.config(font=("Menlo", 11, "bold") if active else ("Menlo", 11)))
-
     def _build_ui(self):
         _load_tool_icons()
 
@@ -72,11 +61,7 @@ class ToolsView(BaseView):
         nav_frame = tk.Frame(header, bg="#000000")
         nav_frame.pack(pady=(0, 10))
 
-        self._nav_btn("Tools", "tools", nav_frame, True)
-        self._nav_btn("Machines", "machines", nav_frame, False)
-        self._nav_btn("Domains", "domains", nav_frame, False)
-        self._nav_btn("Evidences", "evidences", nav_frame, False)
-        self._nav_btn("Credentials", "credentials", nav_frame, False)
+        build_nav(header, "tools", self.master)
 
         tk.Label(
             header,
