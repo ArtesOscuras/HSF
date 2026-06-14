@@ -31,3 +31,6 @@ credentials/credentials.dbs
 
 # External tools
 Villain/
+
+# Large files
+lst/rockyou.txt
