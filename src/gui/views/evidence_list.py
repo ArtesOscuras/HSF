@@ -96,6 +96,7 @@ class EvidenceListView(BaseView):
                             width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.text.configure(yscrollcommand=scrollbar.set)
+        self.text.bind("<Configure>", lambda e: self.after(50, self._poll))
 
         self._last_hash = None
         self._poll_id = None
@@ -157,10 +158,6 @@ class EvidenceListView(BaseView):
         self._items = items
 
         current_hash = hash(tuple((i["name"], i["requests"]) for i in items))
-        if current_hash == self._last_hash and self.text.index("end-1c") != "1.0":
-            self._poll_id = self.after(2000, self._poll)
-            return
-        self._last_hash = current_hash
 
         w_name = self.MIN_NAME
         w_reqs = 10
@@ -193,11 +190,11 @@ class EvidenceListView(BaseView):
         t += col_w(w_reqs) + gap_px
         tabs.append(t)
 
-        self.text.configure(tabs=tabs)
+        self._last_hash = current_hash
 
         scroll_pos = self.text.yview()[0]
 
-        self.text.configure(state=tk.NORMAL)
+        self.text.configure(state=tk.NORMAL, tabs=tabs)
         self.text.delete("1.0", tk.END)
 
         if not items:

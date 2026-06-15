@@ -81,7 +81,9 @@ class NetworkView(BaseView):
                             width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.text.configure(yscrollcommand=scrollbar.set)
+        self.text.bind("<Configure>", lambda e: self.after(50, self._poll))
 
+        self._last_hash = None
         self._poll_id = None
 
     def on_activate(self):

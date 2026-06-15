@@ -115,7 +115,7 @@ class UserPassView(BaseView):
         self._poll_id = None
 
         btn_frame2 = tk.Frame(self, bg="#000000")
-        btn_frame2.grid(row=2, column=0, sticky="ew", pady=(10, 15))
+        btn_frame2.grid(row=2, column=0, pady=(10, 15))
 
         gen_btn = tk.Label(
             btn_frame2,

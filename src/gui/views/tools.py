@@ -72,13 +72,13 @@ class ToolsView(BaseView):
                             width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.text.configure(yscrollcommand=scrollbar.set)
+        self.text.bind("<Configure>", lambda e: self.after(50, self._poll))
 
         self._tools = [
             {"name": "Scanner", "action": "scanner", "desc": "Scan interface or ip."},
             {"name": "Fuzzer", "action": "fuzzer", "desc": "Fuzz directory or subdommains."},
             {"name": "Webrecorder", "action": "webrecorder", "desc": "Record web evidences for analisis."},
         ]
-
         self._poll_id = None
 
     def on_activate(self):

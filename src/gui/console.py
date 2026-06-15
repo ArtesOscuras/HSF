@@ -97,6 +97,9 @@ class Console(tk.Frame):
         self.input_entry.bind("<FocusOut>", self._on_focus_out)
         self.input_entry.focus()
 
+        self.winfo_toplevel().bind("<Button-1>", self._on_root_click, add="+")
+        self.winfo_toplevel().bind("<Escape>", self._on_escape, add="+")
+
         self.bind_all("<Control-plus>", lambda e: self._adjust_font(+1))
         self.bind_all("<Control-minus>", lambda e: self._adjust_font(-1))
         self.bind_all("<Command-plus>", lambda e: self._adjust_font(+1))
@@ -326,6 +329,7 @@ class Console(tk.Frame):
         lb.selection_set(0)
         lb.activate(0)
         lb.bind("<ButtonRelease-1>", self._on_popup_click)
+        lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
 
         n = len(matches)
         h = n * 22 + 4
@@ -376,14 +380,27 @@ class Console(tk.Frame):
             self.after(50, self._filter_autocomplete)
 
     def _on_focus_out(self, event):
-        self.after(150, self._close_autocomplete)
+        pass
+
+    def _on_root_click(self, event):
+        if not self._autocomplete_popup:
+            return
+        if event.widget == self.input_entry:
+            return
+        popup = self._autocomplete_popup
+        if popup.winfo_containing(event.x_root, event.y_root) == popup:
+            return
+        self._close_autocomplete()
 
     def _close_autocomplete(self):
+        if self._filter_id:
+            self.after_cancel(self._filter_id)
+            self._filter_id = None
         if self._track_id:
             self.after_cancel(self._track_id)
             self._track_id = None
         if self._autocomplete_popup:
-            self._autocomplete_popup.place_forget()
+            self._autocomplete_popup.destroy()
             self._autocomplete_popup = None
             self._autocomplete_listbox = None
             self._autocomplete_matches = []

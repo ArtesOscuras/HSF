@@ -64,6 +64,7 @@ class CredentialListView(BaseView):
                             width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.text.configure(yscrollcommand=scrollbar.set)
+        self.text.bind("<Configure>", lambda e: self.after(50, self._poll))
 
         btn_frame = tk.Frame(self, bg="#000000")
         btn_frame.grid(row=2, column=0, pady=(15, 15))
@@ -141,10 +142,6 @@ class CredentialListView(BaseView):
         self._items = items
 
         current_hash = hash(tuple((i["id"], i.get("username", ""), i.get("password", ""), i.get("hash_nt", "")) for i in items))
-        if current_hash == self._last_hash and self.text.index("end-1c") != "1.0":
-            self._poll_id = self.after(2000, self._poll)
-            return
-        self._last_hash = current_hash
 
         w_name = self.MIN_NAME
         w_pass = 8
@@ -178,6 +175,8 @@ class CredentialListView(BaseView):
         tabs.append(t)
         t += col_w(w_pass) + char_w
         tabs.append(t)
+
+        self._last_hash = current_hash
 
         scroll_pos = self.text.yview()[0]
 

@@ -72,9 +72,10 @@ class ShellListView(BaseView):
                             width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.text.configure(yscrollcommand=scrollbar.set)
+        self.text.bind("<Configure>", lambda e: self.after(50, self._poll))
 
         btn_frame = tk.Frame(self, bg="#000000")
-        btn_frame.grid(row=2, column=0, pady=(5, 10))
+        btn_frame.grid(row=2, column=0, sticky="ew", pady=(5, 10))
 
         remote_btn = tk.Label(
             btn_frame, text="  New remote connection  ", bg="#222222", fg="#ffffff",
@@ -160,10 +161,6 @@ class ShellListView(BaseView):
         self._items = items
 
         current_hash = hash(tuple((i["id"], i["status"], i.get("type", ""), i.get("os", "")) for i in items))
-        if current_hash == self._last_hash and self.text.index("end-1c") != "1.0":
-            self._poll_id = self.after(2000, self._poll)
-            return
-        self._last_hash = current_hash
 
         w_id = 4
         w_ip = 12
@@ -201,19 +198,28 @@ class ShellListView(BaseView):
         t += col_w(w_type) + gap_px
         tabs.append(t)
 
-        self.text.configure(tabs=tabs)
+        self._last_hash = current_hash
 
         scroll_pos = self.text.yview()[0]
 
-        self.text.configure(state=tk.NORMAL)
+        self.text.configure(state=tk.NORMAL, tabs=tabs)
         self.text.delete("1.0", tk.END)
 
         if not items:
+            msg1 = "No shells connected yet."
+            msg2 = "Use 'start-listener' to start the listener."
+            msg_w = max(font.measure(msg1), font.measure(msg2))
+            w = self.text.winfo_width()
+            if w > msg_w:
+                pad_chars = int((w - msg_w) // 2 // char_w)
+                center_pad_msg = " " * max(0, pad_chars)
+            else:
+                center_pad_msg = "  "
             self.text.insert(tk.END, "\n", "bright")
-            self.text.insert(tk.END, center_pad, "bright")
-            self.text.insert(tk.END, "No shells connected yet.\n", "muted")
-            self.text.insert(tk.END, center_pad, "bright")
-            self.text.insert(tk.END, "Use 'start-listener' to start the listener.\n", "muted")
+            self.text.insert(tk.END, center_pad_msg, "bright")
+            self.text.insert(tk.END, msg1 + "\n", "muted")
+            self.text.insert(tk.END, center_pad_msg, "bright")
+            self.text.insert(tk.END, msg2 + "\n", "muted")
         else:
             for item in items:
                 self._insert_line(item, center_pad)
