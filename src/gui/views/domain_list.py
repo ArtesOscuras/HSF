@@ -1,7 +1,7 @@
-import os
+from src.gui import fonts
 import tkinter as tk
 import tkinter.font as tkfont
-from PIL import Image, ImageTk
+from src.gui import icons
 from .base import BaseView
 from .nav import build as build_nav
 from src.machines import domain_db
@@ -10,49 +10,8 @@ MUTED = "#888888"
 BRIGHT = "#ffffff"
 INFO = "#5ba3ec"
 
-ICON_SIZE = 50
 COL_GAP = "   "
-
-_icon = None
-
-
-def _load_icon():
-    global _icon
-    if _icon is not None:
-        return _icon
-    path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "icons", "domain.png")
-    path = os.path.abspath(path)
-    if os.path.isfile(path):
-        try:
-            img = Image.open(path).convert("RGBA")
-            img = img.resize((ICON_SIZE, ICON_SIZE), Image.LANCZOS)
-            _icon = ImageTk.PhotoImage(img)
-        except Exception:
-            _icon = False
-    else:
-        _icon = False
-    return _icon
-
-
-_delete_img = None
-
-
-def _load_delete_img():
-    global _delete_img
-    if _delete_img is not None:
-        return _delete_img
-    path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "icons", "delete.png")
-    path = os.path.abspath(path)
-    if os.path.isfile(path):
-        try:
-            img = Image.open(path).convert("RGBA")
-            img = img.resize((20, 20), Image.LANCZOS)
-            _delete_img = ImageTk.PhotoImage(img)
-        except Exception:
-            _delete_img = False
-    else:
-        _delete_img = False
-    return _delete_img
+ICON_SIZE = 50
 
 
 class DomainListView(BaseView):
@@ -62,8 +21,7 @@ class DomainListView(BaseView):
     MIN_DOMAIN = 10
 
     def _build_ui(self):
-        _load_icon()
-        _load_delete_img()
+
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
@@ -79,7 +37,7 @@ class DomainListView(BaseView):
         tk.Label(
             header,
             text="Domains",
-            font=("Menlo", 22, "bold"),
+            font=(fonts.family_bold(), 22),
             fg="#ffffff",
             bg="#000000",
         ).pack(anchor="center")
@@ -93,7 +51,7 @@ class DomainListView(BaseView):
             text_frame,
             bg="#000000",
             fg=BRIGHT,
-            font=("Menlo", 16),
+            font=(fonts.family(), 16),
             borderwidth=0,
             highlightthickness=0,
             pady=10,
@@ -133,7 +91,7 @@ class DomainListView(BaseView):
 
         self.text.insert(tk.END, center_pad, "bright")
 
-        icon = _load_icon()
+        icon = icons.icon("domain.png", size=50)
         if icon:
             self.text.image_create(tk.END, image=icon)
         else:
@@ -152,7 +110,7 @@ class DomainListView(BaseView):
         self.text.insert(tk.END, f"{first}", "muted")
         self.text.insert(tk.END, "\t", "bright")
 
-        del_img = _load_delete_img()
+        del_img = icons.delete_icon()
         if del_img:
             self.text.image_create(tk.END, image=del_img)
             del_tag = f"del_{domain}"

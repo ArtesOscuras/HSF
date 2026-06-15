@@ -1,3 +1,4 @@
+from src.gui import fonts
 import json
 import os
 import tkinter as tk
@@ -31,11 +32,11 @@ class _RecordDialog(tk.Toplevel):
         self.rowconfigure(3, weight=1)
 
         tk.Label(
-            self, text="Evidence name:", font=("Menlo", 11),
+            self, text="Evidence name:", font=(fonts.family(), 11),
             fg=BRIGHT, bg="#111111",
         ).grid(row=0, column=0, sticky="w", padx=15, pady=(15, 0))
         tk.Label(
-            self, text="(name for the evidence folder)", font=("Menlo", 9),
+            self, text="(name for the evidence folder)", font=(fonts.family(), 9),
             fg=MUTED, bg="#111111",
         ).grid(row=1, column=0, sticky="w", padx=15, pady=(0, 5))
 
@@ -43,7 +44,7 @@ class _RecordDialog(tk.Toplevel):
         tk.Entry(
             self, textvariable=self._name_var,
             bg="#000000", fg=BRIGHT, insertbackground=BRIGHT,
-            font=("Menlo", 12), borderwidth=1, relief=tk.FLAT,
+            font=(fonts.family(), 12), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=2, column=0, columnspan=2, sticky="ew", padx=15, pady=(0, 10))
 
@@ -52,7 +53,7 @@ class _RecordDialog(tk.Toplevel):
 
         cancel_btn = tk.Label(
             btn_frame, text="  Cancel  ", bg="#222222", fg=BRIGHT,
-            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         cancel_btn.pack(side=tk.RIGHT, padx=(5, 0))
@@ -62,7 +63,7 @@ class _RecordDialog(tk.Toplevel):
 
         start_btn = tk.Label(
             btn_frame, text="  Start Recording  ", bg="#222222", fg=BRIGHT,
-            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         start_btn.pack(side=tk.RIGHT)
@@ -100,7 +101,12 @@ class ShellDetailView(BaseView):
         self._record_name = ""
         self._record_tdir = ""
         self._record_buffer = []
-        self._prompt = "$ "
+        session = shell_db.get_session(sid)
+        stype = (session or {}).get("type", "")
+        if stype in ("FTP", "SFTP"):
+            self._prompt = "ftp> "
+        else:
+            self._prompt = "$ "
         self._freeze_mark = None
         self._history = []
         self._history_idx = -1
@@ -118,13 +124,13 @@ class ShellDetailView(BaseView):
 
         self._title_label = tk.Label(
             header, text="",
-            font=("Menlo", 22, "bold"),
+            font=(fonts.family_bold(), 22),
             fg="#ffffff", bg="#000000",
         )
         self._title_label.pack(anchor="center")
         self._title_label.bind("<Button-1>", self._on_title_click)
-        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=("Menlo", 22, "bold", "underline")))
-        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=("Menlo", 22, "bold")))
+        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=(fonts.family_bold(), 22, "underline")))
+        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=(fonts.family_bold(), 22)))
         self._on_back_click = None
 
         terminal_frame = tk.Frame(self, bg="#000000")
@@ -135,7 +141,7 @@ class ShellDetailView(BaseView):
         self.terminal = tk.Text(
             terminal_frame,
             bg="#000000", fg=BRIGHT,
-            font=("Menlo", 13), borderwidth=0, highlightthickness=0,
+            font=(fonts.family(), 13), borderwidth=0, highlightthickness=0,
             cursor="xterm", wrap=tk.WORD,
             insertbackground=BRIGHT,
             pady=10, padx=10,
@@ -172,7 +178,7 @@ class ShellDetailView(BaseView):
         self._record_btn = tk.Label(
             bar, text="  Record evidence  ",
             bg="#222222", fg=BRIGHT,
-            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
             padx=10, pady=4, cursor="",
         )
         self._record_btn.pack(side=tk.RIGHT)
@@ -228,7 +234,7 @@ class ShellDetailView(BaseView):
 
     def _lock_and_send(self, cmd):
         self.terminal.delete("prompt", tk.END)
-        self.terminal.insert(tk.END, "\n", "bright")
+        self.terminal.insert(tk.END, cmd + "\n", "bright")
         self._freeze_mark = self.terminal.index("insert")
         self._protect("1.0", self._freeze_mark)
 
@@ -353,10 +359,11 @@ class ShellDetailView(BaseView):
             self._title_label.config(
                 text=f"Shell #{s['id']} — {s['ip']} ({s['status']})"
             )
-        self._freeze_mark = "1.0"
-        self._protect("1.0", self._freeze_mark)
-        self._append_output("[connected]\n", "info")
-        self._insert_prompt()
+        if self.terminal.get("1.0", tk.END).strip() == "":
+            self._freeze_mark = "1.0"
+            self._protect("1.0", self._freeze_mark)
+            self._append_output("[connected]\n", "info")
+            self._insert_prompt()
         self.after(100, lambda: self.terminal.focus_set())
         self.after(500, self._poll)
 

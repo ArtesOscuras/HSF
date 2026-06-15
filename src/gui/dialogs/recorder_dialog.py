@@ -1,3 +1,4 @@
+from src.gui import fonts
 import tkinter as tk
 from tkinter import ttk
 
@@ -23,7 +24,7 @@ class _TargetSection:
 
         machine_radio = tk.Radiobutton(
             mode_frame, text="  Machine  ", variable=self._target_mode, value="machine",
-            bg=BG, fg=FG, selectcolor=BG, font=("Menlo", 10),
+            bg=BG, fg=FG, selectcolor=BG, font=(fonts.family(), 10),
             activebackground=BG, activeforeground=FG,
             indicatoron=False, relief=tk.FLAT,
             command=self._populate,
@@ -32,7 +33,7 @@ class _TargetSection:
 
         domain_radio = tk.Radiobutton(
             mode_frame, text="  Domain  ", variable=self._target_mode, value="domain",
-            bg=BG, fg=FG, selectcolor=BG, font=("Menlo", 10),
+            bg=BG, fg=FG, selectcolor=BG, font=(fonts.family(), 10),
             activebackground=BG, activeforeground=FG,
             indicatoron=False, relief=tk.FLAT,
             command=self._populate,
@@ -47,7 +48,7 @@ class _TargetSection:
         self._listbox = tk.Listbox(
             frame, bg=BG_WIDGET, fg=FG,
             selectbackground=SEL_BG, selectforeground=FG,
-            font=("Menlo", 11), borderwidth=0, highlightthickness=0,
+            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
             activestyle="none", exportselection=False, height=3,
         )
         self._listbox.grid(row=0, column=0, sticky="nsew")
@@ -122,16 +123,16 @@ class WebRecorderDialog(tk.Toplevel):
         self.rowconfigure(8, weight=0)
 
         tk.Label(
-            self, text="Web Recorder Configuration", font=("Menlo", 16, "bold"),
+            self, text="Web Recorder Configuration", font=(fonts.family_bold(), 16),
             fg=FG, bg=BG,
         ).grid(row=0, column=0, columnspan=2, sticky="w", padx=15, pady=(15, 10))
 
         tk.Label(
-            self, text="Evidence name", font=("Menlo", 11, "bold"),
+            self, text="Evidence name", font=(fonts.family_bold(), 11),
             fg=FG, bg=BG,
         ).grid(row=1, column=0, sticky="w", padx=15, pady=(5, 0))
         tk.Label(
-            self, text="(name for the evidence folder)", font=("Menlo", 9),
+            self, text="(name for the evidence folder)", font=(fonts.family(), 9),
             fg=FG_DIM, bg=BG,
         ).grid(row=2, column=0, sticky="w", padx=15, pady=(0, 5))
 
@@ -139,12 +140,12 @@ class WebRecorderDialog(tk.Toplevel):
         tk.Entry(
             self, textvariable=self._name_var,
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
-            font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
+            font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=1, column=1, rowspan=2, sticky="ew", padx=15, pady=(5, 5))
 
         tk.Label(
-            self, text="Target", font=("Menlo", 11, "bold"),
+            self, text="Target", font=(fonts.family_bold(), 11),
             fg=FG, bg=BG,
         ).grid(row=3, column=0, sticky="nw", padx=15, pady=(10, 5))
 
@@ -158,18 +159,18 @@ class WebRecorderDialog(tk.Toplevel):
         self._target = _TargetSection(self, 3, on_select=_on_target_change)
 
         tk.Label(
-            self, text="URL", font=("Menlo", 11, "bold"),
+            self, text="URL", font=(fonts.family_bold(), 11),
             fg=FG, bg=BG,
         ).grid(row=5, column=0, sticky="w", padx=15, pady=(10, 0))
         tk.Entry(
             self, textvariable=self._url_var,
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
-            font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
+            font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=5, column=1, sticky="ew", padx=15, pady=(10, 0))
 
         tk.Label(
-            self, text="Browser", font=("Menlo", 11, "bold"),
+            self, text="Browser", font=(fonts.family_bold(), 11),
             fg=FG, bg=BG,
         ).grid(row=6, column=0, sticky="nw", padx=15, pady=(15, 5))
 
@@ -181,7 +182,7 @@ class WebRecorderDialog(tk.Toplevel):
         self._browser_listbox = tk.Listbox(
             frame, bg=BG_WIDGET, fg=FG,
             selectbackground=SEL_BG, selectforeground=FG,
-            font=("Menlo", 11), borderwidth=0, highlightthickness=0,
+            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
             activestyle="none", exportselection=False, height=4,
         )
         self._browser_listbox.grid(row=0, column=0, sticky="nsew")
@@ -194,7 +195,7 @@ class WebRecorderDialog(tk.Toplevel):
             self._browser_listbox.selection_set(0)
 
         tk.Label(
-            self, text="Scope", font=("Menlo", 11, "bold"),
+            self, text="Scope", font=(fonts.family_bold(), 11),
             fg=FG, bg=BG,
         ).grid(row=7, column=0, sticky="w", padx=15, pady=(15, 0))
 
@@ -206,7 +207,7 @@ class WebRecorderDialog(tk.Toplevel):
             scope_frame, text="  Only capture matching domain",
             variable=self._scope_var,
             bg=BG, fg=FG_DIM, selectcolor=BG,
-            font=("Menlo", 10),
+            font=(fonts.family(), 10),
             activebackground=BG, activeforeground=FG,
         )
         self._scope_check.pack(side=tk.LEFT)
@@ -215,7 +216,7 @@ class WebRecorderDialog(tk.Toplevel):
         self._scope_domain_entry = tk.Entry(
             scope_frame, textvariable=self._scope_domain_var,
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
-            font=("Menlo", 10), width=25, borderwidth=1, relief=tk.FLAT,
+            font=(fonts.family(), 10), width=25, borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         )
         self._scope_domain_entry.pack(side=tk.LEFT, padx=(10, 0))
@@ -227,7 +228,7 @@ class WebRecorderDialog(tk.Toplevel):
 
         cancel_btn = tk.Label(
             btn_frame, text="  Cancel  ", bg="#222222", fg=FG,
-            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         cancel_btn.pack(side=tk.RIGHT, padx=(5, 0))
@@ -237,7 +238,7 @@ class WebRecorderDialog(tk.Toplevel):
 
         start_btn = tk.Label(
             btn_frame, text="  Start  ", bg="#222222", fg=FG,
-            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         start_btn.pack(side=tk.RIGHT)

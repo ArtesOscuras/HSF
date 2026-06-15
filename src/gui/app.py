@@ -10,6 +10,7 @@ import time
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import netifaces
+from . import fonts
 from .console import Console
 from .visualizer import Visualizer
 from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UserPassView, HashListView, ShellListView, ToolsView
@@ -26,11 +27,13 @@ from src.shells import ShellListener, shell_db
 
 class App(tk.Tk):
     def __init__(self):
+        fonts.register_before_tk()
         super().__init__()
         self.title("HSF - Hack Station Framework")
         self.minsize(800, 600)
-        self.state("zoomed")
+        self.state("normal")
 
+        fonts.init(self)
         self.configure(bg="#000000")
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -161,6 +164,7 @@ class App(tk.Tk):
         self.console.register_command("nslookup", self._cmd_nslookup, "DNS lookup for a domain, IP or machine ID")
         self.console.register_command("add-domain", self._cmd_domain, "Add a domain to the inventory")
         self.console.register_command("fuzz", self._cmd_fuzz, "Open fuzz configuration dialog")
+        self.console.register_command("ftp", self._cmd_ftp, "Open FTP/SFTP connection to a machine")
         self.console.register_command("webrecorder", self._cmd_recorder, "Record browser session for a domain")
         self.console.register_command("delete-evidence", self._cmd_delete_evidence, "Delete all evidence data")
         self.console.register_command("init", self._cmd_init, "Re-run initialization checks")
@@ -1438,6 +1442,66 @@ class App(tk.Tk):
     def _cmd_fuzz(self, args):
         from .dialogs.fuzz import FuzzDialog
         FuzzDialog(self)
+
+    def _cmd_ftp(self, args):
+        if not args:
+            from .dialogs.remote_access import RemoteAccessDialog
+            RemoteAccessDialog(self)
+            self.visualizer.activate_view("shells")
+            return
+
+        target = args[0]
+        ip = target
+        if re.match(r"^\d+$", ip):
+            machine_id = int(ip)
+            machine = None
+            for m in store.get_all():
+                if m.id == machine_id:
+                    machine = m
+                    break
+            if machine:
+                ip = machine.ip
+            else:
+                self.console.warning(f"No machine with ID #{machine_id}")
+                return
+
+        port = 21
+        cred_user = ""
+        cred_pass = ""
+        if len(args) >= 2:
+            if re.match(r"^\d+$", args[1]):
+                port = int(args[1])
+                if len(args) >= 3:
+                    cred_user = args[2]
+            else:
+                cred_user = args[1]
+
+        if cred_user:
+            from src.machines import credential_db
+            for c in credential_db.load_credentials():
+                if c.get("username") == cred_user:
+                    cred_pass = c.get("password") or ""
+                    break
+
+        self.console.info(f"Connecting FTP to {ip}:{port}...")
+        threading.Thread(
+            target=self._run_ftp_connect,
+            args=(ip, port, cred_user, cred_pass),
+            daemon=True,
+        ).start()
+        self.visualizer.activate_view("shells")
+
+    def _run_ftp_connect(self, host, port, user, password):
+        from src.shells import shell_db
+        from src.shells.ftp_shell import FTPConnectionThread
+        session = shell_db.add_session(host, port, 0)
+        session["type"] = "FTP"
+        ftp_thread = FTPConnectionThread(host, port, user, password, session["id"])
+        session["cmd_queue"] = ftp_thread.queue
+        ftp_thread.start()
+        self.console.after(0, lambda s=session: self.console.success(
+            f"FTP session #{s['id']} to {host}:{port}"
+        ))
 
     def _cmd_recorder(self, args):
         if not args:

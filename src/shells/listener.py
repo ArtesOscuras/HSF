@@ -177,21 +177,44 @@ def send_command(sid, cmd):
     if not session or session["status"] != "connected":
         _dbg(f"[shell #{sid}] send_command failed: not connected")
         return False
-    sock = session.get("socket")
-    if not sock:
-        return False
-    try:
-        if isinstance(cmd, str):
-            cmd_bytes = (cmd + "\n").encode()
-        else:
-            cmd_bytes = cmd
-        sock.sendall(cmd_bytes)
-        _dbg(f"[shell #{sid}] sent command ({len(cmd_bytes)} bytes)")
+    q = session.get("cmd_queue")
+    if q:
+        q.put(cmd)
+        _dbg(f"[shell #{sid}] queued command ({len(cmd)} chars)")
         return True
-    except OSError as e:
-        _dbg(f"[shell #{sid}] send_command error: {e}")
-        shell_db.set_status(sid, "disconnected")
-        return False
+    cmd_bytes = (cmd + "\n").encode() if isinstance(cmd, str) else cmd
+    pty_fd = session.get("pty_fd")
+    if pty_fd:
+        try:
+            os.write(pty_fd, cmd_bytes)
+            _dbg(f"[shell #{sid}] sent command via pty ({len(cmd_bytes)} bytes)")
+            return True
+        except OSError as e:
+            _dbg(f"[shell #{sid}] send_command (pty) error: {e}")
+            shell_db.set_status(sid, "disconnected")
+            return False
+    sock = session.get("socket")
+    if sock:
+        try:
+            sock.sendall(cmd_bytes)
+            _dbg(f"[shell #{sid}] sent command ({len(cmd_bytes)} bytes)")
+            return True
+        except OSError as e:
+            _dbg(f"[shell #{sid}] send_command error: {e}")
+            shell_db.set_status(sid, "disconnected")
+            return False
+    proc = session.get("process")
+    if proc:
+        try:
+            proc.stdin.write(cmd_bytes)
+            proc.stdin.flush()
+            _dbg(f"[shell #{sid}] sent command via process ({len(cmd_bytes)} bytes)")
+            return True
+        except OSError as e:
+            _dbg(f"[shell #{sid}] send_command (process) error: {e}")
+            shell_db.set_status(sid, "disconnected")
+            return False
+    return False
 
 
 def send_raw(sid, data):
@@ -199,16 +222,39 @@ def send_raw(sid, data):
     if not session or session["status"] != "connected":
         _dbg(f"[shell #{sid}] send_raw failed: not connected")
         return False
+    if isinstance(data, str):
+        data_bytes = data.encode()
+    else:
+        data_bytes = data
+    pty_fd = session.get("pty_fd")
+    if pty_fd:
+        try:
+            os.write(pty_fd, data_bytes)
+            _dbg(f"[shell #{sid}] sent raw via pty ({len(data_bytes)} bytes)")
+            return True
+        except OSError as e:
+            _dbg(f"[shell #{sid}] send_raw (pty) error: {e}")
+            shell_db.set_status(sid, "disconnected")
+            return False
     sock = session.get("socket")
-    if not sock:
-        return False
-    try:
-        if isinstance(data, str):
-            data = data.encode()
-        sock.sendall(data)
-        _dbg(f"[shell #{sid}] sent raw ({len(data)} bytes)")
-        return True
-    except OSError as e:
-        _dbg(f"[shell #{sid}] send_raw error: {e}")
-        shell_db.set_status(sid, "disconnected")
-        return False
+    if sock:
+        try:
+            sock.sendall(data_bytes)
+            _dbg(f"[shell #{sid}] sent raw ({len(data_bytes)} bytes)")
+            return True
+        except OSError as e:
+            _dbg(f"[shell #{sid}] send_raw error: {e}")
+            shell_db.set_status(sid, "disconnected")
+            return False
+    proc = session.get("process")
+    if proc:
+        try:
+            proc.stdin.write(data_bytes)
+            proc.stdin.flush()
+            _dbg(f"[shell #{sid}] sent raw via process ({len(data_bytes)} bytes)")
+            return True
+        except OSError as e:
+            _dbg(f"[shell #{sid}] send_raw (process) error: {e}")
+            shell_db.set_status(sid, "disconnected")
+            return False
+    return False

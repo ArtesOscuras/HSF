@@ -2,6 +2,7 @@ import os
 import platform
 import shutil
 import tkinter as tk
+from src.gui import fonts
 
 _BROWSERS = {
     "google-chrome": ("Google Chrome", [
@@ -67,7 +68,7 @@ class BrowserSelector(tk.Toplevel):
 
         tk.Label(
             self, text="Multiple browsers detected. Select one:",
-            font=("Menlo", 11), fg="#ffffff", bg="#111111",
+            font=(fonts.family(), 11), fg="#ffffff", bg="#111111",
         ).grid(row=0, column=0, sticky="w", padx=15, pady=(15, 5))
 
         frame = tk.Frame(self, bg="#000000")
@@ -78,7 +79,7 @@ class BrowserSelector(tk.Toplevel):
         self._listbox = tk.Listbox(
             frame, bg="#000000", fg="#ffffff",
             selectbackground="#333333", selectforeground="#ffffff",
-            font=("Menlo", 12), borderwidth=0, highlightthickness=0,
+            font=(fonts.family(), 12), borderwidth=0, highlightthickness=0,
             activestyle="none",
         )
         self._listbox.grid(row=0, column=0, sticky="nsew")
@@ -100,7 +101,7 @@ class BrowserSelector(tk.Toplevel):
 
         cancel_btn = tk.Label(
             btn_frame, text="  Cancel  ", bg="#222222", fg="#ffffff",
-            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         cancel_btn.pack(side=tk.RIGHT, padx=(5, 0))
@@ -110,7 +111,7 @@ class BrowserSelector(tk.Toplevel):
 
         select_btn = tk.Label(
             btn_frame, text="  Select  ", bg="#222222", fg="#ffffff",
-            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         select_btn.pack(side=tk.RIGHT)

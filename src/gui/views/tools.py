@@ -1,45 +1,15 @@
-import os
+from src.gui import fonts
 import tkinter as tk
 import tkinter.font as tkfont
-from PIL import Image, ImageTk
+from src.gui import icons
 from .base import BaseView
 from .nav import build as build_nav
 
 MUTED = "#888888"
 BRIGHT = "#ffffff"
 
-ICON_SIZE = 50
 COL_GAP = "   "
-
-_icons = {}
-
-_ICON_FILES = {
-    "scanner": "scanner.png",
-    "fuzzer": "fuzzer.png",
-    "webrecorder": "webrecorder.png",
-}
-
-
-def _load_tool_icons():
-    icons_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "icons")
-    icons_dir = os.path.abspath(icons_dir)
-    for action, filename in _ICON_FILES.items():
-        if action in _icons:
-            continue
-        path = os.path.join(icons_dir, filename)
-        if os.path.isfile(path):
-            try:
-                img = Image.open(path).convert("RGBA")
-                img = img.resize((ICON_SIZE, ICON_SIZE), Image.LANCZOS)
-                _icons[action] = ImageTk.PhotoImage(img)
-            except Exception:
-                _icons[action] = None
-        else:
-            _icons[action] = None
-
-
-def _get_tool_icon(action):
-    return _icons.get(action)
+ICON_SIZE = 50
 
 
 class ToolsView(BaseView):
@@ -49,7 +19,7 @@ class ToolsView(BaseView):
     MIN_NAME = 14
 
     def _build_ui(self):
-        _load_tool_icons()
+
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=0)
@@ -66,7 +36,7 @@ class ToolsView(BaseView):
         tk.Label(
             header,
             text="Tools",
-            font=("Menlo", 22, "bold"),
+            font=(fonts.family_bold(), 22),
             fg="#ffffff",
             bg="#000000",
         ).pack(anchor="center")
@@ -80,7 +50,7 @@ class ToolsView(BaseView):
             text_frame,
             bg="#000000",
             fg=BRIGHT,
-            font=("Menlo", 16),
+            font=(fonts.family(), 16),
             borderwidth=0,
             highlightthickness=0,
             pady=10,
@@ -94,8 +64,8 @@ class ToolsView(BaseView):
 
         self.text.tag_configure("muted", foreground=MUTED)
         self.text.tag_configure("bright", foreground=BRIGHT)
-        self.text.tag_configure("tool_name", foreground=BRIGHT, font=("Menlo", 18))
-        self.text.tag_configure("tool_desc", foreground=MUTED, font=("Menlo", 12))
+        self.text.tag_configure("tool_name", foreground=BRIGHT, font=(fonts.family(), 18))
+        self.text.tag_configure("tool_desc", foreground=MUTED, font=(fonts.family(), 12))
 
         scrollbar = tk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.text.yview)
         scrollbar.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
@@ -133,8 +103,8 @@ class ToolsView(BaseView):
             w_name = max(w_name, len(t["name"]))
             w_desc = max(w_desc, len(t["desc"]))
 
-        font = tkfont.Font(font=("Menlo", 18))
-        font_desc = tkfont.Font(font=("Menlo", 12))
+        font = tkfont.Font(font=(fonts.family(), 18))
+        font_desc = tkfont.Font(font=(fonts.family(), 12))
         gap_px = font.measure(COL_GAP)
         char_w = font_desc.measure(" ")
 
@@ -167,7 +137,7 @@ class ToolsView(BaseView):
 
         self.text.insert(tk.END, center_pad, "bright")
 
-        icon = _get_tool_icon(action)
+        icon = icons.icon(f"{action}.png", size=ICON_SIZE)
         if icon:
             self.text.image_create(tk.END, image=icon)
         else:

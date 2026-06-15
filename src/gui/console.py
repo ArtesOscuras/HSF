@@ -1,3 +1,4 @@
+from src.gui import fonts
 import tkinter as tk
 from tkinter import scrolledtext
 
@@ -48,7 +49,7 @@ class Console(tk.Frame):
             bg=BG,
             fg=FG_DIM,
             insertbackground=FG,
-            font=("Menlo", 11),
+            font=(fonts.family(), 11),
             borderwidth=0,
             highlightthickness=0,
         )
@@ -66,7 +67,7 @@ class Console(tk.Frame):
             text="HSF> ",
             bg=BG_INPUT,
             fg=FG,
-            font=("Menlo", 11),
+            font=(fonts.family(), 11),
         )
         self.prompt_label.grid(row=0, column=0, sticky="w")
 
@@ -77,7 +78,7 @@ class Console(tk.Frame):
             bg=BG,
             fg=FG,
             insertbackground=FG,
-            font=("Menlo", 11),
+            font=(fonts.family(), 11),
             borderwidth=1,
             relief=tk.FLAT,
             highlightthickness=1,
@@ -120,6 +121,8 @@ class Console(tk.Frame):
         self.help_sections.append((title, items))
 
     def write(self, text, color=None):
+        if not self.winfo_exists():
+            return
         self.output_area.config(state=tk.NORMAL)
         is_at_bottom = self.output_area.yview()[1] >= 1.0
         tag = None
@@ -208,7 +211,7 @@ class Console(tk.Frame):
 
     def _adjust_font(self, delta):
         self._font_size = max(8, min(24, self._font_size + delta))
-        new_font = ("Menlo", self._font_size)
+        new_font = (fonts.family(), self._font_size)
         self.output_area.configure(font=new_font)
         self.input_entry.configure(font=new_font)
         self.prompt_label.configure(font=new_font)
@@ -315,7 +318,7 @@ class Console(tk.Frame):
         frame = tk.Frame(self.master, bg="#111111", highlightbackground="#333333", highlightthickness=1)
 
         lb = tk.Listbox(frame, bg="#111111", fg="#FFFFFF", selectbackground="#333333",
-                        selectforeground="#FFFFFF", font=("Menlo", 11), borderwidth=0,
+                        selectforeground="#FFFFFF", font=(fonts.family(), 11), borderwidth=0,
                         highlightthickness=0, activestyle="none", exportselection=False)
         lb.pack(fill=tk.BOTH, expand=True)
         for name, help_text in matches:

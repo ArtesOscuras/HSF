@@ -1,9 +1,8 @@
-import os
+from src.gui import fonts
 import re
-import shutil
 import tkinter as tk
 import tkinter.font as tkfont
-from PIL import Image, ImageTk
+from src.gui import icons
 from .base import BaseView
 from .nav import build as build_nav
 from src.machines import store, interface_name, interface_ip
@@ -12,50 +11,8 @@ from src.machines import machine_db
 MUTED = "#888888"
 BRIGHT = "#ffffff"
 
-ICON_SIZE = 50
 COL_GAP = "   "
-
-_icon_cache = {}
-_delete_img = None
-
-
-def _load_delete_img():
-    global _delete_img
-    if _delete_img is not None:
-        return _delete_img
-    path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "icons", "delete.png")
-    path = os.path.abspath(path)
-    if os.path.isfile(path):
-        try:
-            img = Image.open(path).convert("RGBA")
-            img = img.resize((20, 20), Image.LANCZOS)
-            _delete_img = ImageTk.PhotoImage(img)
-        except Exception:
-            _delete_img = False
-    else:
-        _delete_img = False
-    return _delete_img
-
-
-def _load_icons():
-    global _icon_cache
-    if _icon_cache:
-        return
-    icons_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "icons")
-    icons_dir = os.path.abspath(icons_dir)
-    if not os.path.isdir(icons_dir):
-        return
-    for fname in os.listdir(icons_dir):
-        if not fname.lower().endswith(".png"):
-            continue
-        path = os.path.join(icons_dir, fname)
-        try:
-            img = Image.open(path).convert("RGBA")
-            img = img.resize((ICON_SIZE, ICON_SIZE), Image.LANCZOS)
-            name = os.path.splitext(fname)[0].lower()
-            _icon_cache[name] = ImageTk.PhotoImage(img)
-        except Exception:
-            pass
+ICON_SIZE = 50
 
 
 class NetworkView(BaseView):
@@ -66,8 +23,6 @@ class NetworkView(BaseView):
     MIN_HOSTNAME = 6
 
     def _build_ui(self):
-        _load_icons()
-        _load_delete_img()
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
@@ -83,7 +38,7 @@ class NetworkView(BaseView):
         tk.Label(
             header,
             text="Machines",
-            font=("Menlo", 22, "bold"),
+            font=(fonts.family_bold(), 22),
             fg="#ffffff",
             bg="#000000",
         ).pack(anchor="center")
@@ -91,7 +46,7 @@ class NetworkView(BaseView):
         self.iface_label = tk.Label(
             header,
             text="",
-            font=("Menlo", 11),
+            font=(fonts.family(), 11),
             fg=MUTED,
             bg="#000000",
         )
@@ -106,7 +61,7 @@ class NetworkView(BaseView):
             text_frame,
             bg="#000000",
             fg=BRIGHT,
-            font=("Menlo", 16),
+            font=(fonts.family(), 16),
             borderwidth=0,
             highlightthickness=0,
             pady=10,
@@ -146,13 +101,15 @@ class NetworkView(BaseView):
     def _guess_icon(machine):
         dt = (machine.device_type or "device unknown").lower()
         if dt == "device unknown":
-            return _icon_cache.get("question")
+            return icons.icon("question.png", size=50)
         if dt == "gateway":
-            return _icon_cache.get("router") or _icon_cache.get("question")
-        for name in sorted(_icon_cache, key=lambda n: -len(n)):
+            return icons.icon("router.png", size=50) or icons.icon("question.png", size=50)
+        for name in ["linux device", "windows", "mac", "android", "iphone", "ipad",
+                      "ubuntu", "debian", "fedora", "centos", "arch", "kali",
+                      "freebsd", "router", "printer", "camera"]:
             if name in dt or dt in name:
-                return _icon_cache[name]
-        return _icon_cache.get("question")
+                return icons.icon(f"{name}.png", size=50)
+        return icons.icon("question.png", size=50)
 
     @staticmethod
     def _display_label(machine):
@@ -190,7 +147,7 @@ class NetworkView(BaseView):
         self.text.insert(tk.END, f"{machine.ip}", "bright")
         self.text.insert(tk.END, "\t", "bright")
 
-        del_img = _load_delete_img()
+        del_img = icons.delete_icon()
         if del_img:
             self.text.image_create(tk.END, image=del_img)
             del_tag = f"del_{machine.ip}"

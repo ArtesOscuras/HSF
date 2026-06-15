@@ -1,3 +1,4 @@
+from src.gui import fonts
 import tkinter as tk
 from .base import BaseView
 from src.machines import domain_db
@@ -27,14 +28,14 @@ class DomainDetailView(BaseView):
         self._title_label = tk.Label(
             header,
             text="",
-            font=("Menlo", 22, "bold"),
+            font=(fonts.family_bold(), 22),
             fg="#ffffff",
             bg="#000000",
         )
         self._title_label.pack(anchor="center")
         self._title_label.bind("<Button-1>", self._on_title_click)
-        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=("Menlo", 22, "bold", "underline")))
-        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=("Menlo", 22, "bold")))
+        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=(fonts.family_bold(), 22, "underline")))
+        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=(fonts.family_bold(), 22)))
         self._on_back_click = None
 
         text_frame = tk.Frame(self, bg="#000000")
@@ -46,7 +47,7 @@ class DomainDetailView(BaseView):
             text_frame,
             bg="#000000",
             fg=BRIGHT,
-            font=("Menlo", 13),
+            font=(fonts.family(), 13),
             borderwidth=0,
             highlightthickness=0,
             state=tk.DISABLED,

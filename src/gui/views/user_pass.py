@@ -1,3 +1,4 @@
+from src.gui import fonts
 import struct
 import tkinter as tk
 from .base import BaseView
@@ -80,12 +81,12 @@ class UserPassView(BaseView):
 
         self._title_label = tk.Label(
             header, text="Users & Passwords",
-            font=("Menlo", 22, "bold"), fg="#ffffff", bg="#000000",
+            font=(fonts.family_bold(), 22), fg="#ffffff", bg="#000000",
         )
         self._title_label.pack(anchor="center")
         self._title_label.bind("<Button-1>", lambda e: self.master.activate_view("credentials"))
-        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=("Menlo", 22, "bold", "underline")))
-        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=("Menlo", 22, "bold")))
+        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=(fonts.family_bold(), 22, "underline")))
+        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=(fonts.family_bold(), 22)))
 
         content = tk.Frame(self, bg="#000000")
         content.grid(row=1, column=0, sticky="nsew", padx=(300, 300))
@@ -97,12 +98,12 @@ class UserPassView(BaseView):
 
         tk.Label(
             content, text="Users",
-            font=("Menlo", 14, "bold"), fg=BRIGHT, bg="#000000",
+            font=(fonts.family_bold(), 14), fg=BRIGHT, bg="#000000",
         ).grid(row=0, column=0, pady=(10, 5))
 
         tk.Label(
             content, text="Passwords",
-            font=("Menlo", 14, "bold"), fg=BRIGHT, bg="#000000",
+            font=(fonts.family_bold(), 14), fg=BRIGHT, bg="#000000",
         ).grid(row=0, column=1, pady=(10, 5))
 
         self._users_text = self._build_editor(content, 1, 0)
@@ -114,13 +115,13 @@ class UserPassView(BaseView):
         self._poll_id = None
 
         btn_frame2 = tk.Frame(self, bg="#000000")
-        btn_frame2.grid(row=2, column=0, pady=(10, 15))
+        btn_frame2.grid(row=2, column=0, sticky="ew", pady=(10, 15))
 
         gen_btn = tk.Label(
             btn_frame2,
             text="  Generate credentials  ",
             bg="#222222", fg=BRIGHT,
-            font=("Menlo", 12),
+            font=(fonts.family(), 12),
             relief=tk.RAISED, bd=1,
             padx=15, pady=8,
         )
@@ -128,7 +129,7 @@ class UserPassView(BaseView):
 
         back_btn = tk.Label(
             btn_frame2, text="  \u2190 Back  ", bg="#222222", fg=BRIGHT,
-            font=("Menlo", 12), relief=tk.RAISED, bd=1,
+            font=(fonts.family(), 12), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         back_btn.pack(side=tk.LEFT)
@@ -148,7 +149,7 @@ class UserPassView(BaseView):
 
         text = tk.Text(
             text_frame, bg="#111111", fg=BRIGHT,
-            font=("Menlo", 13), borderwidth=1,
+            font=(fonts.family(), 13), borderwidth=1,
             relief=tk.FLAT, pady=5, cursor="xterm",
             wrap=tk.NONE, height=12,
             highlightthickness=1,
@@ -247,12 +248,12 @@ class _CredentialGenerator(tk.Toplevel):
         self.rowconfigure(5, weight=0)
 
         tk.Label(
-            self, text="Users", font=("Menlo", 14, "bold"),
+            self, text="Users", font=(fonts.family_bold(), 14),
             fg=INFO, bg="#111111",
         ).grid(row=0, column=0, sticky="w", padx=15, pady=(15, 5))
 
         tk.Label(
-            self, text="Passwords", font=("Menlo", 14, "bold"),
+            self, text="Passwords", font=(fonts.family_bold(), 14),
             fg=INFO, bg="#111111",
         ).grid(row=0, column=1, sticky="w", padx=15, pady=(15, 5))
 
@@ -279,28 +280,28 @@ class _CredentialGenerator(tk.Toplevel):
         domain_frame = tk.Frame(self, bg="#111111")
         domain_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=(15, 0))
         tk.Label(
-            domain_frame, text="Domain", font=("Menlo", 11, "bold"),
+            domain_frame, text="Domain", font=(fonts.family_bold(), 11),
             fg=INFO, bg="#111111",
         ).pack(anchor="w")
         self._domain_var = tk.StringVar()
         tk.Entry(
             domain_frame, textvariable=self._domain_var,
             bg="#000000", fg="#ffffff", insertbackground="#ffffff",
-            font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
+            font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).pack(fill=tk.X)
 
         hash_frame = tk.Frame(self, bg="#111111")
         hash_frame.grid(row=2, column=1, sticky="ew", padx=15, pady=(15, 0))
         tk.Label(
-            hash_frame, text="Hash NT", font=("Menlo", 11, "bold"),
+            hash_frame, text="Hash NT", font=(fonts.family_bold(), 11),
             fg=INFO, bg="#111111",
         ).pack(anchor="w")
         self._hash_var = tk.StringVar()
         tk.Entry(
             hash_frame, textvariable=self._hash_var,
             bg="#000000", fg="#ffffff", insertbackground="#ffffff",
-            font=("Menlo", 11), borderwidth=1, relief=tk.FLAT,
+            font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).pack(fill=tk.X)
         self._auto_hash_var = tk.BooleanVar(value=True)
@@ -308,12 +309,12 @@ class _CredentialGenerator(tk.Toplevel):
             hash_frame, text="  Auto NTLM",
             variable=self._auto_hash_var,
             bg="#111111", fg=MUTED, selectcolor="#111111",
-            font=("Menlo", 10),
+            font=(fonts.family(), 10),
             activebackground="#111111", activeforeground=MUTED,
         ).pack(anchor="w", pady=(5, 0))
 
         self._feedback_label = tk.Label(
-            self, text="", font=("Menlo", 11),
+            self, text="", font=(fonts.family(), 11),
             fg="#00cc66", bg="#111111",
         )
         self._feedback_label.grid(row=3, column=0, columnspan=2, pady=(10, 0))
@@ -323,7 +324,7 @@ class _CredentialGenerator(tk.Toplevel):
 
         cancel_btn = tk.Label(
             btn_frame, text="  Close  ", bg="#222222", fg="#ffffff",
-            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         cancel_btn.pack(side=tk.RIGHT, padx=(5, 0))
@@ -333,7 +334,7 @@ class _CredentialGenerator(tk.Toplevel):
 
         add_btn = tk.Label(
             btn_frame, text="  Add  ", bg="#222222", fg="#ffffff",
-            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         add_btn.pack(side=tk.RIGHT)
@@ -356,7 +357,7 @@ class _CredentialGenerator(tk.Toplevel):
         lb = tk.Listbox(
             frame, bg="#000000", fg="#ffffff",
             selectbackground="#333333", selectforeground="#ffffff",
-            font=("Menlo", 12), borderwidth=0, highlightthickness=0,
+            font=(fonts.family(), 12), borderwidth=0, highlightthickness=0,
             activestyle="none", exportselection=False,
         )
         lb.grid(row=0, column=0, sticky="nsew")

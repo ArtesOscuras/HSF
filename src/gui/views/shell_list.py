@@ -1,56 +1,18 @@
-import os
+from src.gui import fonts
 import tkinter as tk
 import tkinter.font as tkfont
-from PIL import Image, ImageTk
+from src.gui import icons
 from .base import BaseView
 from .nav import build as build_nav
 from src.shells import shell_db
+from src.gui.dialogs.remote_access import RemoteAccessDialog
 
 MUTED = "#888888"
 BRIGHT = "#ffffff"
 INFO = "#5ba3ec"
 
-ICON_SIZE = 50
 COL_GAP = "   "
-
-_icon = None
-_delete_img = None
-
-
-def _load_icon():
-    global _icon
-    if _icon is not None:
-        return _icon
-    path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "icons", "shells.png")
-    path = os.path.abspath(path)
-    if os.path.isfile(path):
-        try:
-            img = Image.open(path).convert("RGBA")
-            img = img.resize((ICON_SIZE, ICON_SIZE), Image.LANCZOS)
-            _icon = ImageTk.PhotoImage(img)
-        except Exception:
-            _icon = False
-    else:
-        _icon = False
-    return _icon
-
-
-def _load_delete_img():
-    global _delete_img
-    if _delete_img is not None:
-        return _delete_img
-    path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "icons", "delete.png")
-    path = os.path.abspath(path)
-    if os.path.isfile(path):
-        try:
-            img = Image.open(path).convert("RGBA")
-            img = img.resize((20, 20), Image.LANCZOS)
-            _delete_img = ImageTk.PhotoImage(img)
-        except Exception:
-            _delete_img = False
-    else:
-        _delete_img = False
-    return _delete_img
+ICON_SIZE = 50
 
 
 class ShellListView(BaseView):
@@ -60,11 +22,9 @@ class ShellListView(BaseView):
     MIN_NAME = 10
 
     def _build_ui(self):
-        _load_icon()
-        _load_delete_img()
-
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
+        self.rowconfigure(2, weight=0)
 
         header = tk.Frame(self, bg="#000000")
         header.grid(row=0, column=0, sticky="ew", pady=(15, 5))
@@ -77,7 +37,7 @@ class ShellListView(BaseView):
         tk.Label(
             header,
             text="Shells",
-            font=("Menlo", 22, "bold"),
+            font=(fonts.family_bold(), 22),
             fg="#ffffff",
             bg="#000000",
         ).pack(anchor="center")
@@ -91,7 +51,7 @@ class ShellListView(BaseView):
             text_frame,
             bg="#000000",
             fg=BRIGHT,
-            font=("Menlo", 16),
+            font=(fonts.family(), 16),
             borderwidth=0,
             highlightthickness=0,
             pady=10,
@@ -112,6 +72,19 @@ class ShellListView(BaseView):
                             width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.text.configure(yscrollcommand=scrollbar.set)
+
+        btn_frame = tk.Frame(self, bg="#000000")
+        btn_frame.grid(row=2, column=0, pady=(5, 10))
+
+        remote_btn = tk.Label(
+            btn_frame, text="  New remote connection  ", bg="#222222", fg="#ffffff",
+            font=(fonts.family(), 12), relief=tk.RAISED, bd=1,
+            padx=15, pady=6,
+        )
+        remote_btn.pack()
+        remote_btn.bind("<Button-1>", lambda e: self._open_remote_access())
+        remote_btn.bind("<Enter>", lambda e: remote_btn.config(bg="#333333"))
+        remote_btn.bind("<Leave>", lambda e: remote_btn.config(bg="#222222"))
 
         self._last_hash = None
         self._poll_id = None
@@ -144,7 +117,7 @@ class ShellListView(BaseView):
 
         self.text.insert(tk.END, "\t", "bright")
 
-        icon = _load_icon()
+        icon = icons.icon("shells.png", size=ICON_SIZE)
         if icon:
             self.text.image_create(tk.END, image=icon)
         else:
@@ -166,7 +139,7 @@ class ShellListView(BaseView):
         self.text.insert(tk.END, f"{status}", status_color)
         self.text.insert(tk.END, "\t", "bright")
 
-        del_img = _load_delete_img()
+        del_img = icons.delete_icon()
         if del_img:
             self.text.image_create(tk.END, image=del_img)
             del_tag = f"del_{sid}"
@@ -178,6 +151,9 @@ class ShellListView(BaseView):
 
     def _delete_shell(self, sid):
         shell_db.close_session(sid)
+
+    def _open_remote_access(self):
+        RemoteAccessDialog(self)
 
     def _poll(self):
         items = shell_db.get_all()

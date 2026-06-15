@@ -1,3 +1,4 @@
+from src.gui import fonts
 import tkinter as tk
 from tkinter import ttk
 import netifaces
@@ -24,7 +25,7 @@ class ScanDialog(tk.Toplevel):
         style.theme_use("default")
         style.configure("TNotebook", background="#111111", borderwidth=0)
         style.configure("TNotebook.Tab", background="#222222", foreground="#888888",
-                        font=("Menlo", 11), padding=[20, 6],
+                        font=(fonts.family(), 11), padding=[20, 6],
                         borderwidth=0, focuscolor="")
         style.map("TNotebook.Tab", background=[("selected", "#111111")],
                   foreground=[("selected", "#ffffff")])
@@ -52,7 +53,7 @@ class ScanDialog(tk.Toplevel):
 
         cancel_btn = tk.Label(
             footer, text="  Cancel  ", bg="#222222", fg="#ffffff",
-            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         cancel_btn.pack(side=tk.RIGHT, padx=(5, 0))
@@ -72,7 +73,7 @@ class ScanDialog(tk.Toplevel):
 
         tk.Label(
             frame, text="Select a network interface for scanning:",
-            font=("Menlo", 11), fg="#ffffff", bg="#111111",
+            font=(fonts.family(), 11), fg="#ffffff", bg="#111111",
         ).grid(row=0, column=0, sticky="w", padx=15, pady=(15, 5))
 
         list_frame = tk.Frame(frame, bg="#000000")
@@ -84,7 +85,7 @@ class ScanDialog(tk.Toplevel):
             list_frame,
             bg="#000000", fg="#ffffff",
             selectbackground="#333333", selectforeground="#ffffff",
-            font=("Menlo", 12), borderwidth=0, highlightthickness=0,
+            font=(fonts.family(), 12), borderwidth=0, highlightthickness=0,
             activestyle="none",
         )
         self._iface_listbox.grid(row=0, column=0, sticky="nsew")
@@ -107,14 +108,14 @@ class ScanDialog(tk.Toplevel):
 
         tk.Label(
             ip_frame, text="Or enter a specific IP:",
-            font=("Menlo", 10), fg="#888888", bg="#111111",
+            font=(fonts.family(), 10), fg="#888888", bg="#111111",
         ).grid(row=0, column=0, sticky="w", padx=(0, 10))
 
         self._scan_ip_var = tk.StringVar()
         self._scan_ip_entry = tk.Entry(
             ip_frame, textvariable=self._scan_ip_var,
             bg="#000000", fg="#ffffff", insertbackground="#ffffff",
-            font=("Menlo", 12), borderwidth=1, relief=tk.FLAT,
+            font=(fonts.family(), 12), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         )
         self._scan_ip_entry.grid(row=0, column=1, sticky="ew")
@@ -125,7 +126,7 @@ class ScanDialog(tk.Toplevel):
 
         select_btn = tk.Label(
             frame, text="  Scan  ", bg="#222222", fg="#ffffff",
-            font=("Menlo", 11), relief=tk.RAISED, bd=1,
+            font=(fonts.family(), 11), relief=tk.RAISED, bd=1,
             padx=20, pady=6, cursor="",
         )
         select_btn.grid(row=2, column=0, sticky="e", padx=15, pady=(5, 8))
@@ -164,7 +165,7 @@ class ScanDialog(tk.Toplevel):
 
         tk.Label(
             frame, text=f"Select a machine for {label_text}:",
-            font=("Menlo", 11), fg="#ffffff", bg="#111111",
+            font=(fonts.family(), 11), fg="#ffffff", bg="#111111",
         ).grid(row=0, column=0, sticky="w", padx=15, pady=(15, 5))
 
         list_frame = tk.Frame(frame, bg="#000000")
@@ -176,7 +177,7 @@ class ScanDialog(tk.Toplevel):
             list_frame,
             bg="#000000", fg="#ffffff",
             selectbackground="#333333", selectforeground="#ffffff",
-            font=("Menlo", 11), borderwidth=0, highlightthickness=0,
+            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
             activestyle="none",
         )
         lb.grid(row=0, column=0, sticky="nsew")
@@ -201,7 +202,7 @@ class ScanDialog(tk.Toplevel):
 
         select_btn = tk.Label(
             frame, text="  Scan  ", bg="#222222", fg="#ffffff",
-            font=("Menlo", 11), relief=tk.RAISED, bd=1,
+            font=(fonts.family(), 11), relief=tk.RAISED, bd=1,
             padx=20, pady=6, cursor="",
         )
         select_btn.grid(row=2, column=0, sticky="e", padx=15, pady=(5, 8))
@@ -218,7 +219,7 @@ class ScanDialog(tk.Toplevel):
 
         tk.Label(
             frame, text="Select a machine and port to probe:",
-            font=("Menlo", 11), fg="#ffffff", bg="#111111",
+            font=(fonts.family(), 11), fg="#ffffff", bg="#111111",
         ).grid(row=0, column=0, sticky="w", padx=15, pady=(15, 5))
 
         list_frame = tk.Frame(frame, bg="#000000")
@@ -230,7 +231,7 @@ class ScanDialog(tk.Toplevel):
             list_frame,
             bg="#000000", fg="#ffffff",
             selectbackground="#333333", selectforeground="#ffffff",
-            font=("Menlo", 11), borderwidth=0, highlightthickness=0,
+            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
             activestyle="none",
         )
         lb.grid(row=0, column=0, sticky="nsew")
@@ -256,21 +257,21 @@ class ScanDialog(tk.Toplevel):
 
         tk.Label(
             port_frame, text="Port:",
-            font=("Menlo", 10), fg="#888888", bg="#111111",
+            font=(fonts.family(), 10), fg="#888888", bg="#111111",
         ).grid(row=0, column=0, sticky="w", padx=(0, 10))
 
         banner_port_var = tk.StringVar(value="80")
         banner_port_entry = tk.Entry(
             port_frame, textvariable=banner_port_var,
             bg="#000000", fg="#ffffff", insertbackground="#ffffff",
-            font=("Menlo", 12), borderwidth=1, relief=tk.FLAT, width=8,
+            font=(fonts.family(), 12), borderwidth=1, relief=tk.FLAT, width=8,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         )
         banner_port_entry.grid(row=0, column=1, sticky="w")
 
         select_btn = tk.Label(
             frame, text="  Scan  ", bg="#222222", fg="#ffffff",
-            font=("Menlo", 11), relief=tk.RAISED, bd=1,
+            font=(fonts.family(), 11), relief=tk.RAISED, bd=1,
             padx=20, pady=6, cursor="",
         )
         select_btn.grid(row=2, column=0, sticky="e", padx=15, pady=(5, 8))

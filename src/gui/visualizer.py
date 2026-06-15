@@ -1,4 +1,5 @@
 import tkinter as tk
+from src.gui import fonts
 from .views import BaseView
 
 
@@ -16,7 +17,7 @@ class Visualizer(tk.Frame):
         self._placeholder = tk.Label(
             self,
             text="Visualization Area",
-            font=("Menlo", 18),
+            font=(fonts.family(), 18),
             fg="#888888",
             bg="#000000",
         )

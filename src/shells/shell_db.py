@@ -88,6 +88,7 @@ def append_output(sid, data):
                 data = repr(data)
         data = data.replace("\r\n", "\n").replace("\r", "\n")
         s["buffer"].append(data)
+        _dbg(f"[shell-db] append_output #{sid}: {len(data)} chars")
 
 
 def drain_output(sid):
@@ -117,11 +118,31 @@ def get_count():
         return len(_sessions)
 
 
+def set_process(sid, proc):
+    s = get_session(sid)
+    if s:
+        s["process"] = proc
+
+
 def close_session(sid):
     _dbg(f"[shell-db] closing session #{sid}")
     s = get_session(sid)
     if s:
         s["active"] = False
+        q = s.get("cmd_queue")
+        if q:
+            try:
+                q.put(None)
+                _dbg(f"[shell-db] session #{sid} cmd_queue signalled")
+            except Exception:
+                pass
+        pty_fd = s.get("pty_fd")
+        if pty_fd:
+            try:
+                os.close(pty_fd)
+                _dbg(f"[shell-db] session #{sid} pty_fd closed")
+            except Exception:
+                pass
         sock = s.get("socket")
         if sock:
             try:
@@ -132,6 +153,13 @@ def close_session(sid):
             try:
                 sock.close()
                 _dbg(f"[shell-db] session #{sid} socket closed")
+            except Exception:
+                pass
+        proc = s.get("process")
+        if proc:
+            try:
+                proc.terminate()
+                _dbg(f"[shell-db] session #{sid} process terminated")
             except Exception:
                 pass
         with _lock:
