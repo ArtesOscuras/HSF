@@ -1,10 +1,14 @@
 import os
+import shutil
+import subprocess
 import sys
 import tkinter as tk
 import tkinter.font as tkfont
 
 _FAMILY = None
 _FAMILY_BOLD = None
+
+_LINUX_FALLBACKS = ["DejaVu Sans Mono", "Liberation Mono", "Monospace"]
 
 
 def _register_font_macos(path):
@@ -38,19 +42,41 @@ def _register_font_macos(path):
         return False
 
 
+def _install_font_linux(base, names):
+    target = os.path.expanduser("~/.local/share/fonts")
+    os.makedirs(target, exist_ok=True)
+    copied = False
+    for name in names:
+        src = os.path.join(base, name)
+        dst = os.path.join(target, name)
+        if os.path.isfile(src) and not os.path.isfile(dst):
+            try:
+                shutil.copy2(src, dst)
+                copied = True
+            except (OSError, PermissionError):
+                pass
+    if copied:
+        try:
+            subprocess.run(["fc-cache", "-f"], timeout=10, capture_output=True)
+        except Exception:
+            pass
+
+
 def register_before_tk():
     global _FAMILY, _FAMILY_BOLD
     if _FAMILY is not None:
         return
-    if sys.platform != "darwin":
-        return
     base = os.path.join(os.path.dirname(__file__), "..", "..", "fonts")
     regular = os.path.join(base, "JetBrainsMonoNL-Regular.ttf")
     bold = os.path.join(base, "JetBrainsMonoNL-Bold.ttf")
-    if os.path.isfile(regular):
-        _register_font_macos(regular)
-    if os.path.isfile(bold):
-        _register_font_macos(bold)
+
+    if sys.platform == "darwin":
+        if os.path.isfile(regular):
+            _register_font_macos(regular)
+        if os.path.isfile(bold):
+            _register_font_macos(bold)
+    elif sys.platform.startswith("linux"):
+        _install_font_linux(base, ["JetBrainsMonoNL-Regular.ttf", "JetBrainsMonoNL-Bold.ttf"])
 
 
 def init(root):
@@ -66,15 +92,21 @@ def init(root):
 
     base = os.path.join(os.path.dirname(__file__), "..", "..", "fonts")
     regular = os.path.join(base, "JetBrainsMonoNL-Regular.ttf")
-    bold = os.path.join(base, "JetBrainsMonoNL-Bold.ttf")
 
     if sys.platform == "darwin":
-        families = tkfont.families()
         for name in ("JetBrains Mono NL", "JetBrains Mono", "JetBrainsMonoNL"):
-            if name in families:
+            if name in tkfont.families():
                 _set(name)
                 return
         _set("Menlo")
+        return
+
+    if sys.platform.startswith("linux"):
+        for fb in _LINUX_FALLBACKS:
+            if fb in families:
+                _set(fb)
+                return
+        _set("Monospace")
         return
 
     if not os.path.isfile(regular):
@@ -84,6 +116,7 @@ def init(root):
     try:
         root.tk.call("font", "create", "HSF-Font", "-file", regular)
         _FAMILY = "HSF-Font"
+        bold = os.path.join(base, "JetBrainsMonoNL-Bold.ttf")
         if os.path.isfile(bold):
             root.tk.call("font", "create", "HSF-Font-Bold", "-file", bold)
             _FAMILY_BOLD = "HSF-Font-Bold"
