@@ -106,7 +106,8 @@ class NetworkView(BaseView):
             return icons.icon("question.png", size=50)
         if dt == "gateway":
             return icons.icon("router.png", size=50) or icons.icon("question.png", size=50)
-        for name in ["linux device", "windows", "mac", "android", "iphone", "ipad",
+        for name in ["linux device", "windows", "mac", "android", "ios device",
+                      "iphone", "ipad",
                       "ubuntu", "debian", "fedora", "centos", "arch", "kali",
                       "freebsd", "router", "printer", "camera"]:
             if name in dt or dt in name:

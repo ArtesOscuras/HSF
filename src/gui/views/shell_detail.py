@@ -117,8 +117,12 @@ class ShellDetailView(BaseView):
         self._record_buffer = []
         session = shell_db.get_session(sid)
         stype = (session or {}).get("type", "")
-        if stype in ("FTP", "SFTP"):
+        if stype == "FTP":
             self._prompt = "ftp> "
+        elif stype == "SFTP":
+            self._prompt = "sftp> "
+        elif stype == "WINRM":
+            self._prompt = "PS> "
         else:
             self._prompt = "$ "
         self._freeze_mark = None
@@ -261,6 +265,11 @@ class ShellDetailView(BaseView):
             self._history_idx = len(self._history)
             send_command(self._sid, cmd)
 
+        s = shell_db.get_session(self._sid)
+        if s:
+            cwd = s.get("winrm_cwd")
+            if cwd:
+                self._prompt = f"PS {cwd}> "
         self._insert_prompt()
 
     def _on_enter(self, event):
@@ -274,6 +283,11 @@ class ShellDetailView(BaseView):
             self.terminal.delete("1.0", tk.END)
             self._freeze_mark = "1.0"
             self._protect("1.0", self._freeze_mark)
+            s = shell_db.get_session(self._sid)
+            if s:
+                cwd = s.get("winrm_cwd")
+                if cwd:
+                    self._prompt = f"PS {cwd}> "
             self._insert_prompt()
             return "break"
         self._lock_and_send(cmd)
@@ -282,7 +296,14 @@ class ShellDetailView(BaseView):
     def _on_ctrl_c(self, event):
         s = shell_db.get_session(self._sid)
         if s and s["status"] == "connected":
-            send_raw(self._sid, "\x03")
+            rs = s.get("winrm_runspace")
+            if rs:
+                try:
+                    rs.interrupt()
+                except Exception:
+                    pass
+            else:
+                send_raw(self._sid, "\x03")
         self.terminal.insert(tk.END, "^C\n", "muted")
         self._freeze_mark = self.terminal.index("insert")
         self._protect("1.0", self._freeze_mark)
@@ -418,6 +439,23 @@ class ShellDetailView(BaseView):
             self._title_label.config(
                 text=f"Shell #{s['id']} — {s['ip']} ({s['status']})"
             )
+            cwd = s.get("winrm_cwd")
+            if cwd:
+                old_prompt = self._prompt
+                new_prompt = f"PS {cwd}> "
+                if new_prompt != old_prompt:
+                    self._prompt = new_prompt
+                    try:
+                        last = self.terminal.index("end - 1 chars")
+                        lstart = self.terminal.index(f"{last} linestart")
+                        line = self.terminal.get(lstart, "end - 1 chars")
+                        if line.strip().startswith("PS "):
+                            self.terminal.delete(lstart, "end - 1 chars")
+                            self.terminal.insert("end - 1 chars", new_prompt, "prompt")
+                            self.terminal.mark_set("prompt", "insert")
+                            self.terminal.mark_gravity("prompt", tk.LEFT)
+                    except Exception:
+                        pass
         self._poll_id = self.after(500, self._poll)
 
     def _append_output(self, text, tag=None):

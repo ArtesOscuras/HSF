@@ -10,6 +10,8 @@ from src.gui import fonts
 from src.shells import shell_db
 from src.shells.ftp_shell import FTPConnectionThread
 from src.shells.ssh_shell import SSHConnectionThread
+from src.shells.sftp_shell import SFTPConnectionThread
+from src.shells.winrm_shell import WinRMConnectionThread
 
 _proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 _DBG_FILE = os.path.join(_proj_root, "databases", "debugging_logs")
@@ -272,6 +274,45 @@ class RemoteAccessDialog(tk.Toplevel):
             self._ssh_vars["user"].set(user)
             self._ssh_vars["pass"].set(pwd)
 
+    def _populate_winrm_machines(self):
+        self._winrm_machine_list.delete(0, tk.END)
+        self._winrm_machine_keys = []
+        from src.machines import store
+        for m in store.get_all_sorted():
+            if m.ip in ("127.0.0.1", "::1") or m.ip.startswith("127."):
+                continue
+            hostname = m.hostname or ""
+            label = f"{m.ip:<18}{hostname}"
+            self._winrm_machine_list.insert(tk.END, f"  {label}")
+            self._winrm_machine_keys.append(m.ip)
+
+    def _on_winrm_machine_select(self, event):
+        sel = self._winrm_machine_list.curselection()
+        if sel and sel[0] < len(self._winrm_machine_keys):
+            ip = self._winrm_machine_keys[sel[0]]
+            self._winrm_vars["host"].set(ip)
+
+    def _populate_winrm_creds(self):
+        self._winrm_cred_list.delete(0, tk.END)
+        self._winrm_cred_keys = []
+        from src.machines import credential_db
+        for c in credential_db.load_credentials():
+            user = (c.get("username") or "").strip()
+            pwd = (c.get("password") or "").strip()
+            if not user or not pwd:
+                continue
+            domain = c.get("domain") or ""
+            label = f"{user:<20}{'@' + domain if domain else ''}"
+            self._winrm_cred_list.insert(tk.END, f"  {label}")
+            self._winrm_cred_keys.append((user, pwd))
+
+    def _on_winrm_cred_select(self, event):
+        sel = self._winrm_cred_list.curselection()
+        if sel and sel[0] < len(self._winrm_cred_keys):
+            user, pwd = self._winrm_cred_keys[sel[0]]
+            self._winrm_vars["user"].set(user)
+            self._winrm_vars["pass"].set(pwd)
+
     def _build_ssh_tab(self):
         tab = self._tab_ssh
         tab.columnconfigure(0, weight=0)
@@ -368,13 +409,89 @@ class RemoteAccessDialog(tk.Toplevel):
         tab.columnconfigure(1, weight=1)
 
         tk.Label(
-            tab, text="WinRM", font=(fonts.family_bold(), 18),
+            tab, text="Machine:", font=(fonts.family(), 11, "bold"),
             fg=MUTED, bg=BG,
-        ).grid(row=0, column=0, columnspan=2, pady=(30, 5))
+        ).grid(row=0, column=0, sticky="nw", padx=15, pady=(15, 0))
+
+        mach_frame = tk.Frame(tab, bg="#000000")
+        mach_frame.grid(row=0, column=1, sticky="nsew", padx=15, pady=(15, 0))
+        mach_frame.columnconfigure(0, weight=1)
+        mach_frame.rowconfigure(0, weight=1)
+
+        self._winrm_machine_list = tk.Listbox(
+            mach_frame, bg="#000000", fg=FG,
+            selectbackground="#333333", selectforeground=FG,
+            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
+            activestyle="none", exportselection=False, height=3,
+        )
+        self._winrm_machine_list.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = tk.Scrollbar(mach_frame, orient=tk.VERTICAL, command=self._winrm_machine_list.yview)
+        scrollbar.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
+                            width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self._winrm_machine_list.configure(yscrollcommand=scrollbar.set)
+
+        self._winrm_machine_keys = []
+        self._populate_winrm_machines()
+        self._winrm_machine_list.bind("<<ListboxSelect>>", self._on_winrm_machine_select)
+
         tk.Label(
-            tab, text="Coming soon", font=(fonts.family(), 11),
+            tab, text="Credential:", font=(fonts.family(), 11, "bold"),
             fg=MUTED, bg=BG,
-        ).grid(row=1, column=0, columnspan=2)
+        ).grid(row=1, column=0, sticky="nw", padx=15, pady=(10, 0))
+
+        cred_frame = tk.Frame(tab, bg="#000000")
+        cred_frame.grid(row=1, column=1, sticky="nsew", padx=15, pady=(10, 0))
+        cred_frame.columnconfigure(0, weight=1)
+        cred_frame.rowconfigure(0, weight=1)
+
+        self._winrm_cred_list = tk.Listbox(
+            cred_frame, bg="#000000", fg=FG,
+            selectbackground="#333333", selectforeground=FG,
+            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
+            activestyle="none", exportselection=False, height=3,
+        )
+        self._winrm_cred_list.grid(row=0, column=0, sticky="nsew")
+
+        cred_scroll = tk.Scrollbar(cred_frame, orient=tk.VERTICAL, command=self._winrm_cred_list.yview)
+        cred_scroll.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
+                              width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
+        cred_scroll.grid(row=0, column=1, sticky="ns")
+        self._winrm_cred_list.configure(yscrollcommand=cred_scroll.set)
+
+        self._winrm_cred_keys = []
+        self._populate_winrm_creds()
+        self._winrm_cred_list.bind("<<ListboxSelect>>", self._on_winrm_cred_select)
+
+        winrm_fields = [
+            ("Host:", "host", "hostname_or_ip"),
+            ("Port:", "port", "5985"),
+            ("Domain:", "domain", ""),
+            ("Username:", "user", "Administrator"),
+            ("Password:", "pass", ""),
+        ]
+        self._winrm_vars = {}
+        for i, (label, key, default) in enumerate(winrm_fields):
+            row = i + 2
+            tk.Label(
+                tab, text=label, font=(fonts.family(), 11, "bold"),
+                fg=MUTED, bg=BG,
+            ).grid(row=row, column=0, sticky="w", padx=15, pady=(8, 0))
+            var = tk.StringVar(value=default)
+            tk.Entry(
+                tab, textvariable=var,
+                bg="#000000", fg=FG, insertbackground=FG,
+                font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+                highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
+            ).grid(row=row, column=1, sticky="ew", padx=15, pady=(8, 0))
+            self._winrm_vars[key] = var
+
+        self._winrm_feedback = tk.Label(
+            tab, text="", font=(fonts.family(), 11),
+            fg=SUCCESS, bg=BG,
+        )
+        self._winrm_feedback.grid(row=len(winrm_fields) + 2, column=0, columnspan=2, pady=(10, 0))
 
     def _build_buttons(self):
         btn_frame = tk.Frame(self, bg=BG)
@@ -406,6 +523,8 @@ class RemoteAccessDialog(tk.Toplevel):
             self._connect_ftp()
         elif tab == 1:
             self._connect_ssh()
+        elif tab == 2:
+            self._connect_winrm()
         else:
             self._feedback_tab("Not implemented yet", ERR_COLOR)
 
@@ -415,6 +534,8 @@ class RemoteAccessDialog(tk.Toplevel):
             self._ftp_feedback.config(text=text, fg=color)
         elif tab_idx == 1:
             self._ssh_feedback.config(text=text, fg=color)
+        elif tab_idx == 2:
+            self._winrm_feedback.config(text=text, fg=color)
 
     def _connect_ftp(self):
         host = self._ftp_vars["host"].get().strip()
@@ -433,7 +554,22 @@ class RemoteAccessDialog(tk.Toplevel):
             return
 
         if proto == "sftp":
-            self._feedback_tab("SFTP is not available yet. Coming soon.", ERR_COLOR)
+            _dbg(f"[remote-access] sftp connecting to {host}:{port}")
+
+            def on_connected(sid):
+                _dbg(f"[remote-access] sftp session #{sid} created")
+                self.after(0, self._on_connected)
+
+            def on_error(msg):
+                self.after(0, lambda: self._feedback_tab(f"{msg}", ERR_COLOR))
+                self.after(0, lambda: self._connect_btn.config(text="Connect", fg=FG))
+
+            sftp_thread = SFTPConnectionThread(
+                host, port, user, password,
+                on_connected=on_connected,
+                on_error=on_error,
+            )
+            sftp_thread.start()
             return
 
         self._connect_btn.config(text="Connecting...", fg=MUTED)
@@ -488,6 +624,54 @@ class RemoteAccessDialog(tk.Toplevel):
             ssh_thread.start()
         except Exception as e:
             _dbg(f"[remote-access] ssh start error: {e}")
+            self.after(0, lambda: self._feedback_tab(f"Connection failed: {e}", ERR_COLOR))
+            self.after(0, lambda: self._connect_btn.config(text="Connect", fg=FG))
+
+    def _connect_winrm(self):
+        host = self._winrm_vars["host"].get().strip()
+        port_str = self._winrm_vars["port"].get().strip()
+        domain = self._winrm_vars["domain"].get().strip()
+        user = self._winrm_vars["user"].get().strip()
+        password = self._winrm_vars["pass"].get().strip()
+
+        if not host:
+            self._feedback_tab("Host is required", ERR_COLOR)
+            return
+        if not user:
+            self._feedback_tab("Username is required", ERR_COLOR)
+            return
+        try:
+            port = int(port_str) if port_str else 5985
+        except ValueError:
+            self._feedback_tab("Invalid port", ERR_COLOR)
+            return
+
+        self._connect_btn.config(text="Connecting...", fg=MUTED)
+        self._feedback_tab(f"Connecting WinRM to {host}:{port}...", SUCCESS)
+        threading.Thread(
+            target=self._run_winrm_connect,
+            args=(host, port, user, password, domain),
+            daemon=True,
+        ).start()
+
+    def _run_winrm_connect(self, host, port, user, password, domain):
+        try:
+            def on_connected(sid):
+                _dbg(f"[remote-access] winrm session #{sid} to {host}:{port}")
+                self.after(0, self._on_connected)
+
+            def on_error(msg):
+                self.after(0, lambda: self._feedback_tab(f"{msg}", ERR_COLOR))
+                self.after(0, lambda: self._connect_btn.config(text="Connect", fg=FG))
+
+            winrm_thread = WinRMConnectionThread(
+                host, port, user, password, domain,
+                on_connected=on_connected,
+                on_error=on_error,
+            )
+            winrm_thread.start()
+        except Exception as e:
+            _dbg(f"[remote-access] winrm start error: {e}")
             self.after(0, lambda: self._feedback_tab(f"Connection failed: {e}", ERR_COLOR))
             self.after(0, lambda: self._connect_btn.config(text="Connect", fg=FG))
 
