@@ -181,7 +181,7 @@ class InitDialog(tk.Toplevel):
         self.resizable(False, False)
 
         self.transient(parent)
-        self.after(10, self.grab_set)
+        self.wait_visibility(); self.grab_set()
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=0)

@@ -42,7 +42,7 @@ class RemoteAccessDialog(tk.Toplevel):
         self.configure(bg=BG)
 
         self.transient(parent)
-        self.after(10, self.grab_set)
+        self.wait_visibility(); self.grab_set()
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)

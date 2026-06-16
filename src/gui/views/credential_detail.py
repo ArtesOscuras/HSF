@@ -20,7 +20,7 @@ class _EditDialog(tk.Toplevel):
         self.configure(bg="#111111")
 
         self.transient(parent)
-        self.after(10, self.grab_set)
+        self.wait_visibility(); self.grab_set()
 
         self.columnconfigure(0, weight=0)
         self.columnconfigure(1, weight=1)
@@ -161,7 +161,7 @@ class CredentialDetailView(BaseView):
         self.text.tag_configure("info", foreground=INFO)
 
         btn_frame = tk.Frame(self, bg="#000000")
-        btn_frame.grid(row=2, column=0, sticky="ew", pady=(0, 15))
+        btn_frame.grid(row=2, column=0, pady=(0, 15))
 
         edit_btn = tk.Label(
             btn_frame, text="  Edit  ", bg="#222222", fg="#ffffff",
