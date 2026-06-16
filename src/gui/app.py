@@ -91,6 +91,10 @@ class App(tk.Tk):
             self._pane.sash_place(0, 0, h * 2 // 3)
 
     def _start_passive_scanner(self):
+        from src.tools.scanner.mdns import _check_permission
+        if not _check_permission():
+            self.console.error("mDNS passive scanner: permission denied. Run as root or install with CAP_NET_RAW.")
+            return
         self._passive_scanner = PassiveMDNSScanner(on_host_callback=self._on_host_discovered)
         self._passive_scanner.start()
         self.console.info("Passive listening mDNS started")
@@ -419,6 +423,10 @@ class App(tk.Tk):
     def _scan_passive(self):
         if self._passive_scanner and self._passive_scanner.is_running:
             self.console.warning("Passive scan is already running.")
+            return
+        from src.tools.scanner.mdns import _check_permission
+        if not _check_permission():
+            self.console.error("mDNS passive scanner: permission denied.")
             return
         self._passive_scanner = PassiveMDNSScanner(on_host_callback=self._on_host_discovered)
         self._passive_scanner.start()

@@ -2,6 +2,14 @@ import threading
 from scapy.all import sniff, DNS
 
 
+def _check_permission():
+    try:
+        sniff(filter="udp port 5353", timeout=0.1, count=1, store=0)
+        return True
+    except (PermissionError, OSError):
+        return False
+
+
 class PassiveMDNSScanner:
     def __init__(self, on_host_callback):
         self.on_host = on_host_callback
@@ -10,10 +18,11 @@ class PassiveMDNSScanner:
 
     def start(self):
         if self._running:
-            return
+            return True
         self._running = True
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
+        return True
 
     def stop(self):
         self._running = False
@@ -24,12 +33,19 @@ class PassiveMDNSScanner:
 
     def _run(self):
         while self._running:
-            sniff(
-                filter="udp port 5353",
-                prn=self._process_packet,
-                timeout=2,
-                store=0,
-            )
+            try:
+                sniff(
+                    filter="udp port 5353",
+                    prn=self._process_packet,
+                    timeout=2,
+                    store=0,
+                )
+            except PermissionError:
+                self._running = False
+                break
+            except OSError:
+                self._running = False
+                break
 
     def _process_packet(self, pkt):
         try:
