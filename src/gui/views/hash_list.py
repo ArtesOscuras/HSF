@@ -1,4 +1,5 @@
 from src.gui import fonts
+import os
 import sqlite3
 import tkinter as tk
 import tkinter.font as tkfont
@@ -70,7 +71,7 @@ class HashListView(BaseView):
         self.text.bind("<Configure>", lambda e: self.after(50, self._poll))
 
         btn_frame = tk.Frame(self, bg="#000000")
-        btn_frame.grid(row=2, column=0, sticky="ew", pady=(15, 15))
+        btn_frame.grid(row=2, column=0, pady=(15, 15))
 
         back_btn = tk.Label(
             btn_frame, text="  \u2190 Back  ", bg="#222222", fg=BRIGHT,
@@ -212,7 +213,7 @@ class _HashDialog(tk.Toplevel):
         self.configure(bg="#111111")
 
         self.transient(parent)
-        self.grab_set()
+        self.after(10, self.grab_set)
 
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=1)

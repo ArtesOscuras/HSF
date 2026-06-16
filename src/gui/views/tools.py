@@ -105,10 +105,13 @@ class ToolsView(BaseView):
 
         font = tkfont.Font(font=(fonts.family(), 18))
         font_desc = tkfont.Font(font=(fonts.family(), 12))
-        gap_px = font.measure(COL_GAP)
-        char_w = font_desc.measure(" ")
+        tw = tkfont.Font(font=self.text.cget("font"))
+        gap_px = tw.measure(COL_GAP)
+        char_w = tw.measure(" ")
+        name_px = font.measure(" " * w_name)
+        desc_px = font_desc.measure(" " * w_desc)
 
-        row_content_px = ICON_SIZE + gap_px + font.measure(" " * w_name) + gap_px + font_desc.measure(" " * w_desc)
+        row_content_px = ICON_SIZE + gap_px + name_px + gap_px + desc_px
 
         w = self.text.winfo_width()
         if w > row_content_px:
@@ -117,11 +120,11 @@ class ToolsView(BaseView):
         else:
             center_pad = "  "
 
-        center_px = font.measure(center_pad)
+        center_px = tw.measure(center_pad)
         tabs = []
         t = center_px + ICON_SIZE + gap_px
         tabs.append(t)
-        t += font.measure(" " * w_name) + gap_px
+        t += name_px + gap_px
         tabs.append(t)
 
         self.text.configure(tabs=tabs)

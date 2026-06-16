@@ -171,7 +171,7 @@ class FuzzDialog(tk.Toplevel):
         self.configure(bg=BG)
 
         self.transient(parent)
-        self.grab_set()
+        self.after(10, self.grab_set)
 
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=1)

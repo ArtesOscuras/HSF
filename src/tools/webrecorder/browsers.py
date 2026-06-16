@@ -59,7 +59,7 @@ class BrowserSelector(tk.Toplevel):
         self.configure(bg="#111111")
 
         self.transient(parent)
-        self.grab_set()
+        self.after(10, self.grab_set)
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=0)

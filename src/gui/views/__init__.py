@@ -12,4 +12,6 @@ from .hash_list import HashListView
 from .hash_detail import HashDetailView
 from .shell_list import ShellListView
 from .shell_detail import ShellDetailView
+from .ssh_detail import SSHDetailView
+from .reverse_shell_detail import ReverseShellDetailView
 from .tools import ToolsView

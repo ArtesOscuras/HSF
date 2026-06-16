@@ -22,12 +22,14 @@ def _dbg(msg):
 
 
 class FTPConnectionThread:
-    def __init__(self, host, port, user, password, sid):
+    def __init__(self, host, port, user, password, on_connected=None, on_error=None):
         self._host = host
         self._port = port or 21
         self._user = user
         self._password = password
-        self._sid = sid
+        self._on_connected = on_connected
+        self._on_error = on_error
+        self._sid = None
         self._queue = queue.Queue()
         self._running = True
         self._ftp = None
@@ -53,37 +55,57 @@ class FTPConnectionThread:
     def _run(self):
         ftp = FTP()
         self._ftp = ftp
+        sid = None
         try:
             ftp.connect(self._host, self._port, timeout=10)
-            shell_db.append_output(self._sid, f"Connected to {self._host}:{self._port}\n")
-            _dbg(f"[ftp-shell #{self._sid}] connected")
+            _dbg(f"[ftp-shell] connected to {self._host}:{self._port}")
         except Exception as e:
-            shell_db.append_output(self._sid, f"Connection failed: {e}\n")
-            shell_db.set_status(self._sid, "disconnected")
+            if self._on_error:
+                self._on_error(f"Connection failed: {e}")
             return
 
+        connected_ok = False
         if self._user:
             if self._password:
                 try:
                     ftp.login(self._user, self._password)
-                    shell_db.append_output(self._sid, f"Logged in as {self._user}\n")
-                    _dbg(f"[ftp-shell #{self._sid}] logged in as {self._user}")
+                    _dbg(f"[ftp-shell] logged in as {self._user}")
+                    connected_ok = True
                 except error_perm as e:
-                    shell_db.append_output(self._sid, f"Login failed: {e}\n")
-                    shell_db.set_status(self._sid, "disconnected")
+                    if self._on_error:
+                        self._on_error(f"Login failed: {e}")
                     return
             else:
                 try:
                     resp = ftp.sendcmd(f"USER {self._user}")
-                    shell_db.append_output(self._sid, f"{resp}\n")
+                    _dbg(f"[ftp-shell] sent USER {self._user}, awaiting PASS")
+                    connected_ok = True
                     self._awaiting_pass = True
-                    _dbg(f"[ftp-shell #{self._sid}] sent USER {self._user}, awaiting PASS")
                 except error_perm as e:
-                    shell_db.append_output(self._sid, f"USER failed: {e}\n")
-                    shell_db.set_status(self._sid, "disconnected")
+                    if self._on_error:
+                        self._on_error(f"USER failed: {e}")
                     return
+        else:
+            connected_ok = True
+
+        if not connected_ok:
+            return
+
+        session = shell_db.add_session(self._host, self._port, 0)
+        session["type"] = "FTP"
+        session["cmd_queue"] = self._queue
+        self._sid = session["id"]
+
+        shell_db.append_output(self._sid, f"Connected to {self._host}:{self._port}\n")
+        if self._user and self._password:
+            shell_db.append_output(self._sid, f"Logged in as {self._user}\n")
+        elif self._user and not self._password:
+            shell_db.append_output(self._sid, "Awaiting password...\n")
 
         shell_db.append_output(self._sid, "Type 'help' for available commands.\n")
+
+        if self._on_connected:
+            self._on_connected(self._sid)
 
         while self._running:
             try:

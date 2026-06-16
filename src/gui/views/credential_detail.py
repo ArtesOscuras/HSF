@@ -20,7 +20,7 @@ class _EditDialog(tk.Toplevel):
         self.configure(bg="#111111")
 
         self.transient(parent)
-        self.grab_set()
+        self.after(10, self.grab_set)
 
         self.columnconfigure(0, weight=0)
         self.columnconfigure(1, weight=1)

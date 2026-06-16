@@ -1,3 +1,4 @@
+import re
 from src.gui import fonts
 import json
 import os
@@ -11,6 +12,19 @@ BRIGHT = "#ffffff"
 INFO = "#5ba3ec"
 SUCCESS = "#00cc66"
 
+_ANSI_FG = {
+    30: "#555555", 31: "#f44747", 32: "#00cc66", 33: "#ce9178",
+    34: "#5ba3ec", 35: "#c586c0", 36: "#4ec9b0", 37: "#ffffff",
+    90: "#888888", 91: "#ff6b6b", 92: "#4cdf8b", 93: "#e5c07b",
+    94: "#7fc6f0", 95: "#d4a0d4", 96: "#70d4c8", 97: "#ffffff",
+}
+_ANSI_BG = {
+    40: "#1a1a1a", 41: "#5c1a1a", 42: "#1a3c1a", 43: "#4c3c1a",
+    44: "#1a2a4c", 45: "#3c1a4c", 46: "#1a3c3c", 47: "#555555",
+    100: "#333333", 101: "#7c2a2a", 102: "#2a5c2a", 103: "#6c5c2a",
+    104: "#2a4a7c", 105: "#5c2a7c", 106: "#2a5c5c", 107: "#888888",
+}
+
 
 class _RecordDialog(tk.Toplevel):
     def __init__(self, parent):
@@ -22,7 +36,7 @@ class _RecordDialog(tk.Toplevel):
         self.configure(bg="#111111")
 
         self.transient(parent)
-        self.grab_set()
+        self.after(10, self.grab_set)
 
         self.columnconfigure(0, weight=1)
         self.columnconfigure(1, weight=1)
@@ -111,6 +125,8 @@ class ShellDetailView(BaseView):
         self._history = []
         self._history_idx = -1
         self._partial_input = ""
+        self._use_ansi = False
+        self._ansi_tags = {}
         super().__init__(parent, **kwargs)
 
     def _build_ui(self):
@@ -171,6 +187,7 @@ class ShellDetailView(BaseView):
         self.terminal.bind("<Down>", self._on_history_down)
         self.terminal.bind("<Home>", self._jump_to_prompt)
         self.terminal.bind("<Control-a>", self._jump_to_prompt)
+        self.terminal.bind("<Configure>", self._on_terminal_resize)
 
         bar = tk.Frame(self, bg="#000000")
         bar.grid(row=2, column=0, sticky="ew", padx=(200, 200), pady=(0, 10))
@@ -188,6 +205,7 @@ class ShellDetailView(BaseView):
 
         self._last_output = ""
         self._poll_id = None
+        self._resize_id = None
 
     def _insert_prompt(self):
         self.terminal.insert(tk.END, "\n", "bright")
@@ -353,6 +371,17 @@ class ShellDetailView(BaseView):
                 fg=BRIGHT, bg="#222222",
             )
 
+    def _on_terminal_resize(self, event=None):
+        if self._resize_id:
+            self.after_cancel(self._resize_id)
+        self._resize_id = self.after(500, self._do_resize)
+
+    def _do_resize(self):
+        self._resize_id = None
+
+    def _resize_terminal(self):
+        pass
+
     def on_activate(self):
         s = shell_db.get_session(self._sid)
         if s:
@@ -382,7 +411,6 @@ class ShellDetailView(BaseView):
         new_data = shell_db.drain_output(self._sid)
         if new_data:
             data = new_data.replace("\r\n", "\n").replace("\r", "\n")
-            has_prompt = self._prompt.strip() in data
             self._append_output(data, "bright")
 
         s = shell_db.get_session(self._sid)
@@ -393,7 +421,71 @@ class ShellDetailView(BaseView):
         self._poll_id = self.after(500, self._poll)
 
     def _append_output(self, text, tag=None):
-        self.terminal.insert(self._freeze_mark, text, tag or "bright")
+        if self._use_ansi and "\x1b" in text:
+            self._append_ansi_text(text)
+        else:
+            self.terminal.insert(self._freeze_mark, text, tag or "bright")
         self.terminal.see(tk.END)
         if self._recording:
             self._record_buffer.append(text)
+
+    def _ansi_tag(self, fg, bg, bold):
+        key = (fg, bg, bold)
+        if key in self._ansi_tags:
+            return self._ansi_tags[key]
+        name = f"ansi_{len(self._ansi_tags)}"
+        conf = {}
+        if fg is not None:
+            conf["foreground"] = fg
+        if bg is not None:
+            conf["background"] = bg
+        if bold:
+            name += "_b"
+        if not conf:
+            conf["foreground"] = "#ffffff"
+        self.terminal.tag_configure(name, **conf)
+        self._ansi_tags[key] = name
+        return name
+
+    def _append_ansi_text(self, text):
+        text = re.sub(r"\x1b\].*?(\x07|$)", "", text)
+        text = text.replace("\x07", "")
+        text = re.sub(r"\x1b[^\[\]]", "", text)
+        text = re.sub(r"\x1b$", "", text)
+        parts = re.split(r"(\x1b\[[?0-9;]*[a-zA-Z])", text)
+        segments = []
+        fg = None; bg = None; bold = False
+        for part in parts:
+            if not part:
+                continue
+            if part.startswith("\x1b["):
+                m = re.match(r"\x1b\[([?0-9;]*)m", part)
+                if not m:
+                    continue
+                params = m.group(1)
+                if not params:
+                    fg = None; bg = None; bold = False
+                    continue
+                for p in params.split(";"):
+                    if not p: continue
+                    code = int(p)
+                    if code == 0: fg = None; bg = None; bold = False
+                    elif code == 1: bold = True
+                    elif 30 <= code <= 37: fg = _ANSI_FG.get(code)
+                    elif 40 <= code <= 47: bg = _ANSI_BG.get(code)
+                    elif 90 <= code <= 97: fg = _ANSI_FG.get(code)
+                    elif 100 <= code <= 107: bg = _ANSI_BG.get(code)
+                continue
+            segments.append((part, fg, bg, bold))
+        if not segments:
+            return
+        plain = "".join(s[0] for s in segments)
+        idx = self.terminal.index(self._freeze_mark)
+        self.terminal.insert(self._freeze_mark, plain)
+        for text_part, fg, bg, bold in segments:
+            if not text_part:
+                continue
+            end = f"{idx}+{len(text_part)}c"
+            tag = self._ansi_tag(fg, bg, bold)
+            self.terminal.tag_add(tag, idx, end)
+            idx = end

@@ -309,8 +309,15 @@ class App(tk.Tk):
     def _open_shell_view(self, sid):
         view_name = f"shell_{sid}"
         if view_name not in self.visualizer.get_view_names():
-            from .views import ShellDetailView
-            detail_view = ShellDetailView(self.visualizer, sid)
+            from .views import ShellDetailView, SSHDetailView, ReverseShellDetailView
+            s = shell_db.get_session(sid)
+            stype = (s or {}).get("type", "")
+            if stype == "SSH":
+                detail_view = SSHDetailView(self.visualizer, sid)
+            elif stype.startswith("Revershell"):
+                detail_view = ReverseShellDetailView(self.visualizer, sid)
+            else:
+                detail_view = ShellDetailView(self.visualizer, sid)
             detail_view._on_back_click = lambda: self.visualizer.activate_view("shells")
             self.visualizer.register_view(view_name, detail_view)
         self.visualizer.activate_view(view_name)
@@ -1492,16 +1499,22 @@ class App(tk.Tk):
         self.visualizer.activate_view("shells")
 
     def _run_ftp_connect(self, host, port, user, password):
-        from src.shells import shell_db
         from src.shells.ftp_shell import FTPConnectionThread
-        session = shell_db.add_session(host, port, 0)
-        session["type"] = "FTP"
-        ftp_thread = FTPConnectionThread(host, port, user, password, session["id"])
-        session["cmd_queue"] = ftp_thread.queue
+
+        def on_connected(sid):
+            self.console.after(0, lambda: self.console.success(
+                f"FTP session #{sid} to {host}:{port}"
+            ))
+
+        def on_error(msg):
+            self.console.after(0, lambda: self.console.error(f"FTP failed: {msg}"))
+
+        ftp_thread = FTPConnectionThread(
+            host, port, user, password,
+            on_connected=on_connected,
+            on_error=on_error,
+        )
         ftp_thread.start()
-        self.console.after(0, lambda s=session: self.console.success(
-            f"FTP session #{s['id']} to {host}:{port}"
-        ))
 
     def _cmd_recorder(self, args):
         if not args:

@@ -9,6 +9,7 @@ from tkinter import ttk
 from src.gui import fonts
 from src.shells import shell_db
 from src.shells.ftp_shell import FTPConnectionThread
+from src.shells.ssh_shell import SSHConnectionThread
 
 _proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 _DBG_FILE = os.path.join(_proj_root, "databases", "debugging_logs")
@@ -41,7 +42,7 @@ class RemoteAccessDialog(tk.Toplevel):
         self.configure(bg=BG)
 
         self.transient(parent)
-        self.grab_set()
+        self.after(10, self.grab_set)
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=1)
@@ -232,19 +233,134 @@ class RemoteAccessDialog(tk.Toplevel):
             self._ftp_vars["user"].set(user)
             self._ftp_vars["pass"].set(pwd)
 
+    def _populate_ssh_machines(self):
+        self._ssh_machine_list.delete(0, tk.END)
+        self._ssh_machine_keys = []
+        from src.machines import store
+        for m in store.get_all_sorted():
+            if m.ip in ("127.0.0.1", "::1") or m.ip.startswith("127."):
+                continue
+            hostname = m.hostname or ""
+            label = f"{m.ip:<18}{hostname}"
+            self._ssh_machine_list.insert(tk.END, f"  {label}")
+            self._ssh_machine_keys.append(m.ip)
+
+    def _on_ssh_machine_select(self, event):
+        sel = self._ssh_machine_list.curselection()
+        if sel and sel[0] < len(self._ssh_machine_keys):
+            ip = self._ssh_machine_keys[sel[0]]
+            self._ssh_vars["host"].set(ip)
+
+    def _populate_ssh_creds(self):
+        self._ssh_cred_list.delete(0, tk.END)
+        self._ssh_cred_keys = []
+        from src.machines import credential_db
+        for c in credential_db.load_credentials():
+            user = (c.get("username") or "").strip()
+            pwd = (c.get("password") or "").strip()
+            if not user or not pwd:
+                continue
+            domain = c.get("domain") or ""
+            label = f"{user:<20}{'@' + domain if domain else ''}"
+            self._ssh_cred_list.insert(tk.END, f"  {label}")
+            self._ssh_cred_keys.append((user, pwd))
+
+    def _on_ssh_cred_select(self, event):
+        sel = self._ssh_cred_list.curselection()
+        if sel and sel[0] < len(self._ssh_cred_keys):
+            user, pwd = self._ssh_cred_keys[sel[0]]
+            self._ssh_vars["user"].set(user)
+            self._ssh_vars["pass"].set(pwd)
+
     def _build_ssh_tab(self):
         tab = self._tab_ssh
         tab.columnconfigure(0, weight=0)
         tab.columnconfigure(1, weight=1)
 
         tk.Label(
-            tab, text="SSH", font=(fonts.family_bold(), 18),
+            tab, text="Machine:", font=(fonts.family(), 11, "bold"),
             fg=MUTED, bg=BG,
-        ).grid(row=0, column=0, columnspan=2, pady=(30, 5))
+        ).grid(row=0, column=0, sticky="nw", padx=15, pady=(15, 0))
+
+        mach_frame = tk.Frame(tab, bg="#000000")
+        mach_frame.grid(row=0, column=1, sticky="nsew", padx=15, pady=(15, 0))
+        mach_frame.columnconfigure(0, weight=1)
+        mach_frame.rowconfigure(0, weight=1)
+
+        self._ssh_machine_list = tk.Listbox(
+            mach_frame, bg="#000000", fg=FG,
+            selectbackground="#333333", selectforeground=FG,
+            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
+            activestyle="none", exportselection=False, height=3,
+        )
+        self._ssh_machine_list.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = tk.Scrollbar(mach_frame, orient=tk.VERTICAL, command=self._ssh_machine_list.yview)
+        scrollbar.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
+                            width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self._ssh_machine_list.configure(yscrollcommand=scrollbar.set)
+
+        self._ssh_machine_keys = []
+        self._populate_ssh_machines()
+        self._ssh_machine_list.bind("<<ListboxSelect>>", self._on_ssh_machine_select)
+
         tk.Label(
-            tab, text="Coming soon", font=(fonts.family(), 11),
+            tab, text="Credential:", font=(fonts.family(), 11, "bold"),
             fg=MUTED, bg=BG,
-        ).grid(row=1, column=0, columnspan=2)
+        ).grid(row=1, column=0, sticky="nw", padx=15, pady=(10, 0))
+
+        cred_frame = tk.Frame(tab, bg="#000000")
+        cred_frame.grid(row=1, column=1, sticky="nsew", padx=15, pady=(10, 0))
+        cred_frame.columnconfigure(0, weight=1)
+        cred_frame.rowconfigure(0, weight=1)
+
+        self._ssh_cred_list = tk.Listbox(
+            cred_frame, bg="#000000", fg=FG,
+            selectbackground="#333333", selectforeground=FG,
+            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
+            activestyle="none", exportselection=False, height=3,
+        )
+        self._ssh_cred_list.grid(row=0, column=0, sticky="nsew")
+
+        cred_scroll = tk.Scrollbar(cred_frame, orient=tk.VERTICAL, command=self._ssh_cred_list.yview)
+        cred_scroll.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
+                              width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
+        cred_scroll.grid(row=0, column=1, sticky="ns")
+        self._ssh_cred_list.configure(yscrollcommand=cred_scroll.set)
+
+        self._ssh_cred_keys = []
+        self._populate_ssh_creds()
+        self._ssh_cred_list.bind("<<ListboxSelect>>", self._on_ssh_cred_select)
+
+        ssh_fields = [
+            ("Host:", "host", "hostname_or_ip"),
+            ("Port:", "port", "22"),
+            ("Username:", "user", "root"),
+            ("Password:", "pass", ""),
+        ]
+        row = 2
+        self._ssh_vars = {}
+        for label, key, default in ssh_fields:
+            tk.Label(
+                tab, text=label, font=(fonts.family(), 11, "bold"),
+                fg=MUTED, bg=BG,
+            ).grid(row=row, column=0, sticky="w", padx=15, pady=(8, 0))
+            var = tk.StringVar(value=default)
+            tk.Entry(
+                tab, textvariable=var,
+                bg="#000000", fg=FG, insertbackground=FG,
+                font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+                highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
+            ).grid(row=row, column=1, sticky="ew", padx=15, pady=(8, 0))
+            self._ssh_vars[key] = var
+            row += 1
+
+        self._ssh_feedback = tk.Label(
+            tab, text="", font=(fonts.family(), 11),
+            fg=SUCCESS, bg=BG,
+        )
+        self._ssh_feedback.grid(row=row, column=0, columnspan=2, pady=(10, 0))
 
     def _build_winrm_tab(self):
         tab = self._tab_winrm
@@ -288,13 +404,17 @@ class RemoteAccessDialog(tk.Toplevel):
         tab = self._notebook.index(self._notebook.select())
         if tab == 0:
             self._connect_ftp()
+        elif tab == 1:
+            self._connect_ssh()
         else:
-            self._feedback("Not implemented yet", ERR_COLOR)
+            self._feedback_tab("Not implemented yet", ERR_COLOR)
 
-    def _feedback(self, text, color=SUCCESS):
+    def _feedback_tab(self, text, color=SUCCESS):
         tab_idx = self._notebook.index(self._notebook.select())
         if tab_idx == 0:
             self._ftp_feedback.config(text=text, fg=color)
+        elif tab_idx == 1:
+            self._ssh_feedback.config(text=text, fg=color)
 
     def _connect_ftp(self):
         host = self._ftp_vars["host"].get().strip()
@@ -304,34 +424,92 @@ class RemoteAccessDialog(tk.Toplevel):
         proto = self._ftp_proto.get()
 
         if not host:
-            self._feedback("Host is required", ERR_COLOR)
+            self._feedback_tab("Host is required", ERR_COLOR)
             return
         try:
             port = int(port_str) if port_str else 0
         except ValueError:
-            self._feedback("Invalid port", ERR_COLOR)
+            self._feedback_tab("Invalid port", ERR_COLOR)
+            return
+
+        if proto == "sftp":
+            self._feedback_tab("SFTP is not available yet. Coming soon.", ERR_COLOR)
             return
 
         self._connect_btn.config(text="Connecting...", fg=MUTED)
-        self._feedback(f"Connecting {proto.upper()} to {host}:{port}...", SUCCESS)
+        self._feedback_tab(f"Connecting {proto.upper()} to {host}:{port}...", SUCCESS)
         threading.Thread(
             target=self._run_pty_connect,
             args=(proto, host, port, user, password),
             daemon=True,
         ).start()
 
+    def _connect_ssh(self):
+        host = self._ssh_vars["host"].get().strip()
+        port_str = self._ssh_vars["port"].get().strip()
+        user = self._ssh_vars["user"].get().strip()
+        password = self._ssh_vars["pass"].get().strip()
+
+        if not host:
+            self._feedback_tab("Host is required", ERR_COLOR)
+            return
+        if not user:
+            self._feedback_tab("Username is required", ERR_COLOR)
+            return
+        try:
+            port = int(port_str) if port_str else 22
+        except ValueError:
+            self._feedback_tab("Invalid port", ERR_COLOR)
+            return
+
+        self._connect_btn.config(text="Connecting...", fg=MUTED)
+        self._feedback_tab(f"Connecting SSH to {host}:{port}...", SUCCESS)
+        threading.Thread(
+            target=self._run_ssh_connect,
+            args=(host, port, user, password),
+            daemon=True,
+        ).start()
+
+    def _run_ssh_connect(self, host, port, user, password):
+        try:
+            def on_connected(sid):
+                _dbg(f"[remote-access] ssh session #{sid} to {host}:{port}")
+                self.after(0, self._on_connected)
+
+            def on_error(msg):
+                self.after(0, lambda: self._feedback_tab(f"{msg}", ERR_COLOR))
+                self.after(0, lambda: self._connect_btn.config(text="Connect", fg=FG))
+
+            ssh_thread = SSHConnectionThread(
+                host, port, user, password,
+                on_connected=on_connected,
+                on_error=on_error,
+            )
+            ssh_thread.start()
+        except Exception as e:
+            _dbg(f"[remote-access] ssh start error: {e}")
+            self.after(0, lambda: self._feedback_tab(f"Connection failed: {e}", ERR_COLOR))
+            self.after(0, lambda: self._connect_btn.config(text="Connect", fg=FG))
+
     def _run_pty_connect(self, proto, host, port, user, password):
         try:
             if proto == "ftp":
-                session = shell_db.add_session(host, port, 0)
-                session["type"] = "FTP"
-                _dbg(f"[remote-access] ftp session #{session['id']} to {host}:{port}")
+                _dbg(f"[remote-access] ftp connecting to {host}:{port}")
 
-                ftp_thread = FTPConnectionThread(host, port, user, password, session["id"])
-                session["cmd_queue"] = ftp_thread.queue
+                def on_connected(sid):
+                    _dbg(f"[remote-access] ftp session #{sid} created")
+                    self.after(0, self._on_connected)
+
+                def on_error(msg):
+                    self.after(0, lambda: self._feedback_tab(f"{msg}", ERR_COLOR))
+                    self.after(0, lambda: self._connect_btn.config(text="Connect", fg=FG))
+
+                ftp_thread = FTPConnectionThread(
+                    host, port, user, password,
+                    on_connected=on_connected,
+                    on_error=on_error,
+                )
                 ftp_thread.start()
-
-                self.after(0, self._on_connected)
                 return
 
             target = f"{user}@{host}" if user else host
@@ -369,7 +547,7 @@ class RemoteAccessDialog(tk.Toplevel):
 
         except Exception as e:
             _dbg(f"[remote-access] connect error: {e}")
-            self.after(0, lambda: self._feedback(f"Connection failed: {e}", ERR_COLOR))
+            self.after(0, lambda: self._feedback_tab(f"Connection failed: {e}", ERR_COLOR))
             self.after(0, lambda: self._connect_btn.config(text="Connect", fg=FG))
 
     def _read_pty(self, sid, master_fd, pid):
@@ -413,6 +591,6 @@ class RemoteAccessDialog(tk.Toplevel):
                 pass
 
     def _on_connected(self):
-        self._feedback("Connected", SUCCESS)
+        self._feedback_tab("Connected", SUCCESS)
         self._connect_btn.config(text="Connect", fg=FG)
         self.after(1000, self.destroy)

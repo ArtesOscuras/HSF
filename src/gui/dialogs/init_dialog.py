@@ -34,6 +34,7 @@ def _checks():
     yield _check("websocket", "websocket-client", lambda: _has_module("websocket"), kind="python", critical=True)
     yield _check("pillow", "Pillow", lambda: _has_module("PIL"), kind="python", critical=True)
     yield _check("netifaces", "netifaces", lambda: _has_module("netifaces"), kind="python", critical=True)
+    yield _check("paramiko", "paramiko", lambda: _has_module("paramiko"), kind="python", critical=False)
     yield _check("python_nmap", "python-nmap", lambda: _has_module("nmap"), kind="python", critical=False)
 
     # --- Binaries ---
@@ -180,7 +181,7 @@ class InitDialog(tk.Toplevel):
         self.resizable(False, False)
 
         self.transient(parent)
-        self.grab_set()
+        self.after(10, self.grab_set)
 
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=0)

@@ -110,7 +110,7 @@ def get_session(sid):
 
 def get_all():
     with _lock:
-        return sorted(_sessions.values(), key=lambda s: s["id"], reverse=True)
+        return sorted(_sessions.values(), key=lambda s: s["id"], reverse=False)
 
 
 def get_count():

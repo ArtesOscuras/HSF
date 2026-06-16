@@ -179,8 +179,8 @@ def send_command(sid, cmd):
         return False
     q = session.get("cmd_queue")
     if q:
+        _dbg(f"[shell #{sid}] queuing: {repr(cmd[:100])}")
         q.put(cmd)
-        _dbg(f"[shell #{sid}] queued command ({len(cmd)} chars)")
         return True
     cmd_bytes = (cmd + "\n").encode() if isinstance(cmd, str) else cmd
     pty_fd = session.get("pty_fd")
