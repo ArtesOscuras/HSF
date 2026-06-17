@@ -86,7 +86,7 @@ class ScanDialog(tk.Toplevel):
             bg="#000000", fg="#ffffff",
             selectbackground="#333333", selectforeground="#ffffff",
             font=fonts.view_font(12), borderwidth=0, highlightthickness=0,
-            activestyle="none",
+            activestyle="none", exportselection=False,
         )
         self._iface_listbox.grid(row=0, column=0, sticky="nsew")
 
@@ -101,6 +101,8 @@ class ScanDialog(tk.Toplevel):
             self._iface_listbox.insert(tk.END, f"  {name:<8} {ip}")
         if self._interfaces:
             self._iface_listbox.selection_set(0)
+            self._iface_listbox.activate(0)
+            self._iface_listbox.focus_set()
 
         ip_frame = tk.Frame(frame, bg="#111111")
         ip_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=(5, 5))
