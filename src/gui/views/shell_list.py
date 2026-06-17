@@ -72,7 +72,7 @@ class ShellListView(BaseView):
                             width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.text.configure(yscrollcommand=scrollbar.set)
-        self.text.bind("<Configure>", lambda e: self.after(50, self._poll))
+        self.text.bind("<Configure>", self._on_resize)
 
         btn_frame = tk.Frame(self, bg="#000000")
         btn_frame.grid(row=2, column=0, sticky="ew", pady=(5, 10))
@@ -89,6 +89,14 @@ class ShellListView(BaseView):
 
         self._last_hash = None
         self._poll_id = None
+        self._resize_id = None
+
+    def _on_resize(self, event):
+        if self._resize_id:
+            self.after_cancel(self._resize_id)
+        self._last_hash = None
+        self._resize_id = self.after(200, self._poll)
+
 
     def on_activate(self):
         self.after(100, self._poll)
@@ -161,6 +169,11 @@ class ShellListView(BaseView):
         self._items = items
 
         current_hash = hash(tuple((i["id"], i["status"], i.get("type", ""), i.get("os", "")) for i in items))
+
+        if current_hash == self._last_hash:
+            self._poll_id = self.after(2000, self._poll)
+            return
+        self._last_hash = current_hash
 
         w_id = 4
         w_ip = 12

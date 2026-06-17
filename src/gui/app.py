@@ -24,6 +24,7 @@ from src.tools.scanner import PassiveMDNSScanner, ActiveScanner
 from src.tools.scanner.mdns_cache import load as load_mdns_cache, save as save_mdns_cache, start_autosave, clear as clear_mdns_cache, wipe as wipe_mdns_cache
 from src.tools.scanner.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _probe_smb_info, _probe_ssh_banner, _parse_ssh_banner, _probe_ttl, _run_whatweb, _probe_web_internal, _identify_linux_distro, _extract_domains_from_whatweb, _dbg
 from src.shells import ShellListener, shell_db
+from src import event_bus
 
 
 class _ReviewDialogManager:
@@ -298,23 +299,6 @@ class App(tk.Tk):
     def __init__(self):
         fonts.register_before_tk()
         super().__init__()
-        try:
-            fpixels = self.winfo_fpixels('1i')
-            scale = fpixels / 72.0
-            if platform.system() == 'Darwin' and fpixels < 90:
-                out = subprocess.run(
-                    ['system_profiler', 'SPDisplaysDataType'],
-                    capture_output=True, text=True, timeout=5
-                ).stdout
-                log_w = self.winfo_screenwidth()
-                for m in re.finditer(r'Resolution:\s*(\d+)\s*x\s*(\d+)', out):
-                    phys_w = int(m.group(1))
-                    ratio = phys_w / log_w
-                    if ratio >= 1.5:
-                        scale = max(scale, ratio)
-            self.tk.call('tk', 'scaling', scale)
-        except Exception:
-            pass
         fonts.set_root(self)
         self.title("HSF - Hack Station Framework")
         self.minsize(800, 600)
@@ -364,6 +348,8 @@ class App(tk.Tk):
         start_machines_autosave(store)
 
         self.after(500, self._run_init_checks)
+
+        event_bus.start(self, self._process_scanner_events)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -802,7 +788,7 @@ class App(tk.Tk):
         has_evidence = result != "device unknown" or ttl is not None or bool(mds)
         _dbg(f"[scan-ip] result={result} ttl={ttl} mds={sorted(mds.keys()) if mds else []} evidence={has_evidence}")
         if not has_evidence:
-            self.console.after(0, lambda: self.console.warning(f"No device detected at {ip}"))
+            event_bus.submit({"type": "scan_error", "message": f"No device detected at {ip}"})
             return
         machine = store.add_or_update(ip=ip, method="manual")
         machine.device_type = result
@@ -828,9 +814,7 @@ class App(tk.Tk):
                     machine.device_type = distro
                     machine.os = distro
         machine_db.save_machine_info(machine)
-        self.console.after(0, lambda: self.console.success(
-            f"{machine.ip:<20} {machine.hostname:<20} [manual]"
-        ))
+        event_bus.submit({"type": "scan_ip_result", "machine": machine})
 
     TCP_PORTS_COMMON = [
         7, 9, 13, 21, 22, 23, 25, 37, 49, 53, 69, 70, 79, 80, 88, 110, 111,
@@ -1481,28 +1465,26 @@ class App(tk.Tk):
 
     def _on_host_discovered(self, ip, hostname, method, mac=""):
         if ip == "ERROR":
-            self.console.after(0, lambda: self.console.error(hostname))
+            event_bus.submit({"type": "scan_error", "message": hostname})
             return
 
         if ip in ("127.0.0.1", "::1", "localhost") or ip.startswith("127."):
             return
 
         existing = store.get(ip)
-        is_new = existing is None
         machine = store.add_or_update(ip=ip, hostname=hostname, mac=mac, method=method)
 
-        _dbg(f"[discovery] ip={ip} hostname={hostname} method={method} is_new={is_new} prev_type={existing.device_type if existing else 'N/A'}")
+        _dbg(f"[discovery] ip={ip} hostname={hostname} method={method} is_new={existing is None} prev_type={existing.device_type if existing else 'N/A'}")
 
         if ip in self._identifying_ips:
             return
 
-        if is_new:
-            self.console.after(0, lambda m=machine: self.console.success(
-                f"{m.ip:<20} {m.hostname:<20} [{', '.join(m.methods)}]"
-            ))
-            self._identifying_ips.add(ip)
-            threading.Thread(target=self._identify, args=(machine,), daemon=True).start()
-        elif not existing.device_type or existing.device_type in ("device unknown", "iOS device"):
+        event_bus.submit({
+            "type": "discovery",
+            "machine": machine,
+            "is_new": existing is None,
+        })
+        if existing is None or existing.device_type in ("", "device unknown", "iOS device"):
             self._identifying_ips.add(ip)
             threading.Thread(target=self._identify, args=(machine,), daemon=True).start()
 
@@ -1537,16 +1519,54 @@ class App(tk.Tk):
                             machine.os = distro
                 machine_db.save_machine_info(machine)
                 if result != old_type:
-                    if machine.device_type == "device unknown":
-                        self.console.after(0, lambda m=machine: self.console.body(
-                            f"  {m.ip:<20} identified as: {m.device_type}"
-                        ))
-                    else:
-                        self.console.after(0, lambda m=machine: self.console.success(
-                            f"  {m.ip:<20} identified as: {m.device_type}"
-                        ))
+                    event_bus.submit({
+                        "type": "identify_result",
+                        "machine": machine,
+                        "result": machine.device_type,
+                    })
         finally:
             self._identifying_ips.discard(machine.ip)
+
+    def _process_scanner_events(self, events):
+        discoveries = []
+        identify_results = []
+        scan_ip_results = []
+        scan_errors = []
+
+        for ev in events:
+            t = ev["type"]
+            if t == "discovery":
+                discoveries.append(ev)
+            elif t == "identify_result":
+                identify_results.append(ev)
+            elif t == "scan_ip_result":
+                scan_ip_results.append(ev)
+            elif t == "scan_error":
+                scan_errors.append(ev)
+
+        for ev in scan_errors:
+            self.console.error(ev["message"])
+
+        for ev in discoveries:
+            m = ev["machine"]
+            if ev.get("is_new"):
+                self.console.success(
+                    f"{m.ip:<20} {m.hostname:<20} [{', '.join(m.methods)}]"
+                )
+
+        for ev in scan_ip_results:
+            m = ev["machine"]
+            self.console.success(
+                f"{m.ip:<20} {m.hostname:<20} [manual]"
+            )
+
+        for ev in identify_results:
+            m = ev["machine"]
+            result = ev["result"]
+            if result == "device unknown":
+                self.console.body(f"  {m.ip:<20} identified as: {result}")
+            else:
+                self.console.success(f"  {m.ip:<20} identified as: {result}")
 
     def _cmd_init(self, args):
         self._run_init_checks()
@@ -1985,4 +2005,5 @@ class App(tk.Tk):
         store.save()
         save_mdns_cache()
         hsf_settings.save()
+        event_bus.stop()
         self.destroy()

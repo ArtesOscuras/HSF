@@ -16,7 +16,6 @@ dependencies = [
     "websocket-client>=1.6.0",
     "paramiko>=3.0.0",
     "requests>=2.31.0",
-    "python-nmap>=0.7.0",
     "prompt-toolkit>=3.0.0",
 ]
 

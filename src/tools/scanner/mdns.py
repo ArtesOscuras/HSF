@@ -1,5 +1,7 @@
 import threading
 from scapy.all import sniff, DNS
+from scapy.config import conf
+conf.verb = 0
 
 
 def _check_permission():

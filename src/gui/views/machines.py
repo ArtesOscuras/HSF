@@ -81,10 +81,17 @@ class NetworkView(BaseView):
                             width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.text.configure(yscrollcommand=scrollbar.set)
-        self.text.bind("<Configure>", lambda e: self.after(50, self._poll))
+        self.text.bind("<Configure>", self._on_resize)
 
         self._last_hash = None
         self._poll_id = None
+        self._resize_id = None
+
+    def _on_resize(self, event):
+        if self._resize_id:
+            self.after_cancel(self._resize_id)
+        self._last_hash = None
+        self._resize_id = self.after(200, self._poll)
 
     def on_activate(self):
         self.after(100, self._poll)
@@ -171,6 +178,16 @@ class NetworkView(BaseView):
 
         all_machines = store.get_all_sorted()
         machines = [m for m in all_machines if not self._is_local(m)]
+
+        current_hash = hash(tuple(
+            (m.id, m.ip, m.hostname, m.device_type, tuple(sorted(m.methods)))
+            for m in machines
+        ))
+        if current_hash == self._last_hash:
+            self._poll_id = self.after(2000, self._poll)
+            return
+        self._last_hash = current_hash
+
         self._machines = machines
 
         w_id = self.MIN_ID
