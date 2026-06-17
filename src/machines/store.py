@@ -7,8 +7,8 @@ from datetime import datetime
 
 
 # --- debug logging -----------------------------------------------------------
-from src.hsf_paths import databases_dir as _databases_dir
-_DBG_FILE = os.path.join(_databases_dir(), "debugging_logs")
+from src.hsf_paths import logs_dir as _logs_dir
+_DBG_FILE = os.path.join(_logs_dir(), "debugging_logs")
 _DBG_LOCK = threading.Lock()
 
 
@@ -23,6 +23,7 @@ def _dbg(msg):
         pass
 # ---------------------------------------------------------------------------
 
+from src.hsf_paths import databases_dir as _databases_dir
 
 _DB_FILE = None
 _AUTOSAVE_INTERVAL = 10

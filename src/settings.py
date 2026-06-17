@@ -31,8 +31,10 @@ def save():
 
 
 def get(key, default=None):
-    return _data.get(key, default)
+    with _lock:
+        return _data.get(key, default)
 
 
 def set(key, value):
-    _data[key] = value
+    with _lock:
+        _data[key] = value

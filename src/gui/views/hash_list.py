@@ -88,16 +88,6 @@ class HashListView(BaseView):
             font=fonts.view_font(12), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
-        back_btn.pack(side=tk.RIGHT, padx=(10, 0))
-        back_btn.bind("<Button-1>", lambda e: self.master.activate_view("credentials"))
-        back_btn.bind("<Enter>", lambda e: back_btn.config(bg="#333333"))
-        back_btn.bind("<Leave>", lambda e: back_btn.config(bg="#222222"))
-
-        add_btn = tk.Label(
-            btn_frame, text="  Add hash  ", bg="#222222", fg=BRIGHT,
-            font=fonts.view_font(12), relief=tk.RAISED, bd=1,
-            padx=15, pady=6,
-        )
         add_btn.pack(side=tk.LEFT)
         add_btn.bind("<Button-1>", lambda e: self._open_add_hash())
         add_btn.bind("<Enter>", lambda e: add_btn.config(bg="#333333"))
@@ -200,8 +190,6 @@ class HashListView(BaseView):
         tabs.append(t)
         t += col_w(w_hash) + char_w
         tabs.append(t)
-
-        self._last_hash = current_hash
 
         scroll_pos = self.text.yview()[0]
 

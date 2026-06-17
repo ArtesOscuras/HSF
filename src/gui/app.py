@@ -1,4 +1,3 @@
-import ipaddress
 import os
 import platform
 import re
@@ -22,7 +21,7 @@ from src.machines import domain_db
 import src.machines
 from src.tools.scanner import PassiveMDNSScanner, ActiveScanner
 from src.tools.scanner.mdns_cache import load as load_mdns_cache, save as save_mdns_cache, start_autosave, clear as clear_mdns_cache, wipe as wipe_mdns_cache
-from src.tools.scanner.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _probe_smb_info, _probe_ssh_banner, _parse_ssh_banner, _probe_ttl, _run_whatweb, _probe_web_internal, _identify_linux_distro, _extract_domains_from_whatweb, _dbg
+from src.tools.scanner.identifier import identify_device, get_gateway_ip, extract_model_for_ip, _probe_smb_info, _probe_ssh_banner, _probe_ttl, _run_whatweb, _probe_web_internal, _identify_linux_distro, _extract_domains_from_whatweb, _dbg
 from src.shells import ShellListener, shell_db
 from src import event_bus
 
@@ -749,7 +748,7 @@ class App(tk.Tk):
                     f"Nmap: {nmap_status}"
                 )
                 if not self._active_scanner.has_nmap:
-                    self.console.warning("python-nmap not found: pip install python-nmap")
+                    self.console.info("nmap binary not available — ARP scanner using native mode")
             except RuntimeError as e:
                 self.console.error(str(e))
 

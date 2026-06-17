@@ -47,3 +47,6 @@ def lst_dir() -> Path:
 def settings_file() -> Path:
     p = _get_data_home() / "settings.json"
     return p
+
+def logs_dir() -> Path:
+    return _PKG / "logs"

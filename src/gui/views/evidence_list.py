@@ -203,8 +203,6 @@ class EvidenceListView(BaseView):
         t += col_w(w_reqs) + gap_px
         tabs.append(t)
 
-        self._last_hash = current_hash
-
         scroll_pos = self.text.yview()[0]
 
         self.text.configure(state=tk.NORMAL, tabs=tabs)

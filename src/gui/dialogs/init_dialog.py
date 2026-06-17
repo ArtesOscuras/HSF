@@ -35,7 +35,6 @@ def _checks():
     yield _check("pillow", "Pillow", lambda: _has_module("PIL"), kind="python", critical=True)
     yield _check("netifaces", "netifaces", lambda: _has_module("netifaces"), kind="python", critical=True)
     yield _check("paramiko", "paramiko", lambda: _has_module("paramiko"), kind="python", critical=False)
-    yield _check("python_nmap", "python-nmap", lambda: _has_module("nmap"), kind="python", critical=False)
 
     # --- Binaries ---
     yield _check("nmap_bin", "nmap", lambda: _resolve_binary("nmap")[0], kind="binary", critical=False)

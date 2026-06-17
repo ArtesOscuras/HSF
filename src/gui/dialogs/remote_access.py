@@ -12,9 +12,9 @@ from src.shells.ftp_shell import FTPConnectionThread
 from src.shells.ssh_shell import SSHConnectionThread
 from src.shells.sftp_shell import SFTPConnectionThread
 from src.shells.winrm_shell import WinRMConnectionThread
-from src.hsf_paths import databases_dir as _databases_dir
+from src.hsf_paths import logs_dir as _logs_dir
 
-_DBG_FILE = os.path.join(_databases_dir(), "debugging_logs")
+_DBG_FILE = os.path.join(_logs_dir(), "debugging_logs")
 _DBG_LOCK = threading.Lock()
 
 

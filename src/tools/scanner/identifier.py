@@ -8,8 +8,8 @@ from scapy.all import IP, ICMP, TCP, UDP, DNS, DNSQR, sr1, RandShort
 
 
 # --- debug logging -----------------------------------------------------------
-from src.hsf_paths import databases_dir as _databases_dir
-_DBG_FILE = os.path.join(_databases_dir(), "debugging_logs")
+from src.hsf_paths import logs_dir as _logs_dir
+_DBG_FILE = os.path.join(_logs_dir(), "debugging_logs")
 _DBG_LOCK = __import__("threading").Lock()
 
 
@@ -24,6 +24,16 @@ def _dbg(msg):
         pass
 # ---------------------------------------------------------------------------
 
+_scapy_perm_warned = False
+
+def _warn_scapy_permission():
+    global _scapy_perm_warned
+    if _scapy_perm_warned:
+        return
+    _scapy_perm_warned = True
+    from src import event_bus
+    event_bus.submit({"type": "scan_error",
+                       "message": "scapy requires root/CAP_NET_RAW for packet probes. Run as root or: sudo setcap cap_net_raw+ep $(which python3)"})
 
 import socket
 
@@ -133,7 +143,11 @@ def _probe_mdns_service(ip, service_name):
 
     _dbg(f"  [active-mdns] probing {ip} for {service_name}")
     pkt = IP(dst=ip) / UDP(sport=RandShort(), dport=PORT_MDNS) / DNS(rd=1, qd=DNSQR(qname=service_name, qtype="PTR"))
-    reply = sr1(pkt, timeout=TIMEOUT, verbose=0)
+    try:
+        reply = sr1(pkt, timeout=TIMEOUT, verbose=0)
+    except (PermissionError, OSError):
+        _warn_scapy_permission()
+        return False
     if reply is None:
         _dbg(f"  [active-mdns] {service_name} -> no reply")
         return False
@@ -149,7 +163,11 @@ def _probe_mdns_service(ip, service_name):
 
 def _probe_udp_port(ip, port):
     pkt = IP(dst=ip) / UDP(sport=RandShort(), dport=port)
-    reply = sr1(pkt, timeout=TIMEOUT, verbose=0)
+    try:
+        reply = sr1(pkt, timeout=TIMEOUT, verbose=0)
+    except (PermissionError, OSError):
+        _warn_scapy_permission()
+        return False
     if reply is None:
         return True
     if reply.haslayer(ICMP) and reply[ICMP].type == 3 and reply[ICMP].code == 3:
