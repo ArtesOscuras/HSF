@@ -421,24 +421,6 @@ class App(tk.Tk):
         shell_view._on_shell_click = self._open_shell_view
         self.visualizer.register_view("shells", shell_view)
 
-        self.console.add_help_section("Views", [
-            ("view list", "List available views"),
-            ("view tools", "Available tools"),
-            ("view machines", "Machine list"),
-            ("view machine <id|ip>", "View machine details"),
-            ("view domains", "Domain list"),
-            ("view domain <name>", "View domain details"),
-            ("view shells", "Shell sessions"),
-            ("view shell <id|ip>", "View shell detail"),
-            ("view credentials", "Stored credentials"),
-            ("view credential <user>", "View credential detail"),
-            ("view hashes", "Stored hashes"),
-            ("view hash <hash|id>", "View hash detail"),
-            ("view evidences", "Evidence sessions"),
-            ("view evidence <name>", "View evidence detail"),
-            ("view users / passwords", "User/password list"),
-        ])
-
     def _register_commands(self):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
         self.console.set_subcommands("view", ["list", "tools", "machines", "machine", "domains", "domain", "shells", "shell", "credentials", "credential", "hashes", "hash", "users", "passwords", "evidences", "evidence"])

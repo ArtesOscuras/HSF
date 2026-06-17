@@ -249,7 +249,7 @@ class Console(tk.Frame):
             fs = self._font_size
             f = tkfont.Font(font=(fonts.family(), fs))
             line_h = f.metrics("linespace")
-            h = len(self._autocomplete_matches) * line_h + 4
+            h = len(self._autocomplete_matches) * line_h + 4 + len(self._autocomplete_matches)
             longest = max((len(it.strip()) for it in items), default=10)
             w = f.measure(" " * (longest + 3)) + 4
             con_top = self.winfo_rooty() - self.master.winfo_rooty()
@@ -396,7 +396,7 @@ class Console(tk.Frame):
         lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
 
         popup_w = f.measure(" " * (longest + 3)) + 4
-        h = len(matches) * line_h + 4
+        h = len(matches) * line_h + 4 + len(matches)
         con_top = self.winfo_rooty() - self.master.winfo_rooty()
         y = con_top - h
 
@@ -425,7 +425,7 @@ class Console(tk.Frame):
             longest = max((len(name) for name, _ in matches), default=10)
             lb.configure(width=longest + 3)
             popup_w = f.measure(" " * (longest + 3)) + 4
-            h = len(matches) * line_h + 4
+            h = len(matches) * line_h + 4 + len(matches)
             con_top = self.winfo_rooty() - self.master.winfo_rooty()
             y = con_top - h
             self._autocomplete_popup.place_configure(x=0, y=y, width=popup_w, height=h)
@@ -439,7 +439,10 @@ class Console(tk.Frame):
         raw = self.input_var.get()
         prefix = raw.strip()
         if not prefix:
-            self._close_autocomplete()
+            all_cmds = [(n, info["help"]) for n, info in self.commands.items()]
+            all_cmds.sort(key=lambda x: x[0])
+            self._close_arg_popup()
+            self._show_or_update(all_cmds)
             return
 
         parts = prefix.split(None, 1)
@@ -472,7 +475,7 @@ class Console(tk.Frame):
         f = tkfont.Font(font=(fonts.family(), fs))
         line_h = f.metrics("linespace")
         longest = max((len(s) for s in items), default=10)
-        h = len(items) * line_h + 4
+        h = len(items) * line_h + 4 + len(items)
         popup_w = f.measure(" " * (longest + 3)) + 4
 
         cmd_x = self._autocomplete_popup.winfo_x()
