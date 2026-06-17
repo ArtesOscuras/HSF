@@ -23,6 +23,7 @@ class HashListView(BaseView):
 
     MIN_TYPE = 8
     MIN_HASH = 16
+    MIN_ID = 4
 
     def _build_ui(self):
         self.columnconfigure(0, weight=1)
@@ -114,10 +115,13 @@ class HashListView(BaseView):
         self._items = []
 
     def _insert_line(self, item, w_type, w_hash, center_pad):
+        hid = item["id"]
         htype = item.get("type", "") or ""
         hval = item.get("hash", "") or ""
 
         self.text.insert(tk.END, center_pad, "bright")
+        self.text.insert(tk.END, f"#{hid}", "muted")
+        self.text.insert(tk.END, "\t", "bright")
 
         icon = icons.icon("hashes2.png", size=ICON_SIZE)
         if icon:
@@ -159,9 +163,11 @@ class HashListView(BaseView):
             return
         self._last_hash = current_hash
 
+        w_id = self.MIN_ID
         w_type = self.MIN_TYPE
         w_hash = self.MIN_HASH
         for item in items:
+            w_id = max(w_id, len(str(item["id"])))
             w_type = max(w_type, len(item.get("type", "") or ""))
             hval = item.get("hash", "") or ""
             w_hash = max(w_hash, min(len(hval), 17))
@@ -173,7 +179,7 @@ class HashListView(BaseView):
         def col_w(n):
             return font.measure(" " * n)
 
-        row_content_px = ICON_SIZE + gap_px + col_w(w_type) + gap_px + col_w(w_hash) + char_w + 20
+        row_content_px = col_w(w_id) + gap_px + ICON_SIZE + gap_px + col_w(w_type) + gap_px + col_w(w_hash) + char_w + 20
 
         w = self.text.winfo_width()
         if w > row_content_px:
@@ -184,7 +190,9 @@ class HashListView(BaseView):
 
         center_px = font.measure(center_pad)
         tabs = []
-        t = center_px + ICON_SIZE + gap_px
+        t = center_px + col_w(w_id) + gap_px
+        tabs.append(t)
+        t += ICON_SIZE + gap_px
         tabs.append(t)
         t += col_w(w_type) + gap_px
         tabs.append(t)

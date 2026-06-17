@@ -423,34 +423,36 @@ class App(tk.Tk):
 
         self.console.add_help_section("Views", [
             ("view list", "List available views"),
-            ("view machines", "Machine list"),
             ("view tools", "Available tools"),
-            ("view shells", "Reverse shell sessions"),
-            ("view domains", "Discovered domains list"),
-            ("view evidences", "Evidence sessions list"),
-            ("view credentials", "Stored credentials"),
+            ("view machines", "Machine list"),
             ("view machine <id|ip>", "View machine details"),
-            ("view <name>", "Switch to a view"),
+            ("view domains", "Domain list"),
+            ("view domain <name>", "View domain details"),
+            ("view shells", "Shell sessions"),
+            ("view shell <id|ip>", "View shell detail"),
+            ("view credentials", "Stored credentials"),
+            ("view credential <user>", "View credential detail"),
+            ("view hashes", "Stored hashes"),
+            ("view hash <hash|id>", "View hash detail"),
+            ("view evidences", "Evidence sessions"),
+            ("view evidence <name>", "View evidence detail"),
+            ("view users / passwords", "User/password list"),
         ])
 
     def _register_commands(self):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
-        self.console.register_command("scan", self._cmd_scan, "Network scanning commands")
-        self.console.register_command("tcpscan", self._cmd_tcpscan, "Scan TCP ports on an IP")
-        self.console.register_command("udpscan", self._cmd_udpscan, "Scan UDP ports on an IP")
-        self.console.register_command("whatweb", self._cmd_whatweb, "Web technology scan on a port")
-        self.console.register_command("bannergrab", self._cmd_bannergrab, "Grab service banner from a port")
+        self.console.set_subcommands("view", ["list", "tools", "machines", "machine", "domains", "domain", "shells", "shell", "credentials", "credential", "hashes", "hash", "users", "passwords", "evidences", "evidence"])
+        self.console.register_command("use", self._cmd_use, "Use a tool")
+        self.console.set_subcommands("use", ["scanner", "bannergrab", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "whatweb", "ftp"])
+        self.console.register_command("start", self._cmd_start, "Start listeners")
+        self.console.set_subcommands("start", ["shells-listener", "mdns-listener"])
+        self.console.register_command("stop", self._cmd_stop, "Stop listeners")
+        self.console.set_subcommands("stop", ["shells-listener", "mdns-listener"])
         self.console.register_command("delete", self._cmd_delete, "Delete stored data")
-        self.console.set_subcommands("delete", ["dbs", "credentials", "evidences", "machine"])
-        self.console.register_command("ping", self._cmd_ping, "Ping a machine by IP or ID")
-        self.console.register_command("nslookup", self._cmd_nslookup, "DNS lookup for a domain, IP or machine ID")
-        self.console.register_command("add-domain", self._cmd_domain, "Add a domain to the inventory")
-        self.console.register_command("fuzz", self._cmd_fuzz, "Open fuzz configuration dialog")
-        self.console.register_command("ftp", self._cmd_ftp, "Open FTP/SFTP connection to a machine")
-        self.console.register_command("webrecorder", self._cmd_recorder, "Record browser session for a domain")
+        self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell"])
+        self.console.register_command("add", self._cmd_add, "Add to inventory")
+        self.console.set_subcommands("add", ["machine", "domain", "credential", "user", "password", "hash"])
         self.console.register_command("init", self._cmd_init, "Re-run initialization checks")
-        self.console.register_command("start-listener", self._cmd_start_listener, "Start reverse shell listener")
-        self.console.register_command("stop-listener", self._cmd_stop_listener, "Stop reverse shell listener")
         self.console.register_command("exit", self._cmd_exit, "Close the application")
 
         self.console.set_system_handler(self._run_system)
@@ -458,9 +460,10 @@ class App(tk.Tk):
 
     def _cmd_view(self, args):
         if not args:
-            self.console.body("Usage: view <name> or view list")
+            self.console.body("Usage: view <subcommand> or view list")
             return
         sub = args[0].lower()
+        rest = args[1:]
         if sub == "list":
             names = self.visualizer.get_view_names()
             if names:
@@ -472,29 +475,146 @@ class App(tk.Tk):
             else:
                 self.console.warning("No views available.")
         elif sub == "machine":
-            self._cmd_view_machine(args[1:])
+            self._cmd_view_machine(rest)
         elif sub == "domain":
-            self._cmd_view_domain(args[1:])
+            self._cmd_view_domain(rest)
+        elif sub == "shell":
+            self._cmd_view_shell(rest)
+        elif sub == "credential":
+            self._cmd_view_credential(rest)
+        elif sub == "hash":
+            self._cmd_view_hash(rest)
+        elif sub == "evidence":
+            self._cmd_view_evidence_name(rest)
+        elif sub in ("tools", "machines", "domains", "shells", "credentials", "hashes", "users", "passwords", "evidences"):
+            target = "user-pass" if sub in ("users", "passwords") else sub
+            self.visualizer.activate_view(target)
         else:
-            try:
-                self.visualizer.activate_view(sub)
-            except ValueError:
-                self.console.error(f"Unknown view: {sub}. Use 'view list' to see available views.")
+            self.console.error(f"Unknown view subcommand: {sub}. Use 'view list' to see available views.")
+
+    def _resolve_target(self, target):
+        if re.match(r"^\d+\.\d+\.\d+\.\d+$", target):
+            return target, None
+        if re.match(r"^\d+$", target):
+            mid = int(target)
+            for m in store.get_all():
+                if m.id == mid:
+                    return m.ip, m
+        m = store.get(target)
+        if m:
+            return target, m
+        for d in domain_db.list_all():
+            if d == target:
+                info = domain_db.load_domain_info(d)
+                return target, None
+        return None, None
+
+    def _resolve_to_ip(self, target):
+        ip, machine = self._resolve_target(target)
+        if ip and re.match(r"^\d+\.\d+\.\d+\.\d+$", ip):
+            return ip
+        try:
+            info = socket.getaddrinfo(target, None, socket.AF_INET, socket.SOCK_STREAM)
+            if info:
+                ip = info[0][4][0]
+                dom = target
+                machine = store.get(ip)
+                if not machine:
+                    machine = store.add_or_update(ip=ip, method="manual")
+                    machine.device_type = "device unknown"
+                    machine_db.save_machine_info(machine)
+                if not domain_db.exists(dom):
+                    domain_db.init_or_update(dom, machine.id, machine.ip, "use")
+                self.console.info(f"{dom} -> {ip}")
+                return ip
+        except Exception:
+            pass
+        return None
+
+    def _cmd_use(self, args):
+        if not args:
+            self.console.body("Usage: use <scanner|bannergrab|fuzzer|webrecorder|nslookup|ping|tcpscan|udpscan|whatweb|ftp> ...")
+            return
+        sub = args[0].lower()
+        rest = args[1:]
+        if sub == "scanner":
+            self._cmd_use_scanner(rest)
+        elif sub == "bannergrab":
+            self._cmd_use_bannergrab(rest)
+        elif sub == "fuzzer":
+            self._cmd_use_fuzzer(rest)
+        elif sub == "webrecorder":
+            self._cmd_use_recorder(rest)
+        elif sub == "nslookup":
+            self._cmd_use_nslookup(rest)
+        elif sub == "ping":
+            self._cmd_use_ping(rest)
+        elif sub == "tcpscan":
+            self._cmd_use_tcpscan(rest)
+        elif sub == "udpscan":
+            self._cmd_use_udpscan(rest)
+        elif sub == "whatweb":
+            self._cmd_use_whatweb(rest)
+        elif sub == "ftp":
+            self._cmd_ftp(rest)
+        else:
+            self.console.error(f"Unknown tool: {sub}")
+
+    def _cmd_use_scanner(self, args):
+        if not args:
+            self._scan_active()
+            return
+        ip = self._resolve_to_ip(args[0])
+        if not ip:
+            self.console.body("Usage: use scanner [<ip|id|domain>]")
+            return
+        self._scan_ip(ip)
+
+    def _cmd_use_bannergrab(self, args):
+        if not args:
+            self._show_scan_dialog()
+            return
+        self._cmd_bannergrab(args)
+
+    def _cmd_use_fuzzer(self, args):
+        self._cmd_fuzz(args)
+
+    def _cmd_use_recorder(self, args):
+        self._cmd_recorder(args)
+
+    def _cmd_use_nslookup(self, args):
+        if not args:
+            self.console.body("Usage: use nslookup <ip|id|domain>")
+            return
+        self._cmd_nslookup(args)
+
+    def _cmd_use_ping(self, args):
+        if not args:
+            self.console.body("Usage: use ping <ip|id|domain>")
+            return
+        self._cmd_ping(args)
+
+    def _cmd_use_tcpscan(self, args):
+        self._cmd_tcpscan(args)
+
+    def _cmd_use_udpscan(self, args):
+        self._cmd_udpscan(args)
+
+    def _cmd_use_whatweb(self, args):
+        self._cmd_whatweb(args)
 
     def _cmd_view_machine(self, args):
         if not args:
             self.console.body("Usage: view machine <id|ip>")
             return
         target = args[0]
-        machine = None
-        if re.match(r"^\d+$", target):
+        machine = store.get(target)
+        if not machine and target.isdigit():
             mid = int(target)
             for m in store.get_all():
                 if m.id == mid:
                     machine = m
                     break
-        else:
-            machine = store.get(target)
         if not machine:
             self.console.warning(f"No machine found for: {target}")
             return
@@ -546,6 +666,56 @@ class App(tk.Tk):
             self._cmd_view_machine([str(machine.id)])
         else:
             self._cmd_view_machine([ip])
+
+    def _cmd_view_shell(self, args):
+        if not args:
+            self.console.body("Usage: view shell <id|ip>")
+            return
+        target = args[0]
+        session = None
+        for s in shell_db.get_all():
+            if s["ip"] == target:
+                session = s
+                break
+        if not session and target.isdigit():
+            session = shell_db.get_session(int(target))
+        if not session:
+            self.console.warning(f"No shell found for: {target}")
+            return
+        self._open_shell_view(session["id"])
+
+    def _cmd_view_credential(self, args):
+        if not args:
+            self.console.body("Usage: view credential <username>")
+            return
+        from src.machines.credential_db import load_credentials
+        username = args[0]
+        for c in load_credentials():
+            if c["username"] == username:
+                self._open_credential_view(c["id"])
+                return
+        self.console.warning(f"No credential found for: {username}")
+
+    def _cmd_view_hash(self, args):
+        if not args:
+            self.console.body("Usage: view hash <hash|id>")
+            return
+        from src.machines.credential_db import load_hashes
+        target = args[0]
+        for h in load_hashes():
+            if h["hash"] == target:
+                self._open_hash_view(h["id"])
+                return
+        if target.isdigit():
+            self._open_hash_view(int(target))
+            return
+        self.console.warning(f"No hash found matching: {target}")
+
+    def _cmd_view_evidence_name(self, args):
+        if not args:
+            self.console.body("Usage: view evidence <name>")
+            return
+        self._open_evidence_view(args[0])
 
     def _open_evidence_view(self, name):
         view_name = f"evidence_{name}"
@@ -625,6 +795,49 @@ class App(tk.Tk):
         else:
             self._start_shell_listener()
 
+    def _cmd_start(self, args):
+        if not args:
+            self.console.body("Usage: start <shells-listener|mdns-listener>")
+            return
+        sub = args[0].lower()
+        if sub == "shells-listener":
+            self._cmd_start_shells(args[1:])
+        elif sub == "mdns-listener":
+            self._cmd_start_mdns(args[1:])
+        else:
+            self.console.error(f"Unknown start target: {sub}")
+
+    def _cmd_start_shells(self, args):
+        if self._shell_listener and self._shell_listener.is_running:
+            self.console.warning(f"Shell listener already running on port {self._shell_listener.port}")
+            return
+        if args:
+            try:
+                port = int(args[0])
+                if port < 1 or port > 65535:
+                    self.console.error("Port must be between 1 and 65535")
+                    return
+            except ValueError:
+                self.console.body("Usage: start shells-listener [port]")
+                return
+            self._shell_listener = ShellListener(port=port, on_new_session=self._on_shell_session)
+            self._shell_listener.start()
+            self.console.info(f"Reverse shell listener started on port {port}")
+        else:
+            self._start_shell_listener()
+
+    def _cmd_start_mdns(self, args):
+        if self._passive_scanner and self._passive_scanner.is_running:
+            self.console.warning("Passive mDNS scanner is already running")
+            return
+        from src.tools.scanner.mdns import _check_permission
+        if not _check_permission():
+            self.console.error("mDNS passive scanner: permission denied. Run as root or install with CAP_NET_RAW.")
+            return
+        self._passive_scanner = PassiveMDNSScanner(on_host_callback=self._on_host_discovered)
+        self._passive_scanner.start()
+        self.console.info("Passive listening mDNS started")
+
     def _cmd_stop_listener(self, args):
         if self._shell_listener and self._shell_listener.is_running:
             self._shell_listener.stop()
@@ -632,6 +845,28 @@ class App(tk.Tk):
             self.console.info("Reverse shell listener stopped")
         else:
             self.console.warning("No shell listener is running")
+
+    def _cmd_stop(self, args):
+        if not args:
+            self.console.body("Usage: stop <shells-listener|mdns-listener>")
+            return
+        sub = args[0].lower()
+        if sub == "shells-listener":
+            if self._shell_listener and self._shell_listener.is_running:
+                self._shell_listener.stop()
+                self._shell_listener = None
+                self.console.info("Reverse shell listener stopped")
+            else:
+                self.console.warning("No shell listener is running")
+        elif sub == "mdns-listener":
+            if self._passive_scanner and self._passive_scanner.is_running:
+                self._passive_scanner.stop()
+                self._passive_scanner = None
+                self.console.info("Passive mDNS scanner stopped")
+            else:
+                self.console.warning("Passive mDNS scanner is not running")
+        else:
+            self.console.error(f"Unknown stop target: {sub}")
 
     def _on_shell_session(self, **kwargs):
         if "error" in kwargs:
@@ -1736,6 +1971,27 @@ class App(tk.Tk):
         domain = args[0].strip()
         threading.Thread(target=self._run_domain, args=(domain,), daemon=True).start()
 
+    def _cmd_add(self, args):
+        if not args:
+            self.console.body("Usage: add <machine|domain|credential|user|password|hash>")
+            return
+        sub = args[0].lower()
+        rest = args[1:]
+        if sub == "machine":
+            self._cmd_add_machine(rest)
+        elif sub == "domain":
+            self._cmd_domain(rest)
+        elif sub == "credential":
+            self._cmd_add_credential(rest)
+        elif sub == "user":
+            self._cmd_add_user(rest)
+        elif sub == "password":
+            self._cmd_add_password(rest)
+        elif sub == "hash":
+            self._cmd_add_hash(rest)
+        else:
+            self.console.error(f"Unknown add target: {sub}")
+
     def _run_domain(self, domain):
         self.console.after(0, lambda: self.console.info(f"Resolving {domain}..."))
         try:
@@ -1764,6 +2020,59 @@ class App(tk.Tk):
             self.console.after(0, lambda: self.console.success(
                 f"{domain} → {ip}  (new machine #{machine.id})"
             ))
+
+    def _cmd_add_machine(self, args):
+        if not args:
+            self.console.body("Usage: add machine <ip>")
+            return
+        ip = args[0]
+        if not re.match(r"^\d+\.\d+\.\d+\.\d+$", ip):
+            self.console.body("Usage: add machine <ip>")
+            return
+        machine = store.add_or_update(ip=ip, method="manual")
+        machine.device_type = "device unknown"
+        machine_db.save_machine_info(machine)
+        self.console.success(f"Machine #{machine.id} ({ip}) added")
+
+    def _cmd_add_credential(self, args):
+        from src.machines.credential_db import save_credential, save_user
+        if len(args) < 2:
+            self.console.body("Usage: add credential <username> <password|hash_nt>")
+            return
+        username = args[0]
+        secret = args[1]
+        nt_pattern = re.compile(r"^[a-fA-F0-9]{32}$")
+        if nt_pattern.match(secret):
+            cid = save_credential(username, "", hash_nt=secret, hash_nt_origin="manual")
+            self.console.success(f"Credential #{cid}: {username} (NT hash) added")
+        else:
+            cid = save_credential(username, secret, password_origin="manual")
+            self.console.success(f"Credential #{cid}: {username} / {secret} added")
+        save_user(username)
+
+    def _cmd_add_user(self, args):
+        if not args:
+            self.console.body("Usage: add user <username>")
+            return
+        from src.machines.credential_db import save_user
+        save_user(args[0])
+        self.console.success(f"User '{args[0]}' added")
+
+    def _cmd_add_password(self, args):
+        if not args:
+            self.console.body("Usage: add password <password>")
+            return
+        from src.machines.credential_db import save_password
+        save_password(args[0])
+        self.console.success("Password added")
+
+    def _cmd_add_hash(self, args):
+        if len(args) < 2:
+            self.console.body("Usage: add hash <type> <hash>")
+            return
+        from src.machines.credential_db import save_hash_entry
+        hid = save_hash_entry(args[0], args[1], origin="manual")
+        self.console.success(f"Hash #{hid} added")
 
     def _cmd_fuzz(self, args):
         from .dialogs.fuzz import FuzzDialog
@@ -1969,40 +2278,203 @@ class App(tk.Tk):
         sub = args[0].lower()
         if sub == "dbs":
             self._cmd_delete_dbs(args[1:])
-        elif sub == "credentials":
-            self._cmd_delete_creds(args[1:])
-        elif sub == "evidences":
-            self._cmd_delete_evidence(args[1:])
+        elif sub == "credential":
+            self._cmd_delete_credential(args[1:])
+        elif sub == "evidence":
+            self._cmd_delete_evidence_single(args[1:])
+        elif sub == "hash":
+            self._cmd_delete_hash(args[1:])
         elif sub == "machine":
             self._cmd_delete_machine(args[1:])
+        elif sub == "domain":
+            self._cmd_delete_domain(args[1:])
+        elif sub == "user":
+            self._cmd_delete_user(args[1:])
+        elif sub == "password":
+            self._cmd_delete_password(args[1:])
+        elif sub == "shell":
+            self._cmd_delete_shell(args[1:])
         else:
-            self.console.error(f"Unknown delete target: {sub}. Use: dbs, credentials, evidences, machine")
+            self.console.error(f"Unknown delete target: {sub}. Use: dbs, credential, evidence, hash, machine, domain, user, password, shell")
 
     def _cmd_delete_creds(self, args):
         from src.machines.credential_db import delete_all
         delete_all()
         self.console.info("All credentials data cleared")
 
+    def _cmd_delete_credential(self, args):
+        if not args:
+            self.console.body("Usage: delete credential <username|all>")
+            return
+        from src.machines.credential_db import load_credentials, delete_credential
+        username = args[0]
+        if username == "all":
+            from src.machines.credential_db import delete_all
+            delete_all()
+            self.console.info("All credentials deleted")
+            return
+        for c in load_credentials():
+            if c["username"] == username:
+                delete_credential(c["id"])
+                self.console.success(f"Credential '{username}' deleted")
+                return
+        self.console.warning(f"No credential found for: {username}")
+
+    def _cmd_delete_evidence_single(self, args):
+        import shutil
+        from src.hsf_paths import evidence_dir
+        if not args:
+            self.console.body("Usage: delete evidence <name|all>")
+            return
+        name = args[0]
+        base = str(evidence_dir())
+        if name == "all":
+            if os.path.isdir(base):
+                shutil.rmtree(base)
+                os.makedirs(base, exist_ok=True)
+            self.console.info("All evidence data cleared")
+            return
+        path = os.path.join(base, name)
+        if not os.path.isdir(path):
+            self.console.warning(f"No evidence session found: {name}")
+            return
+        shutil.rmtree(path)
+        self.console.success(f"Evidence '{name}' deleted")
+
+    def _cmd_delete_hash(self, args):
+        if not args:
+            self.console.body("Usage: delete hash <hash|id|all>")
+            return
+        from src.machines.credential_db import load_hashes, delete_hash_entry
+        target = args[0]
+        if target == "all":
+            count = 0
+            for h in list(load_hashes()):
+                delete_hash_entry(h["id"])
+                count += 1
+            self.console.success(f"{count} hashes deleted")
+            return
+        for h in load_hashes():
+            if h["hash"] == target:
+                delete_hash_entry(h["id"])
+                self.console.success(f"Hash deleted (id={h['id']})")
+                return
+        if target.isdigit():
+            hid = int(target)
+            delete_hash_entry(hid)
+            self.console.success(f"Hash #{hid} deleted")
+            return
+        self.console.warning(f"No hash found matching: {target}")
+
     def _cmd_delete_machine(self, args):
         if not args:
-            self.console.body("Usage: delete machine <id|ip>")
+            self.console.body("Usage: delete machine <id|ip|all>")
             return
         target = args[0]
-        machine = None
-        if re.match(r"^\d+$", target):
+        if target == "all":
+            count = 0
+            for m in list(store.get_all()):
+                machine_db.delete_machine_db(m.id)
+                store.remove(m.ip)
+                count += 1
+            self.console.success(f"{count} machines deleted")
+            return
+        machine = store.get(target)
+        if not machine and target.isdigit():
             mid = int(target)
             for m in store.get_all():
                 if m.id == mid:
                     machine = m
                     break
-        else:
-            machine = store.get(target)
         if not machine:
             self.console.warning(f"No machine found for: {target}")
             return
         machine_db.delete_machine_db(machine.id)
         store.remove(machine.ip)
         self.console.success(f"Machine #{machine.id} ({machine.ip}) deleted")
+
+    def _cmd_delete_shell(self, args):
+        if not args:
+            self.console.body("Usage: delete shell <id|ip|all>")
+            return
+        from src.shells import shell_db
+        target = args[0]
+        if target == "all":
+            count = 0
+            for s in list(shell_db.get_all()):
+                shell_db.close_session(s["id"])
+                count += 1
+            self.console.success(f"{count} shells closed")
+            return
+        session = None
+        for s in shell_db.get_all():
+            if s["ip"] == target:
+                session = s
+                break
+        if not session and target.isdigit():
+            sid = int(target)
+            session = shell_db.get_session(sid)
+        if not session:
+            self.console.warning(f"No shell found for: {target}")
+            return
+        shell_db.close_session(session["id"])
+        self.console.success(f"Shell #{session['id']} ({session['ip']}) closed")
+
+    def _cmd_delete_domain(self, args):
+        if not args:
+            self.console.body("Usage: delete domain <domain|all>")
+            return
+        domain = args[0]
+        if domain == "all":
+            count = 0
+            for d in list(domain_db.list_all()):
+                domain_db.delete_domain(d)
+                count += 1
+            self.console.success(f"{count} domains deleted")
+            return
+        if not domain_db.exists(domain):
+            self.console.warning(f"No domain found for: {domain}")
+            return
+        domain_db.delete_domain(domain)
+        self.console.success(f"Domain '{domain}' deleted")
+
+    def _cmd_delete_user(self, args):
+        if not args:
+            self.console.body("Usage: delete user <username|all>")
+            return
+        from src.machines.credential_db import delete_user, load_users
+        username = args[0]
+        if username == "all":
+            count = 0
+            for u in list(load_users()):
+                delete_user(u)
+                count += 1
+            self.console.success(f"{count} users deleted")
+            return
+        if username not in load_users():
+            self.console.warning(f"No user found for: {username}")
+            return
+        delete_user(username)
+        self.console.success(f"User '{username}' deleted")
+
+    def _cmd_delete_password(self, args):
+        if not args:
+            self.console.body("Usage: delete password <password|all>")
+            return
+        from src.machines.credential_db import delete_password, load_passwords
+        pwd = args[0]
+        if pwd == "all":
+            count = 0
+            for p in list(load_passwords()):
+                delete_password(p)
+                count += 1
+            self.console.success(f"{count} passwords deleted")
+            return
+        if pwd not in load_passwords():
+            self.console.warning(f"No password found")
+            return
+        delete_password(pwd)
+        self.console.success("Password deleted")
 
     def _cmd_delete_evidence(self, args):
         import shutil

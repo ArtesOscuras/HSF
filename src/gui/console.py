@@ -115,7 +115,6 @@ class Console(tk.Frame):
 
         self.register_command("help", self._cmd_help, "Show this help message")
         self.register_command("clear", self._cmd_clear, "Clear the console")
-        self.register_command("echo", self._cmd_echo, "Echo back the arguments")
 
         if self._font_size != 11:
             self.after(0, self._apply_font_size)
@@ -297,9 +296,6 @@ class Console(tk.Frame):
         self.output_area.config(state=tk.NORMAL)
         self.output_area.delete("1.0", tk.END)
         self.output_area.config(state=tk.DISABLED)
-
-    def _cmd_echo(self, args):
-        self.body(" ".join(args))
 
     def _on_key_press(self, event):
         if event.char == "!" and not self._is_system:
