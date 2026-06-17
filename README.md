@@ -72,6 +72,27 @@ Los datos de sesión (bases de datos, credenciales, evidencias) se almacenan en:
 - `~/.local/share/hsf/` (por defecto)
 - `$HSF_HOME/` (si se define la variable de entorno)
 
+## Permisos de red
+
+Algunos escáneres (mDNS pasivo, identificación activa) requieren acceso raw a la red.
+Tienes dos opciones:
+
+### Linux: otorgar CAP_NET_RAW (recomendado)
+
+```bash
+sudo setcap cap_net_raw+ep $(readlink -f $(which python3))
+```
+
+Esto evita tener que usar sudo. Para deshacerlo: `sudo setcap -r $(readlink -f $(which python3))`.
+
+### Ejecutar como root
+
+```bash
+sudo "$(which hsf)"
+```
+
+**Nota**: `which hsf` resuelve la ruta antes de sudo, así funciona con pipx.
+
 ## Desarrollo
 
 ```bash

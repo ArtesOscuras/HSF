@@ -33,7 +33,7 @@ def _warn_scapy_permission():
     _scapy_perm_warned = True
     from src import event_bus
     event_bus.submit({"type": "scan_error",
-                       "message": "scapy requires root/CAP_NET_RAW for packet probes. Run as root or: sudo setcap cap_net_raw+ep $(which python3)"})
+                       "message": "scapy requires root/CAP_NET_RAW. Run with: sudo \"$(which hsf)\"  or: sudo setcap cap_net_raw+ep $(readlink -f $(which python3))"})
 
 import socket
 

@@ -10,15 +10,6 @@ from scapy.all import ARP, Ether, srp
 from zeroconf import Zeroconf, ServiceBrowser, BadTypeInNameException
 from .mdns_cache import add_service, decode_properties
 
-try:
-    import nmap
-    HAS_PYTHON_NMAP = True
-except ImportError:
-    HAS_PYTHON_NMAP = False
-
-HAS_NMAP_BIN = shutil.which("nmap") is not None
-HAS_NMAP = HAS_PYTHON_NMAP and HAS_NMAP_BIN
-
 SERVICE_ENUM_TIME = 3
 ACTIVE_INTERVAL = 5
 THREADS = 20
@@ -105,7 +96,7 @@ class ActiveScanner:
         t_mdns_active.start()
         self._threads.append(t_mdns_active)
 
-        if HAS_NMAP:
+        if self.has_nmap:
             t_nmap = threading.Thread(target=self._run_nmap, daemon=True)
             t_nmap.start()
             self._threads.append(t_nmap)
@@ -152,7 +143,7 @@ class ActiveScanner:
             time.sleep(ACTIVE_INTERVAL)
 
     def _run_nmap(self):
-        if not HAS_NMAP:
+        if not self.has_nmap:
             return
         targets = [str(ip) for ip in self._network.hosts()]
         while self._running:
@@ -194,7 +185,11 @@ class ActiveScanner:
 
     @property
     def has_nmap(self):
-        return HAS_NMAP
+        try:
+            import nmap
+            return shutil.which("nmap") is not None
+        except ImportError:
+            return False
 
     @property
     def interface_name(self):
