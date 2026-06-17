@@ -441,7 +441,7 @@ class App(tk.Tk):
         self.console.register_command("whatweb", self._cmd_whatweb, "Web technology scan on a port")
         self.console.register_command("bannergrab", self._cmd_bannergrab, "Grab service banner from a port")
         self.console.register_command("delete", self._cmd_delete, "Delete stored data")
-        self.console.set_subcommands("delete", ["dbs", "credentials", "evidences"])
+        self.console.set_subcommands("delete", ["dbs", "credentials", "evidences", "machine"])
         self.console.register_command("ping", self._cmd_ping, "Ping a machine by IP or ID")
         self.console.register_command("nslookup", self._cmd_nslookup, "DNS lookup for a domain, IP or machine ID")
         self.console.register_command("add-domain", self._cmd_domain, "Add a domain to the inventory")
@@ -1973,13 +1973,36 @@ class App(tk.Tk):
             self._cmd_delete_creds(args[1:])
         elif sub == "evidences":
             self._cmd_delete_evidence(args[1:])
+        elif sub == "machine":
+            self._cmd_delete_machine(args[1:])
         else:
-            self.console.error(f"Unknown delete target: {sub}. Use: dbs, credentials, evidences")
+            self.console.error(f"Unknown delete target: {sub}. Use: dbs, credentials, evidences, machine")
 
     def _cmd_delete_creds(self, args):
         from src.machines.credential_db import delete_all
         delete_all()
         self.console.info("All credentials data cleared")
+
+    def _cmd_delete_machine(self, args):
+        if not args:
+            self.console.body("Usage: delete machine <id|ip>")
+            return
+        target = args[0]
+        machine = None
+        if re.match(r"^\d+$", target):
+            mid = int(target)
+            for m in store.get_all():
+                if m.id == mid:
+                    machine = m
+                    break
+        else:
+            machine = store.get(target)
+        if not machine:
+            self.console.warning(f"No machine found for: {target}")
+            return
+        machine_db.delete_machine_db(machine.id)
+        store.remove(machine.ip)
+        self.console.success(f"Machine #{machine.id} ({machine.ip}) deleted")
 
     def _cmd_delete_evidence(self, args):
         import shutil

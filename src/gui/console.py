@@ -251,8 +251,8 @@ class Console(tk.Frame):
             f = tkfont.Font(font=(fonts.family(), fs))
             line_h = f.metrics("linespace")
             h = len(self._autocomplete_matches) * line_h + 4
-            self._autocomplete_listbox.update_idletasks()
-            w = self._autocomplete_listbox.winfo_reqwidth() + 4
+            longest = max((len(it.strip()) for it in items), default=10)
+            w = f.measure(" " * (longest + 3)) + 4
             con_top = self.winfo_rooty() - self.master.winfo_rooty()
             y = con_top - h
             self._autocomplete_popup.place_configure(x=0, y=y, width=w, height=h)
@@ -340,7 +340,8 @@ class Console(tk.Frame):
         in_arg_mode = " " in raw.lstrip()
 
         if in_arg_mode and cmd_prefix in self._subcommands:
-            sc_matches = [s for s in self._subcommands[cmd_prefix] if s.startswith(arg_prefix)]
+            arg1 = arg_prefix.split(None, 1)[0] if arg_prefix else ""
+            sc_matches = [s for s in self._subcommands[cmd_prefix] if s.startswith(arg1)]
             if sc_matches:
                 if len(sc_matches) == 1 and arg_prefix:
                     self.input_var.set(f"{cmd_prefix} {sc_matches[0]} ")
@@ -398,8 +399,7 @@ class Console(tk.Frame):
         lb.bind("<ButtonRelease-1>", self._on_popup_click)
         lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
 
-        lb.update_idletasks()
-        popup_w = lb.winfo_reqwidth() + 4
+        popup_w = f.measure(" " * (longest + 3)) + 4
         h = len(matches) * line_h + 4
         con_top = self.winfo_rooty() - self.master.winfo_rooty()
         y = con_top - h
@@ -428,8 +428,7 @@ class Console(tk.Frame):
             line_h = f.metrics("linespace")
             longest = max((len(name) for name, _ in matches), default=10)
             lb.configure(width=longest + 3)
-            lb.update_idletasks()
-            popup_w = lb.winfo_reqwidth() + 4
+            popup_w = f.measure(" " * (longest + 3)) + 4
             h = len(matches) * line_h + 4
             con_top = self.winfo_rooty() - self.master.winfo_rooty()
             y = con_top - h
@@ -462,7 +461,8 @@ class Console(tk.Frame):
 
         if in_arg_mode and cmd_prefix in self._subcommands:
             sc_items = self._subcommands[cmd_prefix]
-            sc_matches = [s for s in sc_items if s.startswith(arg_prefix)]
+            arg1 = arg_prefix.split(None, 1)[0] if arg_prefix else ""
+            sc_matches = [s for s in sc_items if s.startswith(arg1)]
             self._show_or_update(cmd_matches)
             self._show_arg_popup(sc_matches)
         else:
@@ -470,44 +470,55 @@ class Console(tk.Frame):
             self._show_or_update(cmd_matches)
 
     def _show_arg_popup(self, items):
-        self._close_arg_popup()
         if not self._autocomplete_popup:
             return
         fs = self._font_size
         f = tkfont.Font(font=(fonts.family(), fs))
         line_h = f.metrics("linespace")
         longest = max((len(s) for s in items), default=10)
-
-        frame = tk.Frame(self.master, bg="#111111", highlightbackground="#333333", highlightthickness=1)
-        lb = tk.Listbox(frame, bg="#111111", fg="#FFFFFF", selectbackground="#333333",
-                        selectforeground="#FFFFFF", font=(fonts.family(), fs),
-                        width=longest + 3, borderwidth=0,
-                        highlightthickness=0, activestyle="none", exportselection=False)
-        lb.pack(fill=tk.BOTH, expand=True)
-        for s in items:
-            lb.insert(tk.END, f"  {s}")
-        lb.selection_set(0)
-        lb.activate(0)
-        lb.bind("<ButtonRelease-1>", lambda e: self._on_arg_click())
-        lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
-
-        lb.update_idletasks()
-        popup_w = lb.winfo_reqwidth() + 4
         h = len(items) * line_h + 4
+        popup_w = f.measure(" " * (longest + 3)) + 4
 
         cmd_x = self._autocomplete_popup.winfo_x()
         cmd_w = self._autocomplete_popup.winfo_width()
         cmd_y = self._autocomplete_popup.winfo_y()
         cmd_h = self._autocomplete_popup.winfo_height()
-
         bottom = cmd_y + cmd_h
-        frame.place(x=cmd_x + cmd_w, y=bottom - h, width=popup_w, height=h)
-        frame.lift()
 
-        self._arg_popup = frame
-        self._arg_listbox = lb
-        self._arg_matches = items
-        self._arg_index = 0
+        if self._arg_popup:
+            lb = self._arg_listbox
+            lb.delete(0, tk.END)
+            for s in items:
+                lb.insert(tk.END, f"  {s}")
+            lb.selection_set(0)
+            lb.activate(0)
+            lb.configure(width=longest + 3)
+            self._arg_matches = items
+            self._arg_index = 0
+            self._arg_popup.place_configure(
+                x=cmd_x + cmd_w, y=bottom - h, width=popup_w, height=h)
+            self._arg_popup.lift()
+        else:
+            frame = tk.Frame(self.master, bg="#111111", highlightbackground="#333333", highlightthickness=1)
+            lb = tk.Listbox(frame, bg="#111111", fg="#FFFFFF", selectbackground="#333333",
+                            selectforeground="#FFFFFF", font=(fonts.family(), fs),
+                            width=longest + 3, borderwidth=0,
+                            highlightthickness=0, activestyle="none", exportselection=False)
+            lb.pack(fill=tk.BOTH, expand=True)
+            for s in items:
+                lb.insert(tk.END, f"  {s}")
+            lb.selection_set(0)
+            lb.activate(0)
+            lb.bind("<ButtonRelease-1>", lambda e: self._on_arg_click())
+            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
+
+            frame.place(x=cmd_x + cmd_w, y=bottom - h, width=popup_w, height=h)
+            frame.lift()
+
+            self._arg_popup = frame
+            self._arg_listbox = lb
+            self._arg_matches = items
+            self._arg_index = 0
 
     def _close_arg_popup(self):
         if self._arg_popup:
