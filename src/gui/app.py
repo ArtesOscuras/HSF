@@ -440,15 +440,14 @@ class App(tk.Tk):
         self.console.register_command("udpscan", self._cmd_udpscan, "Scan UDP ports on an IP")
         self.console.register_command("whatweb", self._cmd_whatweb, "Web technology scan on a port")
         self.console.register_command("bannergrab", self._cmd_bannergrab, "Grab service banner from a port")
-        self.console.register_command("delete-dbs", self._cmd_delete_dbs, "Wipe all stored data")
-        self.console.register_command("delete-credentials", self._cmd_delete_creds, "Delete all credentials")
+        self.console.register_command("delete", self._cmd_delete, "Delete stored data")
+        self.console.set_subcommands("delete", ["dbs", "credentials", "evidences"])
         self.console.register_command("ping", self._cmd_ping, "Ping a machine by IP or ID")
         self.console.register_command("nslookup", self._cmd_nslookup, "DNS lookup for a domain, IP or machine ID")
         self.console.register_command("add-domain", self._cmd_domain, "Add a domain to the inventory")
         self.console.register_command("fuzz", self._cmd_fuzz, "Open fuzz configuration dialog")
         self.console.register_command("ftp", self._cmd_ftp, "Open FTP/SFTP connection to a machine")
         self.console.register_command("webrecorder", self._cmd_recorder, "Record browser session for a domain")
-        self.console.register_command("delete-evidence", self._cmd_delete_evidence, "Delete all evidence data")
         self.console.register_command("init", self._cmd_init, "Re-run initialization checks")
         self.console.register_command("start-listener", self._cmd_start_listener, "Start reverse shell listener")
         self.console.register_command("stop-listener", self._cmd_stop_listener, "Stop reverse shell listener")
@@ -1962,6 +1961,20 @@ class App(tk.Tk):
 
         self._recorder = Recorder(target, browser_path, on_log=on_log)
         self._recorder.start()
+
+    def _cmd_delete(self, args):
+        if not args:
+            self.console.body("Usage: delete <dbs|credentials|evidences>")
+            return
+        sub = args[0].lower()
+        if sub == "dbs":
+            self._cmd_delete_dbs(args[1:])
+        elif sub == "credentials":
+            self._cmd_delete_creds(args[1:])
+        elif sub == "evidences":
+            self._cmd_delete_evidence(args[1:])
+        else:
+            self.console.error(f"Unknown delete target: {sub}. Use: dbs, credentials, evidences")
 
     def _cmd_delete_creds(self, args):
         from src.machines.credential_db import delete_all

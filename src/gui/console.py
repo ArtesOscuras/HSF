@@ -36,6 +36,11 @@ class Console(tk.Frame):
         self._track_id = None
         self._filter_id = None
         self._last_popup_y = None
+        self._subcommands = {}
+        self._arg_popup = None
+        self._arg_listbox = None
+        self._arg_matches = []
+        self._arg_index = -1
 
         self.grid_propagate(False)
         self.config(bg=BG)
@@ -124,6 +129,9 @@ class Console(tk.Frame):
     def register_command(self, name, handler, help_text=""):
         self.commands[name] = {"handler": handler, "help": help_text}
 
+    def set_subcommands(self, name, items):
+        self._subcommands[name] = items
+
     def set_system_handler(self, handler):
         self._system_handler = handler
 
@@ -171,6 +179,7 @@ class Console(tk.Frame):
         self.writeln(f"[!] {text}", ERR_COLOR)
 
     def _on_enter(self, event):
+        self._close_autocomplete()
         raw = self.input_var.get().strip()
         self.input_var.set("")
         if self._is_system:
@@ -229,6 +238,7 @@ class Console(tk.Frame):
         self.input_entry.configure(font=new_font)
         self.prompt_label.configure(font=new_font)
         if self._autocomplete_popup:
+            self._close_arg_popup()
             self._autocomplete_listbox.configure(font=new_font)
             items = list(self._autocomplete_listbox.get(0, tk.END))
             longest = max((len(it.strip()) for it in items), default=10)
@@ -321,7 +331,28 @@ class Console(tk.Frame):
     def _on_tab(self, event):
         if self._is_system:
             return "break"
-        prefix = self.input_var.get().strip()
+        raw = self.input_var.get()
+        prefix = raw.strip()
+
+        parts = prefix.split(None, 1)
+        cmd_prefix = parts[0]
+        arg_prefix = parts[1] if len(parts) > 1 else ""
+        in_arg_mode = " " in raw.lstrip()
+
+        if in_arg_mode and cmd_prefix in self._subcommands:
+            sc_matches = [s for s in self._subcommands[cmd_prefix] if s.startswith(arg_prefix)]
+            if sc_matches:
+                if len(sc_matches) == 1 and arg_prefix:
+                    self.input_var.set(f"{cmd_prefix} {sc_matches[0]} ")
+                    self.input_entry.icursor(tk.END)
+                    return "break"
+                if self._arg_popup:
+                    self._arg_index = (self._arg_index + 1) % len(sc_matches)
+                    self._arg_listbox.selection_clear(0, tk.END)
+                    self._arg_listbox.selection_set(self._arg_index)
+                    self._arg_listbox.activate(self._arg_index)
+                return "break"
+
         matches = [(n, info["help"]) for n, info in self.commands.items()
                    if n.startswith(prefix)]
         matches.sort(key=lambda x: x[0])
@@ -410,14 +441,92 @@ class Console(tk.Frame):
     def _filter_autocomplete(self):
         if self._is_system:
             return
-        prefix = self.input_var.get().strip()
-        matches = [(n, info["help"]) for n, info in self.commands.items()
-                   if n.startswith(prefix)]
-        matches.sort(key=lambda x: x[0])
-        if not matches:
+        raw = self.input_var.get()
+        prefix = raw.strip()
+        if not prefix:
             self._close_autocomplete()
             return
-        self._show_or_update(matches)
+
+        parts = prefix.split(None, 1)
+        cmd_prefix = parts[0]
+        arg_prefix = parts[1] if len(parts) > 1 else ""
+        in_arg_mode = " " in raw.lstrip()
+
+        cmd_matches = [(n, info["help"]) for n, info in self.commands.items()
+                       if n.startswith(cmd_prefix)]
+        cmd_matches.sort(key=lambda x: x[0])
+
+        if not cmd_matches:
+            self._close_autocomplete()
+            return
+
+        if in_arg_mode and cmd_prefix in self._subcommands:
+            sc_items = self._subcommands[cmd_prefix]
+            sc_matches = [s for s in sc_items if s.startswith(arg_prefix)]
+            self._show_or_update(cmd_matches)
+            self._show_arg_popup(sc_matches)
+        else:
+            self._close_arg_popup()
+            self._show_or_update(cmd_matches)
+
+    def _show_arg_popup(self, items):
+        self._close_arg_popup()
+        if not self._autocomplete_popup:
+            return
+        fs = self._font_size
+        f = tkfont.Font(font=(fonts.family(), fs))
+        line_h = f.metrics("linespace")
+        longest = max((len(s) for s in items), default=10)
+
+        frame = tk.Frame(self.master, bg="#111111", highlightbackground="#333333", highlightthickness=1)
+        lb = tk.Listbox(frame, bg="#111111", fg="#FFFFFF", selectbackground="#333333",
+                        selectforeground="#FFFFFF", font=(fonts.family(), fs),
+                        width=longest + 3, borderwidth=0,
+                        highlightthickness=0, activestyle="none", exportselection=False)
+        lb.pack(fill=tk.BOTH, expand=True)
+        for s in items:
+            lb.insert(tk.END, f"  {s}")
+        lb.selection_set(0)
+        lb.activate(0)
+        lb.bind("<ButtonRelease-1>", lambda e: self._on_arg_click())
+        lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
+
+        lb.update_idletasks()
+        popup_w = lb.winfo_reqwidth() + 4
+        h = len(items) * line_h + 4
+
+        cmd_x = self._autocomplete_popup.winfo_x()
+        cmd_w = self._autocomplete_popup.winfo_width()
+        cmd_y = self._autocomplete_popup.winfo_y()
+        cmd_h = self._autocomplete_popup.winfo_height()
+
+        bottom = cmd_y + cmd_h
+        frame.place(x=cmd_x + cmd_w, y=bottom - h, width=popup_w, height=h)
+        frame.lift()
+
+        self._arg_popup = frame
+        self._arg_listbox = lb
+        self._arg_matches = items
+        self._arg_index = 0
+
+    def _close_arg_popup(self):
+        if self._arg_popup:
+            self._arg_popup.destroy()
+            self._arg_popup = None
+            self._arg_listbox = None
+            self._arg_matches = []
+            self._arg_index = -1
+
+    def _on_arg_click(self):
+        if self._arg_index >= 0 and self._arg_matches:
+            current = self.input_var.get().strip()
+            parts = current.split(None, 1)
+            cmd = parts[0]
+            arg = self._arg_matches[self._arg_index]
+            self.input_var.set(f"{cmd} {arg} ")
+            self.input_entry.icursor(tk.END)
+        self._close_autocomplete()
+        self.input_entry.focus()
 
     def _on_focus_in(self, event):
         if not self._is_system:
@@ -437,6 +546,7 @@ class Console(tk.Frame):
         self._close_autocomplete()
 
     def _close_autocomplete(self):
+        self._close_arg_popup()
         if self._filter_id:
             self.after_cancel(self._filter_id)
             self._filter_id = None
