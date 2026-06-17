@@ -23,7 +23,7 @@ class InterfaceSelector(tk.Toplevel):
         tk.Label(
             self,
             text="Select a network interface for scanning:",
-            font=(fonts.family(), 11),
+            font=fonts.view_font(11),
             fg="#ffffff",
             bg="#111111",
         ).grid(row=0, column=0, sticky="w", padx=15, pady=(15, 5))
@@ -39,7 +39,7 @@ class InterfaceSelector(tk.Toplevel):
             fg="#ffffff",
             selectbackground="#333333",
             selectforeground="#ffffff",
-            font=(fonts.family(), 12),
+            font=fonts.view_font(12),
             borderwidth=0,
             highlightthickness=0,
             activestyle="none",
@@ -66,7 +66,7 @@ class InterfaceSelector(tk.Toplevel):
         tk.Label(
             ip_frame,
             text="Or enter a specific IP:",
-            font=(fonts.family(), 10),
+            font=fonts.view_font(10),
             fg="#888888",
             bg="#111111",
         ).grid(row=0, column=0, sticky="w", padx=(0, 10))
@@ -78,7 +78,7 @@ class InterfaceSelector(tk.Toplevel):
             bg="#000000",
             fg="#ffffff",
             insertbackground="#ffffff",
-            font=(fonts.family(), 12),
+            font=fonts.view_font(12),
             borderwidth=1,
             relief=tk.FLAT,
             highlightthickness=1,
@@ -96,7 +96,7 @@ class InterfaceSelector(tk.Toplevel):
             text="  Cancel  ",
             bg="#222222",
             fg="#ffffff",
-            font=(fonts.family(), 10),
+            font=fonts.view_font(10),
             relief=tk.RAISED,
             bd=1,
             padx=15,
@@ -113,7 +113,7 @@ class InterfaceSelector(tk.Toplevel):
             text="  Select  ",
             bg="#222222",
             fg="#ffffff",
-            font=(fonts.family(), 10),
+            font=fonts.view_font(10),
             relief=tk.RAISED,
             bd=1,
             padx=15,

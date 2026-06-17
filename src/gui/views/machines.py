@@ -38,7 +38,7 @@ class NetworkView(BaseView):
         tk.Label(
             header,
             text="Machines",
-            font=(fonts.family_bold(), 22),
+            font=fonts.view_font_bold(22),
             fg="#ffffff",
             bg="#000000",
         ).pack(anchor="center")
@@ -46,7 +46,7 @@ class NetworkView(BaseView):
         self.iface_label = tk.Label(
             header,
             text="",
-            font=(fonts.family(), 11),
+            font=fonts.view_font(11),
             fg=MUTED,
             bg="#000000",
         )
@@ -61,7 +61,7 @@ class NetworkView(BaseView):
             text_frame,
             bg="#000000",
             fg=BRIGHT,
-            font=(fonts.family(), 16),
+            font=fonts.view_font(16),
             borderwidth=0,
             highlightthickness=0,
             pady=10,

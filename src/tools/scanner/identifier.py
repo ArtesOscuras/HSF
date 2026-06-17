@@ -8,8 +8,8 @@ from scapy.all import IP, ICMP, TCP, UDP, DNS, DNSQR, sr1, RandShort
 
 
 # --- debug logging -----------------------------------------------------------
-_proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-_DBG_FILE = os.path.join(_proj_root, "databases", "debugging_logs")
+from src.hsf_paths import databases_dir as _databases_dir
+_DBG_FILE = os.path.join(_databases_dir(), "debugging_logs")
 _DBG_LOCK = __import__("threading").Lock()
 
 

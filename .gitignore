@@ -25,6 +25,8 @@ Thumbs.db
 databases/
 wfuzz/
 
+# Datos runtime (pipx / dev)
+.hsf/
 chrome_profile/
 evidence/
 credentials/credentials.dbs

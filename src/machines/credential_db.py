@@ -1,6 +1,7 @@
 import os
 import sqlite3
 from datetime import datetime
+from src.hsf_paths import credentials_dir as _credentials_dir
 
 
 _DB_PATH = None
@@ -9,9 +10,7 @@ _DB_PATH = None
 def _init_db_path():
     global _DB_PATH
     if _DB_PATH is None:
-        proj = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        db_dir = os.path.join(proj, "credentials")
-        os.makedirs(db_dir, exist_ok=True)
+        db_dir = _credentials_dir()
         _DB_PATH = os.path.join(db_dir, "credentials.dbs")
 
 

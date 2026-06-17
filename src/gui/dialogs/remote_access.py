@@ -12,9 +12,9 @@ from src.shells.ftp_shell import FTPConnectionThread
 from src.shells.ssh_shell import SSHConnectionThread
 from src.shells.sftp_shell import SFTPConnectionThread
 from src.shells.winrm_shell import WinRMConnectionThread
+from src.hsf_paths import databases_dir as _databases_dir
 
-_proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-_DBG_FILE = os.path.join(_proj_root, "databases", "debugging_logs")
+_DBG_FILE = os.path.join(_databases_dir(), "debugging_logs")
 _DBG_LOCK = threading.Lock()
 
 
@@ -57,7 +57,7 @@ class RemoteAccessDialog(tk.Toplevel):
         style.theme_use("default")
         style.configure("TNotebook", background=BG, borderwidth=0)
         style.configure("TNotebook.Tab", background="#222222", foreground=FG,
-                        padding=[20, 6], font=(fonts.family(), 10))
+                        padding=[20, 6], font=fonts.view_font(10))
         style.map("TNotebook.Tab", background=[("selected", "#333333")])
 
         self._tab_ftp = tk.Frame(self._notebook, bg=BG)
@@ -82,7 +82,7 @@ class RemoteAccessDialog(tk.Toplevel):
         tab.columnconfigure(1, weight=1)
 
         tk.Label(
-            tab, text="Protocol:", font=(fonts.family(), 11, "bold"),
+            tab, text="Protocol:", font=fonts.view_font_bold(11),
             fg=MUTED, bg=BG,
         ).grid(row=0, column=0, sticky="w", padx=15, pady=(15, 5))
 
@@ -91,19 +91,19 @@ class RemoteAccessDialog(tk.Toplevel):
         proto_frame.grid(row=0, column=1, sticky="w", padx=15, pady=(15, 5))
         ftp_rb = tk.Radiobutton(
             proto_frame, text="FTP", variable=self._ftp_proto, value="ftp",
-            bg=BG, fg=FG, selectcolor=BG, font=(fonts.family(), 10),
+            bg=BG, fg=FG, selectcolor=BG, font=fonts.view_font(10),
             activebackground=BG, activeforeground=FG, highlightthickness=0,
         )
         ftp_rb.pack(side=tk.LEFT, padx=(0, 15))
         sftp_rb = tk.Radiobutton(
             proto_frame, text="SFTP", variable=self._ftp_proto, value="sftp",
-            bg=BG, fg=FG, selectcolor=BG, font=(fonts.family(), 10),
+            bg=BG, fg=FG, selectcolor=BG, font=fonts.view_font(10),
             activebackground=BG, activeforeground=FG, highlightthickness=0,
         )
         sftp_rb.pack(side=tk.LEFT)
 
         tk.Label(
-            tab, text="Machine:", font=(fonts.family(), 11, "bold"),
+            tab, text="Machine:", font=fonts.view_font_bold(11),
             fg=MUTED, bg=BG,
         ).grid(row=1, column=0, sticky="nw", padx=15, pady=(10, 0))
 
@@ -115,7 +115,7 @@ class RemoteAccessDialog(tk.Toplevel):
         self._machine_list = tk.Listbox(
             mach_frame, bg="#000000", fg=FG,
             selectbackground="#333333", selectforeground=FG,
-            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
+            font=fonts.view_font(11), borderwidth=0, highlightthickness=0,
             activestyle="none", exportselection=False, height=3,
         )
         self._machine_list.grid(row=0, column=0, sticky="nsew")
@@ -132,7 +132,7 @@ class RemoteAccessDialog(tk.Toplevel):
         self._machine_list.bind("<<ListboxSelect>>", self._on_machine_select)
 
         tk.Label(
-            tab, text="Credential:", font=(fonts.family(), 11, "bold"),
+            tab, text="Credential:", font=fonts.view_font_bold(11),
             fg=MUTED, bg=BG,
         ).grid(row=2, column=0, sticky="nw", padx=15, pady=(10, 0))
 
@@ -144,7 +144,7 @@ class RemoteAccessDialog(tk.Toplevel):
         self._cred_list = tk.Listbox(
             cred_frame, bg="#000000", fg=FG,
             selectbackground="#333333", selectforeground=FG,
-            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
+            font=fonts.view_font(11), borderwidth=0, highlightthickness=0,
             activestyle="none", exportselection=False, height=3,
         )
         self._cred_list.grid(row=0, column=0, sticky="nsew")
@@ -169,21 +169,21 @@ class RemoteAccessDialog(tk.Toplevel):
         self._ftp_vars = {}
         for label, key, default in fields:
             tk.Label(
-                tab, text=label, font=(fonts.family(), 11, "bold"),
+                tab, text=label, font=fonts.view_font_bold(11),
                 fg=MUTED, bg=BG,
             ).grid(row=row, column=0, sticky="w", padx=15, pady=(8, 0))
             var = tk.StringVar(value=default)
             tk.Entry(
                 tab, textvariable=var,
                 bg="#000000", fg=FG, insertbackground=FG,
-                font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+                font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
                 highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
             ).grid(row=row, column=1, sticky="ew", padx=15, pady=(8, 0))
             self._ftp_vars[key] = var
             row += 1
 
         self._ftp_feedback = tk.Label(
-            tab, text="", font=(fonts.family(), 11),
+            tab, text="", font=fonts.view_font(11),
             fg=SUCCESS, bg=BG,
         )
         self._ftp_feedback.grid(row=row, column=0, columnspan=2, pady=(10, 0))
@@ -319,7 +319,7 @@ class RemoteAccessDialog(tk.Toplevel):
         tab.columnconfigure(1, weight=1)
 
         tk.Label(
-            tab, text="Machine:", font=(fonts.family(), 11, "bold"),
+            tab, text="Machine:", font=fonts.view_font_bold(11),
             fg=MUTED, bg=BG,
         ).grid(row=0, column=0, sticky="nw", padx=15, pady=(15, 0))
 
@@ -331,7 +331,7 @@ class RemoteAccessDialog(tk.Toplevel):
         self._ssh_machine_list = tk.Listbox(
             mach_frame, bg="#000000", fg=FG,
             selectbackground="#333333", selectforeground=FG,
-            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
+            font=fonts.view_font(11), borderwidth=0, highlightthickness=0,
             activestyle="none", exportselection=False, height=3,
         )
         self._ssh_machine_list.grid(row=0, column=0, sticky="nsew")
@@ -347,7 +347,7 @@ class RemoteAccessDialog(tk.Toplevel):
         self._ssh_machine_list.bind("<<ListboxSelect>>", self._on_ssh_machine_select)
 
         tk.Label(
-            tab, text="Credential:", font=(fonts.family(), 11, "bold"),
+            tab, text="Credential:", font=fonts.view_font_bold(11),
             fg=MUTED, bg=BG,
         ).grid(row=1, column=0, sticky="nw", padx=15, pady=(10, 0))
 
@@ -359,7 +359,7 @@ class RemoteAccessDialog(tk.Toplevel):
         self._ssh_cred_list = tk.Listbox(
             cred_frame, bg="#000000", fg=FG,
             selectbackground="#333333", selectforeground=FG,
-            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
+            font=fonts.view_font(11), borderwidth=0, highlightthickness=0,
             activestyle="none", exportselection=False, height=3,
         )
         self._ssh_cred_list.grid(row=0, column=0, sticky="nsew")
@@ -384,21 +384,21 @@ class RemoteAccessDialog(tk.Toplevel):
         self._ssh_vars = {}
         for label, key, default in ssh_fields:
             tk.Label(
-                tab, text=label, font=(fonts.family(), 11, "bold"),
+                tab, text=label, font=fonts.view_font_bold(11),
                 fg=MUTED, bg=BG,
             ).grid(row=row, column=0, sticky="w", padx=15, pady=(8, 0))
             var = tk.StringVar(value=default)
             tk.Entry(
                 tab, textvariable=var,
                 bg="#000000", fg=FG, insertbackground=FG,
-                font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+                font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
                 highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
             ).grid(row=row, column=1, sticky="ew", padx=15, pady=(8, 0))
             self._ssh_vars[key] = var
             row += 1
 
         self._ssh_feedback = tk.Label(
-            tab, text="", font=(fonts.family(), 11),
+            tab, text="", font=fonts.view_font(11),
             fg=SUCCESS, bg=BG,
         )
         self._ssh_feedback.grid(row=row, column=0, columnspan=2, pady=(10, 0))
@@ -409,7 +409,7 @@ class RemoteAccessDialog(tk.Toplevel):
         tab.columnconfigure(1, weight=1)
 
         tk.Label(
-            tab, text="Machine:", font=(fonts.family(), 11, "bold"),
+            tab, text="Machine:", font=fonts.view_font_bold(11),
             fg=MUTED, bg=BG,
         ).grid(row=0, column=0, sticky="nw", padx=15, pady=(15, 0))
 
@@ -421,7 +421,7 @@ class RemoteAccessDialog(tk.Toplevel):
         self._winrm_machine_list = tk.Listbox(
             mach_frame, bg="#000000", fg=FG,
             selectbackground="#333333", selectforeground=FG,
-            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
+            font=fonts.view_font(11), borderwidth=0, highlightthickness=0,
             activestyle="none", exportselection=False, height=3,
         )
         self._winrm_machine_list.grid(row=0, column=0, sticky="nsew")
@@ -437,7 +437,7 @@ class RemoteAccessDialog(tk.Toplevel):
         self._winrm_machine_list.bind("<<ListboxSelect>>", self._on_winrm_machine_select)
 
         tk.Label(
-            tab, text="Credential:", font=(fonts.family(), 11, "bold"),
+            tab, text="Credential:", font=fonts.view_font_bold(11),
             fg=MUTED, bg=BG,
         ).grid(row=1, column=0, sticky="nw", padx=15, pady=(10, 0))
 
@@ -449,7 +449,7 @@ class RemoteAccessDialog(tk.Toplevel):
         self._winrm_cred_list = tk.Listbox(
             cred_frame, bg="#000000", fg=FG,
             selectbackground="#333333", selectforeground=FG,
-            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
+            font=fonts.view_font(11), borderwidth=0, highlightthickness=0,
             activestyle="none", exportselection=False, height=3,
         )
         self._winrm_cred_list.grid(row=0, column=0, sticky="nsew")
@@ -475,20 +475,20 @@ class RemoteAccessDialog(tk.Toplevel):
         for i, (label, key, default) in enumerate(winrm_fields):
             row = i + 2
             tk.Label(
-                tab, text=label, font=(fonts.family(), 11, "bold"),
+                tab, text=label, font=fonts.view_font_bold(11),
                 fg=MUTED, bg=BG,
             ).grid(row=row, column=0, sticky="w", padx=15, pady=(8, 0))
             var = tk.StringVar(value=default)
             tk.Entry(
                 tab, textvariable=var,
                 bg="#000000", fg=FG, insertbackground=FG,
-                font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+                font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
                 highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
             ).grid(row=row, column=1, sticky="ew", padx=15, pady=(8, 0))
             self._winrm_vars[key] = var
 
         self._winrm_feedback = tk.Label(
-            tab, text="", font=(fonts.family(), 11),
+            tab, text="", font=fonts.view_font(11),
             fg=SUCCESS, bg=BG,
         )
         self._winrm_feedback.grid(row=len(winrm_fields) + 2, column=0, columnspan=2, pady=(10, 0))
@@ -499,7 +499,7 @@ class RemoteAccessDialog(tk.Toplevel):
 
         close_btn = tk.Label(
             btn_frame, text="  Close  ", bg="#222222", fg=FG,
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         close_btn.pack(side=tk.RIGHT, padx=(5, 0))
@@ -509,7 +509,7 @@ class RemoteAccessDialog(tk.Toplevel):
 
         self._connect_btn = tk.Label(
             btn_frame, text="  Connect  ", bg="#222222", fg=FG,
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         self._connect_btn.pack(side=tk.RIGHT)

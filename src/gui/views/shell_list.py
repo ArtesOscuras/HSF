@@ -37,7 +37,7 @@ class ShellListView(BaseView):
         tk.Label(
             header,
             text="Shells",
-            font=(fonts.family_bold(), 22),
+            font=fonts.view_font_bold(22),
             fg="#ffffff",
             bg="#000000",
         ).pack(anchor="center")
@@ -51,7 +51,7 @@ class ShellListView(BaseView):
             text_frame,
             bg="#000000",
             fg=BRIGHT,
-            font=(fonts.family(), 16),
+            font=fonts.view_font(16),
             borderwidth=0,
             highlightthickness=0,
             pady=10,
@@ -79,7 +79,7 @@ class ShellListView(BaseView):
 
         remote_btn = tk.Label(
             btn_frame, text="  New remote connection  ", bg="#222222", fg="#ffffff",
-            font=(fonts.family(), 12), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(12), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         remote_btn.pack()

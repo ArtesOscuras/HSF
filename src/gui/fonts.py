@@ -4,9 +4,13 @@ import subprocess
 import sys
 import tkinter as tk
 import tkinter.font as tkfont
+from src.hsf_paths import fonts_dir as _fonts_dir
 
 _FAMILY = None
 _FAMILY_BOLD = None
+_VIEW_SCALE = 1.0
+_ROOT = None
+_VIEW_NAMED = {}
 
 _LINUX_FALLBACKS = ["DejaVu Sans Mono", "Liberation Mono", "Monospace"]
 
@@ -66,7 +70,7 @@ def register_before_tk():
     global _FAMILY, _FAMILY_BOLD
     if _FAMILY is not None:
         return
-    base = os.path.join(os.path.dirname(__file__), "..", "..", "fonts")
+    base = str(_fonts_dir())
     regular = os.path.join(base, "JetBrainsMonoNL-Regular.ttf")
     bold = os.path.join(base, "JetBrainsMonoNL-Bold.ttf")
 
@@ -90,7 +94,7 @@ def init(root):
             _set(name)
             return
 
-    base = os.path.join(os.path.dirname(__file__), "..", "..", "fonts")
+    base = str(_fonts_dir())
     regular = os.path.join(base, "JetBrainsMonoNL-Regular.ttf")
 
     if sys.platform == "darwin":
@@ -142,3 +146,46 @@ def family_bold():
     if _FAMILY_BOLD is None:
         return "Menlo"
     return _FAMILY_BOLD
+
+def set_root(root):
+    global _ROOT
+    _ROOT = root
+
+def view_scale():
+    return _VIEW_SCALE
+
+def set_view_scale(factor):
+    global _VIEW_SCALE
+    _VIEW_SCALE = max(0.5, min(4.0, factor))
+    for f in _VIEW_NAMED.values():
+        try:
+            base = f._base_size
+            f.configure(size=max(1, int(base * _VIEW_SCALE)))
+        except Exception:
+            pass
+
+def view_font(size):
+    key = f"VFont-{size}"
+    if key in _VIEW_NAMED:
+        return _VIEW_NAMED[key]
+    f = tkfont.Font(root=_ROOT, name=key, family=family(), size=max(1, int(size * _VIEW_SCALE)))
+    f._base_size = size
+    _VIEW_NAMED[key] = f
+    return f
+
+def view_font_bold(size):
+    key = f"VFontB-{size}"
+    if key in _VIEW_NAMED:
+        return _VIEW_NAMED[key]
+    f = tkfont.Font(root=_ROOT, name=key, family=family_bold(), size=max(1, int(size * _VIEW_SCALE)))
+    f._base_size = size
+    _VIEW_NAMED[key] = f
+    return f
+
+def view_font_under(size):
+    f = view_font(size)
+    return (f.actual("family"), int(f.actual("size")), "underline")
+
+def view_font_bold_under(size):
+    f = view_font_bold(size)
+    return (f.actual("family"), int(f.actual("size")), "underline")

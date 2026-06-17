@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime
+from src.hsf_paths import evidence_dir as _evidence_dir
 
 
 def _ensure_dir(target_dir):
@@ -201,6 +202,4 @@ def sanitize_name(target):
 
 
 def target_dir(target):
-    base = os.path.join(os.path.dirname(__file__), "..", "..", "..", "evidence")
-    base = os.path.abspath(base)
-    return os.path.join(base, sanitize_name(target))
+    return os.path.join(str(_evidence_dir()), sanitize_name(target))

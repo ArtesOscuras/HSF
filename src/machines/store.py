@@ -7,8 +7,8 @@ from datetime import datetime
 
 
 # --- debug logging -----------------------------------------------------------
-_proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_DBG_FILE = os.path.join(_proj_root, "databases", "debugging_logs")
+from src.hsf_paths import databases_dir as _databases_dir
+_DBG_FILE = os.path.join(_databases_dir(), "debugging_logs")
 _DBG_LOCK = threading.Lock()
 
 
@@ -34,9 +34,7 @@ _save_lock = threading.Lock()
 def _init_db_path():
     global _DB_FILE
     if _DB_FILE is None:
-        proj = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        db_dir = os.path.join(proj, "databases")
-        os.makedirs(db_dir, exist_ok=True)
+        db_dir = _databases_dir()
         _DB_FILE = os.path.join(db_dir, "machines.dbs")
 
 

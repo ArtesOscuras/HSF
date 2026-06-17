@@ -38,7 +38,7 @@ class CredentialListView(BaseView):
 
         tk.Label(
             header, text="Credentials",
-            font=(fonts.family_bold(), 22), fg="#ffffff", bg="#000000",
+            font=fonts.view_font_bold(22), fg="#ffffff", bg="#000000",
         ).pack(anchor="center")
 
         text_frame = tk.Frame(self, bg="#000000")
@@ -49,7 +49,7 @@ class CredentialListView(BaseView):
         self.text = tk.Text(
             text_frame,
             bg="#000000", fg=BRIGHT,
-            font=(fonts.family(), 16), borderwidth=0, highlightthickness=0,
+            font=fonts.view_font(16), borderwidth=0, highlightthickness=0,
             pady=10, state=tk.DISABLED, cursor="",
             wrap=tk.NONE, spacing1=8, spacing3=8,
         )
@@ -71,14 +71,14 @@ class CredentialListView(BaseView):
 
         usr_btn = tk.Label(
             btn_frame, text="  Users / Passwords  ", bg="#222222", fg=BRIGHT,
-            font=(fonts.family(), 12), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(12), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         usr_btn.pack(side=tk.LEFT, padx=(0, 10))
 
         hash_btn = tk.Label(
             btn_frame, text="  Hashes  ", bg="#222222", fg=BRIGHT,
-            font=(fonts.family(), 12), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(12), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         hash_btn.pack(side=tk.LEFT)

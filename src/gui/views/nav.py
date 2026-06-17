@@ -17,15 +17,16 @@ def build(parent, active_view, navigator):
 
     for text, view_name in _ORDER:
         is_active = view_name == active_view
+        base_font = fonts.view_font_bold(11) if is_active else fonts.view_font(11)
         btn = tk.Label(
             frame, text=f"  {text}  ",
-            font=(fonts.family_bold(), 11) if is_active else (fonts.family(), 11),
+            font=base_font,
             fg="#ffffff" if is_active else "#888888",
             bg="#000000",
         )
         btn.pack(side=tk.LEFT, padx=5)
         btn.bind("<Button-1>", lambda e, vn=view_name: navigator.activate_view(vn))
         btn.bind("<Enter>", lambda e, b=btn, a=is_active: b.config(
-            font=(fonts.family_bold(), 11, "underline") if a else (fonts.family(), 11, "underline")))
+            font=fonts.view_font_bold_under(11) if a else fonts.view_font_under(11)))
         btn.bind("<Leave>", lambda e, b=btn, a=is_active: b.config(
-            font=(fonts.family_bold(), 11) if a else (fonts.family(), 11)))
+            font=fonts.view_font_bold(11) if a else fonts.view_font(11)))

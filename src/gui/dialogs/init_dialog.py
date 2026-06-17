@@ -194,7 +194,7 @@ class InitDialog(tk.Toplevel):
         tk.Label(
             header,
             text="System Checks",
-            font=(fonts.family_bold(), 18),
+            font=fonts.view_font_bold(18),
             fg=BRIGHT,
             bg="#111111",
         ).pack(anchor="w")
@@ -202,7 +202,7 @@ class InitDialog(tk.Toplevel):
         tk.Label(
             header,
             text="Checking dependencies and system capabilities...",
-            font=(fonts.family(), 10),
+            font=fonts.view_font(10),
             fg=MUTED,
             bg="#111111",
         ).pack(anchor="w", pady=(2, 0))
@@ -216,7 +216,7 @@ class InitDialog(tk.Toplevel):
             text_frame,
             bg="#000000",
             fg=BRIGHT,
-            font=(fonts.family(), 11),
+            font=fonts.view_font(11),
             borderwidth=0,
             highlightthickness=0,
             state=tk.DISABLED,
@@ -239,14 +239,14 @@ class InitDialog(tk.Toplevel):
         self.text.tag_configure("muted", foreground=MUTED)
         self.text.tag_configure("bright", foreground=BRIGHT)
         self.text.tag_configure("info", foreground=INFO)
-        self.text.tag_configure("bold", font=(fonts.family_bold(), 11))
+        self.text.tag_configure("bold", font=fonts.view_font_bold(11))
 
         btn_frame = tk.Frame(self, bg="#111111")
         btn_frame.grid(row=2, column=0, sticky="ew", pady=(0, 15))
 
         self._ok_btn = tk.Label(
             btn_frame, text="     Continue     ", bg="#222222", fg=BRIGHT,
-            font=(fonts.family_bold(), 12), relief=tk.RAISED, bd=1,
+            font=fonts.view_font_bold(12), relief=tk.RAISED, bd=1,
             padx=20, pady=8,
         )
         self._ok_btn.pack()

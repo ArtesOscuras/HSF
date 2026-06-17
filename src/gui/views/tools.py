@@ -36,7 +36,7 @@ class ToolsView(BaseView):
         tk.Label(
             header,
             text="Tools",
-            font=(fonts.family_bold(), 22),
+            font=fonts.view_font_bold(22),
             fg="#ffffff",
             bg="#000000",
         ).pack(anchor="center")
@@ -50,7 +50,7 @@ class ToolsView(BaseView):
             text_frame,
             bg="#000000",
             fg=BRIGHT,
-            font=(fonts.family(), 16),
+            font=fonts.view_font(16),
             borderwidth=0,
             highlightthickness=0,
             pady=10,
@@ -64,8 +64,8 @@ class ToolsView(BaseView):
 
         self.text.tag_configure("muted", foreground=MUTED)
         self.text.tag_configure("bright", foreground=BRIGHT)
-        self.text.tag_configure("tool_name", foreground=BRIGHT, font=(fonts.family(), 18))
-        self.text.tag_configure("tool_desc", foreground=MUTED, font=(fonts.family(), 12))
+        self.text.tag_configure("tool_name", foreground=BRIGHT, font=fonts.view_font(18))
+        self.text.tag_configure("tool_desc", foreground=MUTED, font=fonts.view_font(12))
 
         scrollbar = tk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.text.yview)
         scrollbar.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",

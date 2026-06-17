@@ -6,6 +6,7 @@ import tkinter.font as tkfont
 from src.gui import icons
 from .base import BaseView
 from .nav import build as build_nav
+from src.hsf_paths import evidence_dir as _evidence_dir
 
 MUTED = "#888888"
 BRIGHT = "#ffffff"
@@ -16,8 +17,7 @@ ICON_SIZE = 50
 
 
 def _get_evidence_dir():
-    base = os.path.join(os.path.dirname(__file__), "..", "..", "..", "evidence")
-    return os.path.abspath(base)
+    return str(_evidence_dir())
 
 
 def _list_evidences():
@@ -61,7 +61,7 @@ class EvidenceListView(BaseView):
         tk.Label(
             header,
             text="Evidence",
-            font=(fonts.family_bold(), 22),
+            font=fonts.view_font_bold(22),
             fg="#ffffff",
             bg="#000000",
         ).pack(anchor="center")
@@ -75,7 +75,7 @@ class EvidenceListView(BaseView):
             text_frame,
             bg="#000000",
             fg=BRIGHT,
-            font=(fonts.family(), 16),
+            font=fonts.view_font(16),
             borderwidth=0,
             highlightthickness=0,
             pady=10,

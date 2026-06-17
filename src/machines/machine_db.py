@@ -4,15 +4,15 @@ import sqlite3
 from datetime import datetime
 
 
+from src.hsf_paths import databases_dir as _databases_dir
+
 _DB_DIR = None
 
 
 def _init_db_dir():
     global _DB_DIR
     if _DB_DIR is None:
-        proj = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        _DB_DIR = os.path.join(proj, "databases")
-        os.makedirs(_DB_DIR, exist_ok=True)
+        _DB_DIR = str(_databases_dir())
 
 
 def _get_path(machine_id):

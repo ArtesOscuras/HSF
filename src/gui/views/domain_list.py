@@ -37,7 +37,7 @@ class DomainListView(BaseView):
         tk.Label(
             header,
             text="Domains",
-            font=(fonts.family_bold(), 22),
+            font=fonts.view_font_bold(22),
             fg="#ffffff",
             bg="#000000",
         ).pack(anchor="center")
@@ -51,7 +51,7 @@ class DomainListView(BaseView):
             text_frame,
             bg="#000000",
             fg=BRIGHT,
-            font=(fonts.family(), 16),
+            font=fonts.view_font(16),
             borderwidth=0,
             highlightthickness=0,
             pady=10,

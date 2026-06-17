@@ -3,6 +3,7 @@ import json
 import os
 import tkinter as tk
 from .base import BaseView
+from src.hsf_paths import evidence_dir as _evidence_dir
 
 MUTED = "#888888"
 BRIGHT = "#ffffff"
@@ -11,8 +12,7 @@ SUCCESS = "#00cc66"
 
 
 def _get_evidence_dir():
-    base = os.path.join(os.path.dirname(__file__), "..", "..", "..", "evidence")
-    return os.path.abspath(base)
+    return str(_evidence_dir())
 
 
 def _load_evidence(name):
@@ -80,7 +80,7 @@ class _RequestDetailDialog(tk.Toplevel):
 
         tk.Label(
             header, text=f"[{status}] {method} {url}",
-            font=(fonts.family_bold(), 13),
+            font=fonts.view_font_bold(13),
             fg=SUCCESS if status != 0 and status != "?" else "#f44747",
             bg="#111111",
             wraplength=850,
@@ -94,7 +94,7 @@ class _RequestDetailDialog(tk.Toplevel):
         self.text = tk.Text(
             content_frame,
             bg="#000000", fg=BRIGHT,
-            font=(fonts.family(), 11),
+            font=fonts.view_font(11),
             borderwidth=0, highlightthickness=0,
             state=tk.NORMAL, cursor="",
             wrap=tk.WORD, pady=10, padx=10,
@@ -107,7 +107,7 @@ class _RequestDetailDialog(tk.Toplevel):
         scrollbar.grid(row=0, column=1, sticky="ns")
         self.text.configure(yscrollcommand=scrollbar.set)
 
-        self.text.tag_configure("section", foreground=INFO, font=(fonts.family_bold(), 12))
+        self.text.tag_configure("section", foreground=INFO, font=fonts.view_font_bold(12))
         self.text.tag_configure("muted", foreground=MUTED)
         self.text.tag_configure("bright", foreground=BRIGHT)
         self.text.tag_configure("code", foreground="#ce9178")
@@ -121,7 +121,7 @@ class _RequestDetailDialog(tk.Toplevel):
 
         close_btn = tk.Label(
             btn_frame, text="  Close  ", bg="#222222", fg="#ffffff",
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         close_btn.pack()
@@ -205,13 +205,13 @@ class EvidenceDetailView(BaseView):
 
         self._title_label = tk.Label(
             header, text="",
-            font=(fonts.family_bold(), 22),
+            font=fonts.view_font_bold(22),
             fg="#ffffff", bg="#000000",
         )
         self._title_label.pack(anchor="center")
         self._title_label.bind("<Button-1>", self._on_title_click)
-        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=(fonts.family_bold(), 22, "underline")))
-        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=(fonts.family_bold(), 22)))
+        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=fonts.view_font_bold_under(22)))
+        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=fonts.view_font_bold(22)))
         self._on_back_click = None
 
         text_frame = tk.Frame(self, bg="#000000")
@@ -222,7 +222,7 @@ class EvidenceDetailView(BaseView):
         self.text = tk.Text(
             text_frame,
             bg="#000000", fg=BRIGHT,
-            font=(fonts.family(), 13), borderwidth=0, highlightthickness=0,
+            font=fonts.view_font(13), borderwidth=0, highlightthickness=0,
             state=tk.DISABLED, cursor="", wrap=tk.WORD,
         )
         self.text.grid(row=0, column=0, sticky="nsew")

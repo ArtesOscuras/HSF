@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hsf"
+version = "1.0.0"
+description = "Hack Station Framework - Network pentesting GUI"
+requires-python = ">=3.11"
+dependencies = [
+    "zeroconf>=0.149.0",
+    "netifaces>=0.11.0",
+    "scapy>=2.5.0",
+    "impacket>=0.11.0",
+    "Pillow>=10.0.0",
+    "websocket-client>=1.6.0",
+    "paramiko>=3.0.0",
+    "requests>=2.31.0",
+    "python-nmap>=0.7.0",
+]
+
+[project.scripts]
+hsf = "src.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[tool.setuptools.package-data]
+src = ["fonts/*", "icons/*", "data/*"]

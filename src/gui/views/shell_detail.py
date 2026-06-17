@@ -6,6 +6,7 @@ import tkinter as tk
 from datetime import datetime
 from .base import BaseView
 from src.shells import shell_db, send_command, send_raw
+from src.hsf_paths import evidence_dir as _evidence_dir
 
 MUTED = "#888888"
 BRIGHT = "#ffffff"
@@ -46,11 +47,11 @@ class _RecordDialog(tk.Toplevel):
         self.rowconfigure(3, weight=1)
 
         tk.Label(
-            self, text="Evidence name:", font=(fonts.family(), 11),
+            self,             text="Evidence name:", font=fonts.view_font(11),
             fg=BRIGHT, bg="#111111",
         ).grid(row=0, column=0, sticky="w", padx=15, pady=(15, 0))
         tk.Label(
-            self, text="(name for the evidence folder)", font=(fonts.family(), 9),
+            self,             text="(name for the evidence folder)", font=fonts.view_font(9),
             fg=MUTED, bg="#111111",
         ).grid(row=1, column=0, sticky="w", padx=15, pady=(0, 5))
 
@@ -58,7 +59,7 @@ class _RecordDialog(tk.Toplevel):
         tk.Entry(
             self, textvariable=self._name_var,
             bg="#000000", fg=BRIGHT, insertbackground=BRIGHT,
-            font=(fonts.family(), 12), borderwidth=1, relief=tk.FLAT,
+            font=fonts.view_font(12), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=2, column=0, columnspan=2, sticky="ew", padx=15, pady=(0, 10))
 
@@ -67,7 +68,7 @@ class _RecordDialog(tk.Toplevel):
 
         cancel_btn = tk.Label(
             btn_frame, text="  Cancel  ", bg="#222222", fg=BRIGHT,
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         cancel_btn.pack(side=tk.RIGHT, padx=(5, 0))
@@ -77,7 +78,7 @@ class _RecordDialog(tk.Toplevel):
 
         start_btn = tk.Label(
             btn_frame, text="  Start Recording  ", bg="#222222", fg=BRIGHT,
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         start_btn.pack(side=tk.RIGHT)
@@ -96,9 +97,8 @@ class _RecordDialog(tk.Toplevel):
             self.destroy()
 
 
-def _evidence_dir():
-    base = os.path.join(os.path.dirname(__file__), "..", "..", "..", "evidence")
-    return os.path.abspath(base)
+def _evidence_dir_local():
+    return str(_evidence_dir())
 
 
 def _sanitize(name):
@@ -144,13 +144,13 @@ class ShellDetailView(BaseView):
 
         self._title_label = tk.Label(
             header, text="",
-            font=(fonts.family_bold(), 22),
+            font=fonts.view_font_bold(22),
             fg="#ffffff", bg="#000000",
         )
         self._title_label.pack(anchor="center")
         self._title_label.bind("<Button-1>", self._on_title_click)
-        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=(fonts.family_bold(), 22, "underline")))
-        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=(fonts.family_bold(), 22)))
+        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=fonts.view_font_bold_under(22)))
+        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=fonts.view_font_bold(22)))
         self._on_back_click = None
 
         terminal_frame = tk.Frame(self, bg="#000000")
@@ -161,7 +161,7 @@ class ShellDetailView(BaseView):
         self.terminal = tk.Text(
             terminal_frame,
             bg="#000000", fg=BRIGHT,
-            font=(fonts.family(), 13), borderwidth=0, highlightthickness=0,
+            font=fonts.view_font(13), borderwidth=0, highlightthickness=0,
             cursor="xterm", wrap=tk.WORD,
             insertbackground=BRIGHT,
             pady=10, padx=10,
@@ -199,7 +199,7 @@ class ShellDetailView(BaseView):
         self._record_btn = tk.Label(
             bar, text="  Record evidence  ",
             bg="#222222", fg=BRIGHT,
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=10, pady=4, cursor="",
         )
         self._record_btn.pack(side=tk.RIGHT)
@@ -342,7 +342,7 @@ class ShellDetailView(BaseView):
 
     def _start_recording(self, name):
         self._record_name = _sanitize(name)
-        base = _evidence_dir()
+        base = _evidence_dir_local()
         self._record_tdir = os.path.join(base, self._record_name)
         os.makedirs(self._record_tdir, exist_ok=True)
         self._recording = True

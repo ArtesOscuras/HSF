@@ -15,6 +15,7 @@ from .console import Console
 from .visualizer import Visualizer
 from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UserPassView, HashListView, ShellListView, ToolsView
 from .dialogs import ScanDialog
+from src import settings as hsf_settings
 from src.machines import store, start_autosave as start_machines_autosave, stop_autosave as stop_machines_autosave
 from src.machines import machine_db
 from src.machines import domain_db
@@ -297,6 +298,24 @@ class App(tk.Tk):
     def __init__(self):
         fonts.register_before_tk()
         super().__init__()
+        try:
+            fpixels = self.winfo_fpixels('1i')
+            scale = fpixels / 72.0
+            if platform.system() == 'Darwin' and fpixels < 90:
+                out = subprocess.run(
+                    ['system_profiler', 'SPDisplaysDataType'],
+                    capture_output=True, text=True, timeout=5
+                ).stdout
+                log_w = self.winfo_screenwidth()
+                for m in re.finditer(r'Resolution:\s*(\d+)\s*x\s*(\d+)', out):
+                    phys_w = int(m.group(1))
+                    ratio = phys_w / log_w
+                    if ratio >= 1.5:
+                        scale = max(scale, ratio)
+            self.tk.call('tk', 'scaling', scale)
+        except Exception:
+            pass
+        fonts.set_root(self)
         self.title("HSF - Hack Station Framework")
         self.minsize(800, 600)
         self.state("normal")
@@ -313,7 +332,9 @@ class App(tk.Tk):
         self.visualizer = Visualizer(self._pane)
         self._pane.add(self.visualizer, stretch="always")
 
-        self.console = Console(self._pane)
+        hsf_settings.load()
+        console_font = hsf_settings.get("console_font_size", 11)
+        self.console = Console(self._pane, initial_font_size=console_font)
         self._pane.add(self.console, stretch="always")
 
         self.after(300, self._set_initial_sash)
@@ -333,6 +354,9 @@ class App(tk.Tk):
         self._register_views()
         self.visualizer.activate_view("tools")
         self._register_commands()
+
+        view_scale = hsf_settings.get("view_scale", 1.0)
+        self.visualizer.set_initial_zoom(view_scale)
 
         load_mdns_cache()
         start_autosave()
@@ -1960,4 +1984,5 @@ class App(tk.Tk):
         stop_machines_autosave()
         store.save()
         save_mdns_cache()
+        hsf_settings.save()
         self.destroy()

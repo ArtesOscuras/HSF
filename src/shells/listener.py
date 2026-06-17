@@ -3,11 +3,11 @@ import socket
 import threading
 import time
 from . import shell_db
+from src.hsf_paths import databases_dir as _databases_dir
 
 
 # --- debug logging -----------------------------------------------------------
-_proj_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-_DBG_FILE = os.path.join(_proj_root, "databases", "debugging_logs")
+_DBG_FILE = os.path.join(_databases_dir(), "debugging_logs")
 _DBG_LOCK = threading.Lock()
 
 

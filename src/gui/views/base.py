@@ -18,3 +18,6 @@ class BaseView(tk.Frame):
 
     def on_deactivate(self):
         pass
+
+    def on_zoom(self):
+        pass

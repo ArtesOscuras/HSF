@@ -1,7 +1,8 @@
 import os
 from PIL import Image, ImageTk
+from src.hsf_paths import icons_dir as _icons_dir
 
-_ICONS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "icons"))
+_ICONS_DIR = str(_icons_dir())
 _cache = {}
 
 

@@ -29,7 +29,7 @@ class _HashEditDialog(tk.Toplevel):
         self.rowconfigure(1, weight=1)
 
         tk.Label(
-            self, text="Type", font=(fonts.family_bold(), 11),
+            self, text="Type",             font=fonts.view_font_bold(11),
             fg=MUTED, bg="#111111",
         ).grid(row=0, column=0, sticky="w", padx=15, pady=(10, 5))
 
@@ -41,7 +41,7 @@ class _HashEditDialog(tk.Toplevel):
         self._type_list = tk.Listbox(
             type_frame, bg="#000000", fg="#ffffff",
             selectbackground="#333333", selectforeground="#ffffff",
-            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
+            font=fonts.view_font(11), borderwidth=0, highlightthickness=0,
             activestyle="none", exportselection=False, height=6,
         )
         self._type_list.grid(row=0, column=0, sticky="nsew")
@@ -57,8 +57,7 @@ class _HashEditDialog(tk.Toplevel):
         self._type_modes = {}
         self._type_examples = {}
         try:
-            proj = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-            db_path = os.path.join(proj, "credentials", "hashcat.dbs")
+            db_path = str(_hashcat_db())
             if os.path.isfile(db_path):
                 conn = sqlite3.connect(db_path)
                 rows = conn.execute('SELECT "Hash-Mode", "Hash-Name", "Example" FROM DefaultMode ORDER BY "Hash-Mode"').fetchall()
@@ -78,7 +77,7 @@ class _HashEditDialog(tk.Toplevel):
             self._type_list.see(idx)
 
         self._example_label = tk.Label(
-            self, text="", font=(fonts.family(), 9),
+            self,             text="", font=fonts.view_font(9),
             fg=MUTED, bg="#111111", wraplength=600,
         )
         self._example_label.grid(row=2, column=0, columnspan=2, sticky="w", padx=15, pady=(2, 5))
@@ -94,21 +93,21 @@ class _HashEditDialog(tk.Toplevel):
         row = 3
         for label, key, default in fields:
             tk.Label(
-                self, text=f"{label}:", font=(fonts.family(), 11),
+                self, text=f"{label}:", font=fonts.view_font(11),
                 fg=MUTED, bg="#111111",
             ).grid(row=row, column=0, sticky="w", padx=15, pady=(10, 0))
             var = tk.StringVar(value=default)
             tk.Entry(
                 self, textvariable=var,
                 bg="#000000", fg="#ffffff", insertbackground="#ffffff",
-                font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+                font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
                 highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
             ).grid(row=row, column=1, sticky="ew", padx=15, pady=(10, 0))
             setattr(self, f"_{key}_var", var)
             row += 1
 
         self._feedback = tk.Label(
-            self, text="", font=(fonts.family(), 11),
+            self,             text="", font=fonts.view_font(11),
             fg=SUCCESS, bg="#111111",
         )
         self._feedback.grid(row=row, column=0, columnspan=2, pady=(10, 0))
@@ -119,7 +118,7 @@ class _HashEditDialog(tk.Toplevel):
 
         close_btn = tk.Label(
             btn_frame, text="  Close  ", bg="#222222", fg="#ffffff",
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         close_btn.pack(side=tk.RIGHT, padx=(5, 0))
@@ -129,7 +128,7 @@ class _HashEditDialog(tk.Toplevel):
 
         update_btn = tk.Label(
             btn_frame, text="  Update  ", bg="#222222", fg="#ffffff",
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         update_btn.pack(side=tk.RIGHT)
@@ -183,13 +182,13 @@ class HashDetailView(BaseView):
 
         self._title_label = tk.Label(
             header, text="",
-            font=(fonts.family_bold(), 22),
+            font=fonts.view_font_bold(22),
             fg="#ffffff", bg="#000000",
         )
         self._title_label.pack(anchor="center")
         self._title_label.bind("<Button-1>", self._on_title_click)
-        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=(fonts.family_bold(), 22, "underline")))
-        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=(fonts.family_bold(), 22)))
+        self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=fonts.view_font_bold_under(22)))
+        self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=fonts.view_font_bold(22)))
         self._on_back_click = None
 
         text_frame = tk.Frame(self, bg="#000000")
@@ -200,7 +199,7 @@ class HashDetailView(BaseView):
         self.text = tk.Text(
             text_frame,
             bg="#000000", fg=BRIGHT, cursor="",
-            font=(fonts.family(), 13), borderwidth=0, highlightthickness=0,
+            font=fonts.view_font(13), borderwidth=0, highlightthickness=0,
             state=tk.DISABLED, wrap=tk.WORD,
         )
         self.text.grid(row=0, column=0, sticky="nsew")
@@ -220,7 +219,7 @@ class HashDetailView(BaseView):
 
         edit_btn = tk.Label(
             btn_frame, text="  Edit  ", bg="#222222", fg="#ffffff",
-            font=(fonts.family(), 12), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(12), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         edit_btn.pack(side=tk.LEFT, padx=(0, 10))
@@ -230,7 +229,7 @@ class HashDetailView(BaseView):
 
         back_btn = tk.Label(
             btn_frame, text="  \u2190 Back  ", bg="#222222", fg="#ffffff",
-            font=(fonts.family(), 12), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(12), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         back_btn.pack(side=tk.LEFT)

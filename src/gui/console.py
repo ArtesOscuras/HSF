@@ -15,14 +15,14 @@ ERR_COLOR = "#f44747"
 
 
 class Console(tk.Frame):
-    def __init__(self, parent, **kwargs):
+    def __init__(self, parent, initial_font_size=11, **kwargs):
         super().__init__(parent, **kwargs)
         self.commands = {}
         self.help_sections = []
         self._history = []
         self._history_index = -1
         self._saved_input = ""
-        self._font_size = 11
+        self._font_size = initial_font_size
         self._system_handler = None
         self._system_stop_handler = None
         self._is_system = False
@@ -110,6 +110,15 @@ class Console(tk.Frame):
         self.register_command("help", self._cmd_help, "Show this help message")
         self.register_command("clear", self._cmd_clear, "Clear the console")
         self.register_command("echo", self._cmd_echo, "Echo back the arguments")
+
+        if self._font_size != 11:
+            self.after(0, self._apply_font_size)
+
+    def _apply_font_size(self):
+        new_font = (fonts.family(), self._font_size)
+        self.output_area.configure(font=new_font)
+        self.input_entry.configure(font=new_font)
+        self.prompt_label.configure(font=new_font)
 
     def register_command(self, name, handler, help_text=""):
         self.commands[name] = {"handler": handler, "help": help_text}
@@ -218,6 +227,9 @@ class Console(tk.Frame):
         self.output_area.configure(font=new_font)
         self.input_entry.configure(font=new_font)
         self.prompt_label.configure(font=new_font)
+        from src.settings import set as _set_setting, save as _save_settings
+        _set_setting("console_font_size", self._font_size)
+        _save_settings()
         return "break"
 
     def _execute(self, raw):

@@ -29,7 +29,7 @@ class _TargetSection:
         self._mode = mode
 
         tk.Label(
-            parent, text="Target", font=(fonts.family_bold(), 11),
+            parent, text="Target", font=fonts.view_font_bold(11),
             fg=FG, bg=BG,
         ).grid(row=row, column=0, sticky="nw", padx=15, pady=(10, 5))
 
@@ -44,7 +44,7 @@ class _TargetSection:
         if mode == "both":
             machine_radio = tk.Radiobutton(
                 mode_frame, text="  Machine  ", variable=self._target_mode, value="machine",
-                bg=BG, fg=FG, selectcolor=BG, font=(fonts.family(), 10),
+                bg=BG, fg=FG, selectcolor=BG, font=fonts.view_font(10),
                 activebackground=BG, activeforeground=FG,
                 indicatoron=False, relief=tk.FLAT,
                 command=self._populate,
@@ -53,7 +53,7 @@ class _TargetSection:
 
             domain_radio = tk.Radiobutton(
                 mode_frame, text="  Domain  ", variable=self._target_mode, value="domain",
-                bg=BG, fg=FG, selectcolor=BG, font=(fonts.family(), 10),
+                bg=BG, fg=FG, selectcolor=BG, font=fonts.view_font(10),
                 activebackground=BG, activeforeground=FG,
                 indicatoron=False, relief=tk.FLAT,
                 command=self._populate,
@@ -68,7 +68,7 @@ class _TargetSection:
         self._listbox = tk.Listbox(
             frame, bg=BG_WIDGET, fg=FG,
             selectbackground=SEL_BG, selectforeground=FG,
-            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
+            font=fonts.view_font(11), borderwidth=0, highlightthickness=0,
             activestyle="none", exportselection=False, height=3,
         )
         self._listbox.grid(row=0, column=0, sticky="nsew")
@@ -122,7 +122,7 @@ class _TargetSection:
 class _WordlistSection:
     def __init__(self, parent, row):
         tk.Label(
-            parent, text="Wordlist", font=(fonts.family_bold(), 11),
+            parent, text="Wordlist", font=fonts.view_font_bold(11),
             fg=FG, bg=BG,
         ).grid(row=row, column=0, sticky="nw", padx=15, pady=(10, 5))
 
@@ -134,14 +134,14 @@ class _WordlistSection:
         self._listbox = tk.Listbox(
             frame, bg=BG_WIDGET, fg=FG,
             selectbackground=SEL_BG, selectforeground=FG,
-            font=(fonts.family(), 11), borderwidth=0, highlightthickness=0,
+            font=fonts.view_font(11), borderwidth=0, highlightthickness=0,
             activestyle="none", exportselection=False, height=3,
         )
         self._listbox.grid(row=0, column=0, sticky="nsew")
 
         self._files = []
-        lst_dir = os.path.join(os.path.dirname(__file__), "..", "..", "..", "lst")
-        lst_dir = os.path.abspath(lst_dir)
+        from src.hsf_paths import lst_dir as _lst_dir
+        lst_dir = str(_lst_dir())
         if os.path.isdir(lst_dir):
             for fname in sorted(os.listdir(lst_dir)):
                 if os.path.isfile(os.path.join(lst_dir, fname)):
@@ -183,7 +183,7 @@ class FuzzDialog(tk.Toplevel):
         style.theme_use("default")
         style.configure("TNotebook", background=BG, borderwidth=0)
         style.configure("TNotebook.Tab", background="#222222", foreground=FG,
-                        padding=[20, 6], font=(fonts.family(), 10))
+                        padding=[20, 6], font=fonts.view_font(10))
         style.map("TNotebook.Tab", background=[("selected", "#333333")])
 
         self._tab_dir = tk.Frame(self._notebook, bg=BG)
@@ -232,14 +232,14 @@ class FuzzDialog(tk.Toplevel):
         self._target_dir = _TargetSection(tab, 0, mode="both", on_select=_on_target_change)
 
         tk.Label(
-            tab, text="URL", font=(fonts.family_bold(), 11),
+            tab, text="URL", font=fonts.view_font_bold(11),
             fg=FG, bg=BG,
         ).grid(row=2, column=0, sticky="w", padx=15, pady=(10, 0))
 
         self._url_entry = tk.Entry(
             tab, textvariable=self._url_var,
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
-            font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+            font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         )
         self._url_entry.grid(row=2, column=1, sticky="ew", padx=15, pady=(10, 0))
@@ -248,40 +248,40 @@ class FuzzDialog(tk.Toplevel):
 
         thread_row = 4
         tk.Label(
-            tab, text="Threads", font=(fonts.family_bold(), 11),
+            tab, text="Threads", font=fonts.view_font_bold(11),
             fg=FG, bg=BG,
         ).grid(row=thread_row, column=0, sticky="w", padx=15, pady=(10, 0))
         self._thread_dir_var = tk.StringVar(value="20")
         tk.Entry(
             tab, textvariable=self._thread_dir_var, width=6,
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
-            font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+            font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=thread_row, column=1, sticky="w", padx=15, pady=(10, 0))
 
         row = 5
         tk.Label(
-            tab, text="Show codes", font=(fonts.family_bold(), 11),
+            tab, text="Show codes", font=fonts.view_font_bold(11),
             fg=FG, bg=BG,
         ).grid(row=row, column=0, sticky="w", padx=15, pady=(10, 0))
         self._filter_dir_var = tk.StringVar(value=",".join(str(c) for c in ALL_CODES))
         tk.Entry(
             tab, textvariable=self._filter_dir_var,
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
-            font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+            font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=row, column=1, sticky="ew", padx=15, pady=(10, 0))
 
         row += 1
         tk.Label(
-            tab, text="Hide size range", font=(fonts.family_bold(), 11),
+            tab, text="Hide size range", font=fonts.view_font_bold(11),
             fg=FG, bg=BG,
         ).grid(row=row, column=0, sticky="w", padx=15, pady=(10, 0))
         self._range_dir_var = tk.StringVar()
         tk.Entry(
             tab, textvariable=self._range_dir_var,
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
-            font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+            font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=row, column=1, sticky="ew", padx=15, pady=(10, 0))
 
@@ -292,38 +292,38 @@ class FuzzDialog(tk.Toplevel):
         self._wl_vhost = _WordlistSection(tab, 2)
 
         tk.Label(
-            tab, text="Threads", font=(fonts.family_bold(), 11),
+            tab, text="Threads", font=fonts.view_font_bold(11),
             fg=FG, bg=BG,
         ).grid(row=3, column=0, sticky="w", padx=15, pady=(10, 0))
         self._thread_vhost_var = tk.StringVar(value="20")
         tk.Entry(
             tab, textvariable=self._thread_vhost_var, width=6,
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
-            font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+            font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=3, column=1, sticky="w", padx=15, pady=(10, 0))
 
         tk.Label(
-            tab, text="Show codes", font=(fonts.family_bold(), 11),
+            tab, text="Show codes", font=fonts.view_font_bold(11),
             fg=FG, bg=BG,
         ).grid(row=4, column=0, sticky="w", padx=15, pady=(10, 0))
         self._filter_vhost_var = tk.StringVar(value=",".join(str(c) for c in ALL_CODES))
         tk.Entry(
             tab, textvariable=self._filter_vhost_var,
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
-            font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+            font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=4, column=1, sticky="ew", padx=15, pady=(10, 0))
 
         tk.Label(
-            tab, text="Hide size range", font=(fonts.family_bold(), 11),
+            tab, text="Hide size range", font=fonts.view_font_bold(11),
             fg=FG, bg=BG,
         ).grid(row=5, column=0, sticky="w", padx=15, pady=(10, 0))
         self._range_vhost_var = tk.StringVar()
         tk.Entry(
             tab, textvariable=self._range_vhost_var,
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
-            font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+            font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=5, column=1, sticky="ew", padx=15, pady=(10, 0))
 
@@ -334,44 +334,44 @@ class FuzzDialog(tk.Toplevel):
         self._wl_dns = _WordlistSection(tab, 2)
 
         tk.Label(
-            tab, text="Threads", font=(fonts.family_bold(), 11),
+            tab, text="Threads", font=fonts.view_font_bold(11),
             fg=FG, bg=BG,
         ).grid(row=3, column=0, sticky="w", padx=15, pady=(10, 0))
         self._thread_dns_var = tk.StringVar(value="20")
         tk.Entry(
             tab, textvariable=self._thread_dns_var, width=6,
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
-            font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+            font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=3, column=1, sticky="w", padx=15, pady=(10, 0))
 
         tk.Label(
-            tab, text="Show codes", font=(fonts.family_bold(), 11),
+            tab, text="Show codes", font=fonts.view_font_bold(11),
             fg=FG, bg=BG,
         ).grid(row=4, column=0, sticky="w", padx=15, pady=(10, 0))
         self._filter_dns_var = tk.StringVar(value=",".join(str(c) for c in ALL_CODES))
         tk.Entry(
             tab, textvariable=self._filter_dns_var,
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
-            font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+            font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=4, column=1, sticky="ew", padx=15, pady=(10, 0))
 
         tk.Label(
-            tab, text="Hide size range", font=(fonts.family_bold(), 11),
+            tab, text="Hide size range", font=fonts.view_font_bold(11),
             fg=FG, bg=BG,
         ).grid(row=5, column=0, sticky="w", padx=15, pady=(10, 0))
         self._range_dns_var = tk.StringVar()
         tk.Entry(
             tab, textvariable=self._range_dns_var,
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
-            font=(fonts.family(), 11), borderwidth=1, relief=tk.FLAT,
+            font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=5, column=1, sticky="ew", padx=15, pady=(10, 0))
 
     def _build_output_section(self):
         tk.Label(
-            self, text="Output", font=(fonts.family_bold(), 11),
+            self, text="Output", font=fonts.view_font_bold(11),
             fg=FG, bg=BG,
         ).grid(row=1, column=0, sticky="nw", padx=15, pady=(10, 5))
 
@@ -382,7 +382,7 @@ class FuzzDialog(tk.Toplevel):
 
         self._output_text = tk.Text(
             frame, bg=BG_WIDGET, fg=FG_DIM, insertbackground=FG,
-            font=(fonts.family(), 10), borderwidth=0, highlightthickness=0,
+            font=fonts.view_font(10), borderwidth=0, highlightthickness=0,
             state=tk.DISABLED, wrap=tk.WORD,
         )
         self._output_text.grid(row=0, column=0, sticky="nsew")
@@ -409,7 +409,7 @@ class FuzzDialog(tk.Toplevel):
 
         row = 3
         self._progress_label = tk.Label(
-            self, text="Ready", font=(fonts.family(), 9),
+            self,             text="Ready", font=fonts.view_font(9),
             fg=FG_DIM, bg=BG, anchor="w",
         )
         self._progress_label.grid(row=row, column=0, columnspan=2, sticky="ew", padx=15)
@@ -420,7 +420,7 @@ class FuzzDialog(tk.Toplevel):
 
         close_btn = tk.Label(
             btn_frame, text="  Close  ", bg="#222222", fg=FG,
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         close_btn.pack(side=tk.RIGHT, padx=(5, 0))
@@ -431,7 +431,7 @@ class FuzzDialog(tk.Toplevel):
 
         self._save_dir_btn = tk.Label(
             btn_frame, text="  Save  ", bg="#222222", fg=FG,
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         self._save_dir_btn.bind("<Button-1>", lambda e: self._save_dir_results())
@@ -440,7 +440,7 @@ class FuzzDialog(tk.Toplevel):
 
         self._save_vhost_btn = tk.Label(
             btn_frame, text="  Save  ", bg="#222222", fg=FG,
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         self._save_vhost_btn.bind("<Button-1>", lambda e: self._save_vhost_results())
@@ -449,7 +449,7 @@ class FuzzDialog(tk.Toplevel):
 
         self._save_dns_btn = tk.Label(
             btn_frame, text="  Save  ", bg="#222222", fg=FG,
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         self._save_dns_btn.bind("<Button-1>", lambda e: self._save_dns_results())
@@ -460,7 +460,7 @@ class FuzzDialog(tk.Toplevel):
 
         clear_btn = tk.Label(
             btn_frame, text="  Clear  ", bg="#222222", fg=FG,
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         clear_btn.pack(side=tk.RIGHT, padx=(5, 0))
@@ -470,7 +470,7 @@ class FuzzDialog(tk.Toplevel):
 
         stop_btn = tk.Label(
             btn_frame, text="  Stop  ", bg="#222222", fg=FG,
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         stop_btn.pack(side=tk.RIGHT, padx=(5, 0))
@@ -480,7 +480,7 @@ class FuzzDialog(tk.Toplevel):
 
         start_btn = tk.Label(
             btn_frame, text="  Start  ", bg="#222222", fg=FG,
-            font=(fonts.family(), 10), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6, cursor="",
         )
         start_btn.pack(side=tk.RIGHT, padx=(5, 0))
