@@ -164,28 +164,25 @@ def set_view_scale(factor):
         except Exception:
             pass
 
-def view_font(size):
-    key = f"VFont-{size}"
+def _view_font(prefix, base_size, font_family, underline):
+    key = f"{prefix}-{base_size}"
     if key in _VIEW_NAMED:
         return _VIEW_NAMED[key]
-    f = tkfont.Font(root=_ROOT, name=key, family=family(), size=max(1, int(size * _VIEW_SCALE)))
-    f._base_size = size
+    f = tkfont.Font(root=_ROOT, name=key, family=font_family,
+                    size=max(1, int(base_size * _VIEW_SCALE)),
+                    underline=underline)
+    f._base_size = base_size
     _VIEW_NAMED[key] = f
     return f
+
+def view_font(size):
+    return _view_font("VFont", size, family(), False)
 
 def view_font_bold(size):
-    key = f"VFontB-{size}"
-    if key in _VIEW_NAMED:
-        return _VIEW_NAMED[key]
-    f = tkfont.Font(root=_ROOT, name=key, family=family_bold(), size=max(1, int(size * _VIEW_SCALE)))
-    f._base_size = size
-    _VIEW_NAMED[key] = f
-    return f
+    return _view_font("VFontB", size, family_bold(), False)
 
 def view_font_under(size):
-    f = view_font(size)
-    return (f.actual("family"), int(f.actual("size")), "underline")
+    return _view_font("VFontU", size, family(), True)
 
 def view_font_bold_under(size):
-    f = view_font_bold(size)
-    return (f.actual("family"), int(f.actual("size")), "underline")
+    return _view_font("VFontBU", size, family_bold(), True)

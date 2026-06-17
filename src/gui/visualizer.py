@@ -61,6 +61,9 @@ class Visualizer(tk.Frame):
         self._zoom_label.config(text=f"{int(fonts.view_scale() * 100)}%")
         if self._active_view:
             self._active_view.on_zoom()
+        from src.gui.views.nav import refresh as _nav_refresh
+        _nav_refresh()
+        self.update_idletasks()
         from src.settings import set as _set_setting, save as _save_settings
         _set_setting("view_scale", fonts.view_scale())
         _save_settings()
@@ -68,6 +71,7 @@ class Visualizer(tk.Frame):
     def set_initial_zoom(self, scale):
         fonts.set_view_scale(scale)
         self._zoom_label.config(text=f"{int(fonts.view_scale() * 100)}%")
+        self.update_idletasks()
 
     def register_view(self, name, view):
         self.views[name] = view
