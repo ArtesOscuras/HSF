@@ -339,7 +339,8 @@ class App(tk.Tk):
         self._register_commands()
 
         view_scale = hsf_settings.get("view_scale", 1.0)
-        self.visualizer.set_initial_zoom(view_scale)
+        from src.gui.views.nav import set_initial_zoom as _nav_set_zoom
+        _nav_set_zoom(view_scale)
 
         load_mdns_cache()
         start_autosave()

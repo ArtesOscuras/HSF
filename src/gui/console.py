@@ -1,5 +1,6 @@
 from src.gui import fonts
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import scrolledtext
 
 
@@ -227,6 +228,24 @@ class Console(tk.Frame):
         self.output_area.configure(font=new_font)
         self.input_entry.configure(font=new_font)
         self.prompt_label.configure(font=new_font)
+        if self._autocomplete_popup:
+            self._autocomplete_listbox.configure(font=new_font)
+            items = list(self._autocomplete_listbox.get(0, tk.END))
+            longest = max((len(it.strip()) for it in items), default=10)
+            self._autocomplete_listbox.configure(width=longest + 3)
+            self._autocomplete_listbox.delete(0, tk.END)
+            for item in items:
+                self._autocomplete_listbox.insert(tk.END, item)
+            self._autocomplete_listbox.selection_set(self._autocomplete_index)
+            fs = self._font_size
+            f = tkfont.Font(font=(fonts.family(), fs))
+            line_h = f.metrics("linespace")
+            h = len(self._autocomplete_matches) * line_h + 4
+            self._autocomplete_listbox.update_idletasks()
+            w = self._autocomplete_listbox.winfo_reqwidth() + 4
+            con_top = self.winfo_rooty() - self.master.winfo_rooty()
+            y = con_top - h
+            self._autocomplete_popup.place_configure(x=0, y=y, width=w, height=h)
         from src.settings import set as _set_setting, save as _save_settings
         _set_setting("console_font_size", self._font_size)
         _save_settings()
@@ -330,10 +349,15 @@ class Console(tk.Frame):
 
     def _show_autocomplete(self, matches):
         self._close_autocomplete()
+        fs = self._font_size
+        f = tkfont.Font(font=(fonts.family(), fs))
+        line_h = f.metrics("linespace")
+        longest = max((len(name) for name, _ in matches), default=10)
         frame = tk.Frame(self.master, bg="#111111", highlightbackground="#333333", highlightthickness=1)
 
         lb = tk.Listbox(frame, bg="#111111", fg="#FFFFFF", selectbackground="#333333",
-                        selectforeground="#FFFFFF", font=(fonts.family(), 11), borderwidth=0,
+                        selectforeground="#FFFFFF", font=(fonts.family(), fs),
+                        width=longest + 3, borderwidth=0,
                         highlightthickness=0, activestyle="none", exportselection=False)
         lb.pack(fill=tk.BOTH, expand=True)
         for name, help_text in matches:
@@ -343,11 +367,13 @@ class Console(tk.Frame):
         lb.bind("<ButtonRelease-1>", self._on_popup_click)
         lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
 
-        n = len(matches)
-        h = n * 22 + 4
-        y = self.winfo_y() - h - 4
+        lb.update_idletasks()
+        popup_w = lb.winfo_reqwidth() + 4
+        h = len(matches) * line_h + 4
+        con_top = self.winfo_rooty() - self.master.winfo_rooty()
+        y = con_top - h
 
-        frame.place(x=0, y=y, width=200, height=h)
+        frame.place(x=0, y=y, width=popup_w, height=h)
         frame.lift()
 
         self._autocomplete_popup = frame
@@ -356,8 +382,6 @@ class Console(tk.Frame):
 
     def _show_or_update(self, matches):
         names = [m[0] for m in matches]
-        if self._autocomplete_popup and names == self._autocomplete_names:
-            return
         self._autocomplete_names = names
         if self._autocomplete_popup:
             lb = self._autocomplete_listbox
@@ -368,9 +392,17 @@ class Console(tk.Frame):
             lb.activate(0)
             self._autocomplete_matches = matches
             self._autocomplete_index = 0
-            n = len(matches)
-            h = n * 22 + 4
-            self._autocomplete_popup.place_configure(height=h)
+            fs = self._font_size
+            f = tkfont.Font(font=(fonts.family(), fs))
+            line_h = f.metrics("linespace")
+            longest = max((len(name) for name, _ in matches), default=10)
+            lb.configure(width=longest + 3)
+            lb.update_idletasks()
+            popup_w = lb.winfo_reqwidth() + 4
+            h = len(matches) * line_h + 4
+            con_top = self.winfo_rooty() - self.master.winfo_rooty()
+            y = con_top - h
+            self._autocomplete_popup.place_configure(x=0, y=y, width=popup_w, height=h)
             self._autocomplete_popup.lift()
         else:
             self._show_autocomplete(matches)
@@ -452,7 +484,8 @@ class Console(tk.Frame):
         if not self._autocomplete_popup:
             return
         h = self._autocomplete_popup.winfo_height()
-        y = self.winfo_y() - h - 4
+        con_top = self.winfo_rooty() - self.master.winfo_rooty()
+        y = con_top - h
         if y != self._last_popup_y:
             self._last_popup_y = y
             self._autocomplete_popup.place_configure(y=y)
