@@ -23,12 +23,15 @@ USER_DATA_DIR = os.path.abspath(USER_DATA_DIR)
 
 
 class Recorder:
-    def __init__(self, target, browser_path, on_log=None, evidence_name=None, scope=None):
+    def __init__(self, target, browser_path, on_log=None, evidence_name=None, scope=None,
+                 review_mode=False, on_review_request=None):
         self._target = target
         self._browser_path = browser_path
         self._on_log = on_log
         self._evidence_name = evidence_name or target
         self._scope = scope
+        self._review_mode = review_mode
+        self._on_review_request = on_review_request
         self._browser_proc = None
         self._cdp = None
         self._stop_flag = threading.Event()
@@ -81,6 +84,16 @@ class Recorder:
         self._log(f"\nStarting webrecorder: {self._target}\n", "info")
 
         try:
+            import urllib.request
+            try:
+                old = urllib.request.urlopen(f"http://127.0.0.1:{DEBUG_PORT}/json/version", timeout=1)
+                old.close()
+                self._log(f"Port {DEBUG_PORT} busy, killing previous instance...\n", "warning")
+                subprocess.run(["pkill", "-f", f"remote-debugging-port={DEBUG_PORT}"],
+                               timeout=5, capture_output=True)
+            except Exception:
+                pass
+
             self._browser_proc = subprocess.Popen([
                 self._browser_path,
                 f"--remote-debugging-port={DEBUG_PORT}",
@@ -88,6 +101,9 @@ class Recorder:
                 f"--user-data-dir={USER_DATA_DIR}",
                 "--new-window", "about:blank",
                 "--no-first-run", "--no-default-browser-check",
+                "--disable-session-crashed-bubble",
+                "--disable-restore-session-state",
+                "--disable-features=WelcomePage,ChromeWhatsNewUI",
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
             time.sleep(2)
@@ -121,6 +137,20 @@ class Recorder:
             ]
             for cmd, cmd_params in cdp_commands:
                 self._cdp.send(cmd, cmd_params)
+
+            if self._review_mode:
+                _dbg("[review] sending Fetch.enable (Document/XHR/Fetch, both stages)")
+                self._cdp.send("Fetch.enable", {
+                    "patterns": [
+                        {"urlPattern": "*", "requestStage": "Request", "resourceType": "Document"},
+                        {"urlPattern": "*", "requestStage": "Request", "resourceType": "XHR"},
+                        {"urlPattern": "*", "requestStage": "Request", "resourceType": "Fetch"},
+                        {"urlPattern": "*", "requestStage": "Response", "resourceType": "Document"},
+                        {"urlPattern": "*", "requestStage": "Response", "resourceType": "XHR"},
+                        {"urlPattern": "*", "requestStage": "Response", "resourceType": "Fetch"},
+                    ],
+                })
+                self._log("Review mode enabled (Document, XHR, Fetch)\n", "info")
 
             self._cdp.send("Page.navigate", {"url": url})
 
@@ -331,6 +361,114 @@ class Recorder:
                         "requestURL": params.get("requestURL", ""),
                     }
                     certs.append(cert_info)
+
+                elif method == "Fetch.requestPaused":
+                    _dbg(f"[review] requestPaused: url={params.get('request',{}).get('url','')[:60]} stage={'Response' if 'responseStatusCode' in params else 'Request'} resourceType={params.get('resourceType','')}")
+                    if self._on_review_request:
+                        req = params.get("request", {})
+                        iid = params.get("requestId", "")
+                        frame_id = params.get("frameId", "")
+                        req_url = req.get("url", "")
+                        req_method = req.get("method", "GET")
+                        req_headers = dict(req.get("headers", {}))
+                        req_body = req.get("postData", "")
+                        res_type = params.get("resourceType", "")
+                        net_id = params.get("networkId", "")
+                        stage = "Response" if "responseStatusCode" in params else "Request"
+                        resp_status = params.get("responseStatusCode")
+                        resp_status_text = params.get("responseStatusText", "")
+                        resp_headers_list = params.get("responseHeaders", [])
+                        resp_headers = {h["name"]: h["value"] for h in resp_headers_list} if resp_headers_list else {}
+                        resp_body = ""
+                        resp_body_raw = None
+                        resp_was_base64 = False
+                        if stage == "Response":
+                            try:
+                                result = self._cdp.call("Fetch.getResponseBody", {"requestId": iid})
+                                if result:
+                                    raw = result.get("body", "")
+                                    resp_was_base64 = result.get("base64Encoded", False)
+                                    resp_body_raw = raw
+                                    if resp_was_base64:
+                                        resp_body = base64.b64decode(raw).decode(errors="replace")
+                                    else:
+                                        resp_body = raw
+                            except Exception as e:
+                                _dbg(f"[review] getResponseBody error: {e}")
+                        send_it = threading.Event()
+                        _s = stage
+                        _rt = res_type
+                        _fid = frame_id
+                        _tdir = tdir
+                        _resp_status = resp_status
+                        _resp_text = resp_status_text
+                        _resp_headers = resp_headers
+                        _resp_body_orig = resp_body
+                        _resp_body_raw = resp_body_raw
+                        _resp_was_base64 = resp_was_base64
+
+                        def on_send(url=None, method=None, headers=None, body=None):
+                            try:
+                                if _s == "Response":
+                                    if body is None:
+                                        self._cdp.send("Fetch.continueRequest", {"requestId": iid})
+                                    elif _rt == "Document":
+                                        self._cdp.send("Fetch.continueRequest", {"requestId": iid})
+                                        _dbg(f"[review] Document modified, setDocumentContent len={len(body)}")
+                                        time.sleep(0.1)
+                                        self._cdp.send("Page.setDocumentContent", {"frameId": _fid, "html": body})
+                                    else:
+                                        body_bytes = body.encode("utf-8")
+                                        body_enc = base64.b64encode(body_bytes).decode()
+                                        f_params = {"requestId": iid,
+                                                     "responseCode": _resp_status or 200,
+                                                     "responsePhrase": _resp_text or "OK",
+                                                     "body": body_enc}
+                                        merged = dict(_resp_headers or {})
+                                        if headers:
+                                            merged.update(headers)
+                                        clean = {}
+                                        for k, v in merged.items():
+                                            kl = k.lower()
+                                            if kl not in ("content-encoding", "transfer-encoding"):
+                                                clean[k] = v
+                                        clean["Content-Length"] = str(len(body_bytes))
+                                        f_params["responseHeaders"] = [{"name": k, "value": v} for k, v in clean.items()]
+                                        _dbg(f"[review] fulfill: {len(clean)} headers, Content-Length={clean['Content-Length']}")
+                                        self._cdp.send("Fetch.fulfillRequest", f_params)
+                                        time.sleep(0.2)
+                                        _dbg(f"[review] fulfill: {len(clean)} headers={list(clean.keys())}, body_len={len(body_enc)}")
+                                        try:
+                                            with open(os.path.join(_tdir, "body_original.txt"), "w", encoding="utf-8") as f:
+                                                f.write(_resp_body_orig or "")
+                                            with open(os.path.join(_tdir, "body_modified.txt"), "w", encoding="utf-8") as f:
+                                                f.write(body)
+                                        except Exception:
+                                            pass
+                                else:
+                                    cr_params = {"requestId": iid}
+                                    if url is not None:
+                                        cr_params["url"] = url
+                                    if method is not None:
+                                        cr_params["method"] = method
+                                    if headers:
+                                        cr_params["headers"] = [{"name": k, "value": v} for k, v in headers.items()]
+                                    if body is not None:
+                                        cr_params["postData"] = body
+                                    self._cdp.send("Fetch.continueRequest", cr_params)
+                            except Exception as e:
+                                _dbg(f"[review] on_send error: {e}")
+                                pass
+                            send_it.set()
+
+                        _dbg(f"[review] calling on_review_request")
+                        self._on_review_request(req_url, req_method, req_headers,
+                                                req_body, res_type, net_id, stage, on_send,
+                                                resp_status, resp_status_text, resp_headers,
+                                                resp_body)
+                        _dbg(f"[review] back from on_review_request")
+                        send_it.wait()
+                        _dbg(f"[review] send_it done")
 
             self._save_certs_list(tdir, certs)
             update_session_count(tdir, index)

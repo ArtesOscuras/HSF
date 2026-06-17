@@ -25,6 +25,274 @@ from src.tools.scanner.identifier import identify_device, get_gateway_ip, extrac
 from src.shells import ShellListener, shell_db
 
 
+class _ReviewDialogManager:
+    def __init__(self, parent):
+        self._parent = parent
+        self._dlg = None
+        self._url_entry = None
+        self._method_var = None
+        self._headers_text = None
+        self._resp_headers_text = None
+        self._body_text = None
+        self._status_label = None
+        self._resp_header_label = None
+        self._on_send = None
+        self._done = None
+        self._stage = None
+        self._review_out = False
+        self._review_in = False
+
+    def add(self, url, method, headers, body, res_type, stage, on_send, done,
+            resp_status=None, resp_status_text=None, resp_headers=None, resp_body=""):
+        _dbg(f"[review] add: stage={stage} review_out={self._review_out} review_in={self._review_in} url={url[:80]}")
+        if stage == "Request" and not self._review_out:
+            _dbg("[review] continuing (outgoing off)")
+            on_send()
+            done.set()
+            return
+        if stage == "Response" and not self._review_in:
+            _dbg("[review] continuing (incoming off)")
+            on_send()
+            done.set()
+            return
+        _dbg("[review] adding to pending")
+        self._on_send = on_send
+        self._done = done
+        self._stage = stage
+        self._pending = (url, method, headers, body, res_type,
+                         resp_status, resp_status_text, resp_headers, resp_body)
+        self._parent.after(0, self._show_pending)
+
+    def show_waiting(self):
+        self._parent.after(100, self._show_waiting_ui)
+
+    def _show_pending(self):
+        if self._dlg is None:
+            self._build_dialog()
+        url, method, headers, body, res_type, resp_status, resp_status_text, resp_headers, resp_body = self._pending
+        label = "OUTGOING" if self._stage == "Request" else "INCOMING"
+        self._dlg.title(f"Review Request — {label}")
+        self._url_entry.delete(0, tk.END)
+        self._url_entry.insert(0, url)
+        self._method_var.set(method)
+        info_parts = []
+        if res_type:
+            info_parts.append(f"Type: {res_type}")
+            if self._stage == "Response" and res_type == "Document":
+                info_parts.append("WARNING: body edits not supported for page HTML")
+        if self._stage == "Response":
+            info_parts.append(f"Status: {resp_status or '?'} {resp_status_text or ''}")
+        self._status_label.configure(text="  |  ".join(info_parts) if info_parts else "")
+        self._headers_text.configure(state=tk.NORMAL)
+        self._headers_text.delete("1.0", tk.END)
+        if headers:
+            for k, v in headers.items():
+                self._headers_text.insert(tk.END, f"{k}: {v}\n")
+        self._headers_text.configure(state=tk.NORMAL)
+        self._resp_headers_text.configure(state=tk.NORMAL)
+        self._resp_headers_text.delete("1.0", tk.END)
+        if self._stage == "Response" and resp_headers:
+            for k, v in resp_headers.items():
+                self._resp_headers_text.insert(tk.END, f"{k}: {v}\n")
+        self._resp_headers_text.configure(state=tk.NORMAL)
+        self._body_text.configure(state=tk.NORMAL)
+        self._body_text.delete("1.0", tk.END)
+        display = body if self._stage == "Request" and body else ""
+        if self._stage == "Response" and resp_body:
+            display = resp_body
+        if display:
+            self._body_text.insert("1.0", display)
+        self._original_body = self._body_text.get("1.0", "end-1c")
+        self._body_text.configure(state=tk.NORMAL)
+        self._dlg.deiconify()
+        self._dlg.lift()
+        self._dlg.focus_set()
+
+    def _build_dialog(self):
+        self._dlg = tk.Toplevel(self._parent)
+        self._dlg.title("Review Request")
+        self._dlg.geometry("800x750")
+        self._dlg.configure(bg="#111111")
+        self._dlg.protocol("WM_DELETE_WINDOW", self._send_and_close)
+        self._dlg.columnconfigure(0, weight=1)
+        row = 0
+        self._dlg.rowconfigure(row, weight=0)
+
+        url_frame = tk.Frame(self._dlg, bg="#111111")
+        url_frame.grid(row=row, column=0, sticky="ew", padx=15, pady=(10, 0))
+        url_frame.columnconfigure(1, weight=1)
+        tk.Label(url_frame, text="URL:", bg="#111111", fg="#aaaaaa",
+                 font=("Menlo", 10)).grid(row=0, column=0, sticky="w", padx=(0, 5))
+        self._url_entry = tk.Entry(url_frame, bg="#000000", fg="#ffffff",
+                                   font=("Menlo", 10), borderwidth=0, highlightthickness=1,
+                                   highlightbackground="#333333", insertbackground="#ffffff")
+        self._url_entry.grid(row=0, column=1, sticky="ew")
+        row += 1
+        self._dlg.rowconfigure(row, weight=0)
+
+        info_frame = tk.Frame(self._dlg, bg="#111111")
+        info_frame.grid(row=row, column=0, sticky="ew", padx=15, pady=(5, 0))
+        info_frame.columnconfigure(2, weight=1)
+        tk.Label(info_frame, text="Method:", bg="#111111", fg="#aaaaaa",
+                 font=("Menlo", 10)).grid(row=0, column=0, sticky="w", padx=(0, 5))
+        self._method_var = tk.StringVar(value="GET")
+        method_menu = tk.OptionMenu(info_frame, self._method_var, "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS")
+        method_menu.configure(bg="#000000", fg="#ffffff", borderwidth=0, highlightthickness=0,
+                               font=("Menlo", 10), activebackground="#333333", activeforeground="#ffffff")
+        method_menu["menu"].configure(bg="#000000", fg="#ffffff", font=("Menlo", 10))
+        method_menu.grid(row=0, column=1, sticky="w")
+        self._status_label = tk.Label(info_frame, text="", bg="#111111", fg="#888888",
+                                       font=("Menlo", 10))
+        self._status_label.grid(row=0, column=2, sticky="w", padx=(15, 0))
+        row += 1
+        self._dlg.rowconfigure(row, weight=0)
+
+        tk.Label(self._dlg, text="Request Headers:", bg="#111111", fg="#aaaaaa",
+                 font=("Menlo", 10, "bold"), anchor="w").grid(row=row, column=0, sticky="ew", padx=15, pady=(10, 0))
+        row += 1
+        self._dlg.rowconfigure(row, weight=1)
+
+        self._headers_text = tk.Text(self._dlg, bg="#000000", fg="#ffffff",
+                                      font=("Menlo", 10), borderwidth=0, highlightthickness=1,
+                                      highlightbackground="#333333", insertbackground="#ffffff",
+                                      wrap=tk.NONE, padx=8, pady=8, height=5)
+        self._headers_text.grid(row=row, column=0, sticky="nsew", padx=15, pady=(2, 0))
+        row += 1
+        self._dlg.rowconfigure(row, weight=0)
+
+        self._resp_header_label = tk.Label(self._dlg, text="Response Headers:", bg="#111111", fg="#aaaaaa",
+                                            font=("Menlo", 10, "bold"), anchor="w")
+        self._resp_header_label.grid(row=row, column=0, sticky="ew", padx=15, pady=(10, 0))
+        row += 1
+        self._dlg.rowconfigure(row, weight=1)
+
+        self._resp_headers_text = tk.Text(self._dlg, bg="#000000", fg="#ffffff",
+                                           font=("Menlo", 10), borderwidth=0, highlightthickness=1,
+                                           highlightbackground="#333333", insertbackground="#ffffff",
+                                           wrap=tk.NONE, padx=8, pady=8, height=4)
+        self._resp_headers_text.grid(row=row, column=0, sticky="nsew", padx=15, pady=(2, 0))
+        row += 1
+        self._dlg.rowconfigure(row, weight=0)
+
+        tk.Label(self._dlg, text="Body:", bg="#111111", fg="#aaaaaa",
+                 font=("Menlo", 10, "bold"), anchor="w").grid(row=row, column=0, sticky="ew", padx=15, pady=(10, 0))
+        row += 1
+        self._dlg.rowconfigure(row, weight=2)
+
+        self._body_text = tk.Text(self._dlg, bg="#000000", fg="#ffffff",
+                                   font=("Menlo", 10), borderwidth=0, highlightthickness=1,
+                                   highlightbackground="#333333", insertbackground="#ffffff",
+                                   wrap=tk.WORD, padx=8, pady=8)
+        self._body_text.grid(row=row, column=0, sticky="nsew", padx=15, pady=(2, 0))
+        row += 1
+        self._dlg.rowconfigure(row, weight=0)
+
+        check_frame = tk.Frame(self._dlg, bg="#111111")
+        check_frame.grid(row=row, column=0, sticky="w", padx=15, pady=(8, 0))
+        self._out_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            check_frame, text="  Review outgoing", variable=self._out_var,
+            bg="#111111", fg="#888888", selectcolor="#111111",
+            font=("Menlo", 10),
+            activebackground="#111111", activeforeground="#ffffff",
+            command=self._on_check_change,
+        ).pack(side=tk.LEFT, padx=(0, 15))
+        self._in_var = tk.BooleanVar(value=False)
+        tk.Checkbutton(
+            check_frame, text="  Review incoming", variable=self._in_var,
+            bg="#111111", fg="#888888", selectcolor="#111111",
+            font=("Menlo", 10),
+            activebackground="#111111", activeforeground="#ffffff",
+            command=self._on_check_change,
+        ).pack(side=tk.LEFT)
+        row += 1
+        self._dlg.rowconfigure(row, weight=0)
+
+        btn_frame = tk.Frame(self._dlg, bg="#111111")
+        btn_frame.grid(row=row, column=0, sticky="ew", padx=15, pady=(8, 12))
+        send_btn = tk.Label(
+            btn_frame, text="  Send  ", bg="#222222", fg="#ffffff",
+            font=("Menlo", 10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6,
+        )
+        send_btn.pack(side=tk.RIGHT)
+        send_btn.bind("<Button-1>", lambda e: self._send_and_close())
+        send_btn.bind("<Enter>", lambda e: send_btn.config(bg="#333333"))
+        send_btn.bind("<Leave>", lambda e: send_btn.config(bg="#222222"))
+
+    def _show_waiting_ui(self):
+        if self._dlg is None:
+            self._build_dialog()
+        self._dlg.title("Review Request")
+        self._url_entry.delete(0, tk.END)
+        self._method_var.set("GET")
+        self._status_label.configure(text="Waiting for requests...")
+        self._headers_text.configure(state=tk.NORMAL)
+        self._headers_text.delete("1.0", tk.END)
+        self._resp_headers_text.configure(state=tk.NORMAL)
+        self._resp_headers_text.delete("1.0", tk.END)
+        self._body_text.configure(state=tk.NORMAL)
+        self._body_text.delete("1.0", tk.END)
+        self._dlg.deiconify()
+        self._dlg.lift()
+        self._dlg.focus_set()
+
+    def _on_check_change(self):
+        self._review_out = self._out_var.get()
+        self._review_in = self._in_var.get()
+
+    def _parse_text_headers(self, text_widget):
+        raw = text_widget.get("1.0", "end-1c")
+        headers = {}
+        for line in raw.split("\n"):
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if ":" in line:
+                k, _, v = line.partition(":")
+                headers[k.strip()] = v.strip()
+        return headers
+
+    def _send_and_close(self):
+        if self._on_send:
+            url = self._url_entry.get().strip()
+            method = self._method_var.get()
+            body = self._body_text.get("1.0", "end-1c")
+            if body == self._original_body:
+                body = None
+            if self._stage == "Response":
+                headers = self._parse_text_headers(self._resp_headers_text)
+            else:
+                headers = self._parse_text_headers(self._headers_text)
+            self._on_send(url=url if url else None,
+                          method=method if method else None,
+                          headers=headers if headers else None,
+                          body=body)
+        self._original_body = ""
+        self._on_send = None
+        self._url_entry.delete(0, tk.END)
+        self._method_var.set("GET")
+        self._status_label.configure(text="Sent. Waiting for next request...")
+        self._headers_text.configure(state=tk.NORMAL)
+        self._headers_text.delete("1.0", tk.END)
+        self._resp_headers_text.configure(state=tk.NORMAL)
+        self._resp_headers_text.delete("1.0", tk.END)
+        self._body_text.configure(state=tk.NORMAL)
+        self._body_text.delete("1.0", tk.END)
+        if self._done:
+            self._done.set()
+            self._done = None
+
+    def close(self):
+        def _close_ui():
+            if self._dlg:
+                self._dlg.destroy()
+                self._dlg = None
+            if self._done:
+                self._done.set()
+        self._parent.after(0, _close_ui)
+
+
 class App(tk.Tk):
     def __init__(self):
         fonts.register_before_tk()
@@ -1566,11 +1834,15 @@ class App(tk.Tk):
 
     def _run_recorder_dialog(self, config):
         from src.tools.webrecorder import Recorder
+        import tkinter as tk
+        import threading
 
         name = config["name"]
         target = config["target"]
         browser_path = config["browser"]
         scope = config.get("scope")
+        review_outgoing = config.get("review_mode", False)
+        review_incoming = config.get("review_mode", False)
 
         label = os.path.basename(browser_path)
         self.console.after(0, lambda l=label: self.console.info(f"Using {l}"))
@@ -1585,8 +1857,31 @@ class App(tk.Tk):
             else:
                 self.console.after(0, lambda t=text: self.console.body(t.rstrip()))
 
-        self._recorder = Recorder(target, browser_path, on_log=on_log, evidence_name=name, scope=scope)
+        review_mgr = _ReviewDialogManager(self)
+        if review_outgoing or review_incoming:
+            review_mgr.show_waiting()
+
+        def on_review_request(url, method, headers, body, res_type, net_id, stage, on_send,
+                               resp_status=None, resp_status_text=None, resp_headers=None,
+                               resp_body=""):
+            done = threading.Event()
+            review_mgr.add(url, method, headers, body, res_type, stage, on_send, done,
+                           resp_status, resp_status_text, resp_headers, resp_body)
+            done.wait()
+
+        review_kw = {}
+        if review_outgoing or review_incoming:
+            review_kw["review_mode"] = True
+            review_kw["on_review_request"] = on_review_request
+
+        self._recorder = Recorder(target, browser_path, on_log=on_log, evidence_name=name,
+                                   scope=scope, **review_kw)
         self._recorder.start()
+
+        while self._recorder and self._recorder.is_running():
+            import time
+            time.sleep(1)
+        review_mgr.close()
 
     def _run_recorder(self, target):
         from src.tools.webrecorder import find_browsers, BrowserSelector, Recorder

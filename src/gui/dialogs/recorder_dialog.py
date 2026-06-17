@@ -10,6 +10,7 @@ BG_WIDGET = "#000000"
 FG = "#ffffff"
 FG_DIM = "#888888"
 SEL_BG = "#333333"
+ERR_COLOR = "#f44747"
 
 
 class _TargetSection:
@@ -144,6 +145,12 @@ class WebRecorderDialog(tk.Toplevel):
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=1, column=1, rowspan=2, sticky="ew", padx=15, pady=(5, 5))
 
+        self._name_feedback = tk.Label(
+            self, text="", font=(fonts.family(), 9),
+            fg=ERR_COLOR, bg=BG,
+        )
+        self._name_feedback.grid(row=2, column=1, sticky="w", padx=15, pady=(0, 0))
+
         tk.Label(
             self, text="Target", font=(fonts.family_bold(), 11),
             fg=FG, bg=BG,
@@ -223,8 +230,19 @@ class WebRecorderDialog(tk.Toplevel):
 
         self._scope_domain_var.trace_add("write", lambda *_: self._sync_scope())
 
+        self._review_var = tk.BooleanVar(value=False)
+        review_frame = tk.Frame(self, bg=BG)
+        review_frame.grid(row=8, column=0, columnspan=2, sticky="w", padx=15, pady=(10, 0))
+        tk.Checkbutton(
+            review_frame, text="  Review requests",
+            variable=self._review_var,
+            bg=BG, fg=FG_DIM, selectcolor=BG,
+            font=(fonts.family(), 10),
+            activebackground=BG, activeforeground=FG,
+        ).pack(side=tk.LEFT)
+
         btn_frame = tk.Frame(self, bg=BG)
-        btn_frame.grid(row=8, column=0, columnspan=2, sticky="ew", padx=15, pady=(15, 15))
+        btn_frame.grid(row=9, column=0, columnspan=2, sticky="ew", padx=15, pady=(15, 15))
 
         cancel_btn = tk.Label(
             btn_frame, text="  Cancel  ", bg="#222222", fg=FG,
@@ -258,7 +276,9 @@ class WebRecorderDialog(tk.Toplevel):
     def _start(self):
         name = self._name_var.get().strip()
         if not name:
+            self._name_feedback.config(text="Evidence name is required")
             return
+        self._name_feedback.config(text="")
         target = self._url_var.get().strip()
         if not target:
             return
@@ -274,5 +294,6 @@ class WebRecorderDialog(tk.Toplevel):
             "target": target,
             "browser": browser,
             "scope": scope,
+            "review_mode": self._review_var.get(),
         }
         self.destroy()
