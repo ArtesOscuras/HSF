@@ -434,7 +434,7 @@ class App(tk.Tk):
         self.console.register_command("start", self._cmd_start, "Start listeners")
         self.console.set_subcommands("start", ["shells-listener", "mdns-listener"])
         self.console.register_command("stop", self._cmd_stop, "Stop listeners")
-        self.console.set_subcommands("stop", ["shells-listener", "mdns-listener", "scanner", "bruteforce", "fuzzer", "webrecorder", "tcpscan", "udpscan", "whatweb"])
+        self.console.set_subcommands("stop", ["shells-listener", "mdns-listener", "scanner", "bruteforce", "fuzzer", "webrecorder", "tcpscan", "udpscan", "whatweb", "bannergrab"])
         self.console.register_command("delete", self._cmd_delete, "Delete stored data")
         self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell"])
         self.console.register_command("add", self._cmd_add, "Add to inventory")
@@ -1688,6 +1688,12 @@ class App(tk.Tk):
                 self.console.warning("No udp scan is running")
         elif sub == "whatweb":
             self.console.info("whatweb scan finished")
+        elif sub == "bannergrab":
+            if self._bannergrab_running:
+                self._bannergrab_running = False
+                self.console.info("Bannergrab stopped")
+            else:
+                self.console.warning("No bannergrab is running")
         else:
             self.console.error(f"Unknown stop target: {sub}")
 

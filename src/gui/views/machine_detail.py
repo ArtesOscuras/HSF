@@ -164,7 +164,12 @@ class MachineDetailView(BaseView):
                 for p, out, probe in banners:
                     if p == last_port and out.strip():
                         out_short = out.split("\n")[0][:100]
-                        self.text.insert(tk.END, f"\nBanner port {p} ({probe}):\n", "info")
+                        tag = f"banner_{p}"
+                        self.text.tag_configure(tag, underline=False)
+                        self.text.insert(tk.END, f"\nBanner port {p} ({probe}):\n", ("info", tag))
+                        self.text.tag_bind(tag, "<Button-1>", lambda e, pid=p: self._show_banner(pid))
+                        self.text.tag_bind(tag, "<Enter>", lambda e, t=tag: self.text.tag_configure(t, underline=True))
+                        self.text.tag_bind(tag, "<Leave>", lambda e, t=tag: self.text.tag_configure(t, underline=False))
                         self.text.insert(tk.END, f"  {out_short}\n", "bright")
                         break
 
@@ -206,6 +211,56 @@ class MachineDetailView(BaseView):
         fraction = line_num / max(total, 1)
         self.text.yview_moveto(min(fraction, 1.0))
         self.text.configure(state=tk.DISABLED)
+
+    def _show_banner(self, port):
+        banners = machine_db.load_banners(self._machine.id)
+        texts = [(p, o, pr) for p, o, pr in banners if p == port and o.strip()]
+        if not texts:
+            return
+
+        dlg = tk.Toplevel(self)
+        dlg.title(f"Banner port {port}")
+        dlg.geometry("700x500")
+        dlg.configure(bg="#111111")
+        dlg.transient(self)
+
+        dlg.columnconfigure(0, weight=1)
+        dlg.rowconfigure(0, weight=1)
+
+        text = tk.Text(dlg, bg="#000000", fg="#ffffff", cursor="",
+                       font=fonts.view_font(11), borderwidth=0, highlightthickness=0,
+                       wrap=tk.WORD, padx=15, pady=15)
+        text.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = tk.Scrollbar(dlg, orient=tk.VERTICAL, command=text.yview)
+        scrollbar.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
+                            width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        text.configure(yscrollcommand=scrollbar.set)
+
+        text.tag_configure("muted", foreground=MUTED)
+        text.tag_configure("bright", foreground=BRIGHT)
+        text.tag_configure("info", foreground=INFO)
+
+        text.insert(tk.END, f"Banner for port {port}\n", "info")
+        text.insert(tk.END, f"{'─' * 50}\n", "muted")
+        for p, out, probe in texts:
+            text.insert(tk.END, f"\nProbe: {probe}\n", "info")
+            text.insert(tk.END, f"{out}\n", "bright")
+
+        text.configure(state=tk.DISABLED)
+
+        btn_frame = tk.Frame(dlg, bg="#111111")
+        btn_frame.grid(row=1, column=0, columnspan=2, pady=(10, 15))
+
+        close_btn = tk.Label(btn_frame, text="  Close  ", bg="#222222", fg="#ffffff",
+                             font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+                             padx=15, pady=6)
+        close_btn.pack()
+        close_btn.bind("<Button-1>", lambda e: dlg.destroy())
+        close_btn.bind("<Enter>", lambda e: close_btn.config(bg="#333333"))
+        close_btn.bind("<Leave>", lambda e: close_btn.config(bg="#222222"))
+        dlg.focus_set()
 
 
 _SERVICES = {
