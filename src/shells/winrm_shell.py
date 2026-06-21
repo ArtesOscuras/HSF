@@ -8,12 +8,13 @@ from .winrmexec import (
 
 
 class WinRMConnectionThread:
-    def __init__(self, host, port, user, password, domain="", on_connected=None, on_error=None):
+    def __init__(self, host, port, user, password, domain="", hash_nt="", on_connected=None, on_error=None):
         self._host = host
         self._port = port or 5985
         self._user = user
         self._password = password
         self._domain = domain
+        self._hash_nt = hash_nt
         self._on_connected = on_connected
         self._on_error = on_error
         self._sid = None
@@ -44,7 +45,7 @@ class WinRMConnectionThread:
     def _run(self):
         try:
             url = f"http://{self._host}:{self._port}/wsman"
-            creds = NTCredential(self._domain or ".", self._user, self._password)
+            creds = NTCredential(self._domain or ".", self._user, self._password, nt_hash=self._hash_nt)
             transport = SPNEGOTransport(url, creds)
             runspace = Runspace(transport, timeout=10)
             runspace.__enter__()

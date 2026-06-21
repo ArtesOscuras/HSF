@@ -26,7 +26,7 @@ def build(parent, active_view, navigator):
 
     minus_btn = tk.Label(
         zoom_frame, text="\u2212", bg="#222222", fg="#ffffff",
-        font=fonts.view_font(11), cursor="hand2",
+        font=fonts.view_font(11),
         padx=6, pady=2,
     )
     minus_btn.pack(side=tk.LEFT)
@@ -43,7 +43,7 @@ def build(parent, active_view, navigator):
 
     plus_btn = tk.Label(
         zoom_frame, text="+", bg="#222222", fg="#ffffff",
-        font=fonts.view_font(11), cursor="hand2",
+        font=fonts.view_font(11),
         padx=6, pady=2,
     )
     plus_btn.pack(side=tk.LEFT)

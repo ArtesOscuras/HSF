@@ -122,6 +122,13 @@ class NetworkView(BaseView):
         return icons.icon("question.png", size=50)
 
     @staticmethod
+    def _format_ip(machine):
+        ip = machine.ip
+        if ":" in ip:
+            return ip[:18] + "\u2026" if len(ip) > 18 else ip
+        return ip
+
+    @staticmethod
     def _display_label(machine):
         label = machine.model if machine.model else (machine.device_type or "device unknown")
         return re.sub(r"\s+Build\s+\d+", "", label)
@@ -154,7 +161,7 @@ class NetworkView(BaseView):
         self.text.insert(tk.END, hostname[:30] + "\u2026" if len(hostname) > 30 else hostname, "muted")
         self.text.insert(tk.END, "\t", "bright")
 
-        self.text.insert(tk.END, f"{machine.ip}", "bright")
+        self.text.insert(tk.END, f"{self._format_ip(machine)}", "bright")
         self.text.insert(tk.END, "\t", "bright")
 
         del_img = icons.delete_icon()
@@ -199,7 +206,7 @@ class NetworkView(BaseView):
             w_id = max(w_id, len(id_str))
             w_device = max(w_device, len(self._display_label(m)))
             w_hostname = max(w_hostname, len(m.hostname or ""))
-            w_ip = max(w_ip, len(m.ip))
+            w_ip = max(w_ip, len(self._format_ip(m)))
 
         font = tkfont.Font(font=self.text.cget("font"))
         gap_px = font.measure(COL_GAP)

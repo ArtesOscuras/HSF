@@ -121,6 +121,8 @@ class MachineDetailView(BaseView):
         self._title_label.config(text=f"Machine #{m.id} — {m.ip}")
 
         rows = [
+            ("IPv4", m.ip),
+            ("IPv6", m.ipv6),
             ("Hostname", m.hostname),
             ("MAC", m.mac),
             ("Type", m.device_type),

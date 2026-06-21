@@ -1,4 +1,5 @@
 import os
+import platform
 import time
 import socket
 import threading
@@ -7,8 +8,17 @@ import ipaddress
 from concurrent.futures import ThreadPoolExecutor
 import netifaces
 from scapy.all import ARP, Ether, srp
+from scapy.config import conf
 from zeroconf import Zeroconf, ServiceBrowser, BadTypeInNameException
 from .mdns_cache import add_service, decode_properties
+
+if platform.system() == "Darwin":
+    try:
+        conf.use_pcap = True
+    except Exception:
+        pass
+
+conf.verb = 0
 
 SERVICE_ENUM_TIME = 3
 ACTIVE_INTERVAL = 5
@@ -129,6 +139,8 @@ class ActiveScanner:
             except PermissionError:
                 self.on_host(ip="ERROR", hostname="ARP requires root privileges", mac="", method="error")
                 return
+            except (RecursionError, OSError) as e:
+                pass
             time.sleep(ACTIVE_INTERVAL)
 
     def _run_mdns_active(self):

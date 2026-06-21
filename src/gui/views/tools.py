@@ -77,6 +77,7 @@ class ToolsView(BaseView):
             {"name": "Scanner", "action": "scanner", "desc": "Scan interface or ip."},
             {"name": "Fuzzer", "action": "fuzzer", "desc": "Fuzz directory or subdommains."},
             {"name": "Webrecorder", "action": "webrecorder", "desc": "Record web evidences for analisis."},
+            {"name": "Bruteforce", "action": "bruteforce", "desc": "Brute force FTP, SSH, SMB credentials."},
         ]
         self._rendered = False
         self._poll_id = None

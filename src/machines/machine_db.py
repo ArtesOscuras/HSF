@@ -28,6 +28,7 @@ def save_machine_info(machine):
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS machine_info (
                     ip TEXT,
+                    ipv6 TEXT,
                     hostname TEXT,
                     mac TEXT,
                     device_type TEXT,
@@ -39,11 +40,16 @@ def save_machine_info(machine):
                     last_seen TEXT
                 )
             """)
+            cur = conn.execute("PRAGMA table_info(machine_info)")
+            cols = [r[1] for r in cur.fetchall()]
+            if "ipv6" not in cols:
+                conn.execute("ALTER TABLE machine_info ADD COLUMN ipv6 TEXT")
             conn.execute("DELETE FROM machine_info")
             conn.execute(
-                "INSERT INTO machine_info VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO machine_info VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     machine.ip,
+                    machine.ipv6,
                     machine.hostname,
                     machine.mac,
                     machine.device_type,

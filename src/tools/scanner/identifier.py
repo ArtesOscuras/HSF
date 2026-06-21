@@ -114,6 +114,16 @@ LINUX_DISTROS = (
 )
 
 
+def _is_ipv6(ip):
+    return ":" in ip
+
+
+def _get_sock_addr(ip, port):
+    for family, socktype, proto, canonname, sockaddr in socket.getaddrinfo(ip, port, socket.AF_UNSPEC, socket.SOCK_STREAM):
+        return family, sockaddr
+    return None, None
+
+
 def _probe_ttl(ip):
     try:
         out = subprocess.run(
@@ -127,11 +137,17 @@ def _probe_ttl(ip):
 
 
 def _probe_port(ip, port):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(TIMEOUT)
-    result = sock.connect_ex((ip, port))
-    sock.close()
-    return {"open": result == 0, "ttl": 0}
+    try:
+        family, sockaddr = _get_sock_addr(ip, port)
+        if sockaddr is None:
+            return {"open": False, "ttl": 0}
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        sock.settimeout(TIMEOUT)
+        result = sock.connect_ex(sockaddr)
+        sock.close()
+        return {"open": result == 0, "ttl": 0}
+    except (socket.gaierror, OSError):
+        return {"open": False, "ttl": 0}
 
 
 def _probe_mdns_service(ip, service_name):
@@ -142,6 +158,9 @@ def _probe_mdns_service(ip, service_name):
         return True
 
     _dbg(f"  [active-mdns] probing {ip} for {service_name}")
+    if _is_ipv6(ip):
+        _dbg(f"  [active-mdns] {service_name} -> IPv6 not supported, skipping")
+        return False
     pkt = IP(dst=ip) / UDP(sport=RandShort(), dport=PORT_MDNS) / DNS(rd=1, qd=DNSQR(qname=service_name, qtype="PTR"))
     try:
         reply = sr1(pkt, timeout=TIMEOUT, verbose=0)
@@ -162,6 +181,8 @@ def _probe_mdns_service(ip, service_name):
 
 
 def _probe_udp_port(ip, port):
+    if _is_ipv6(ip):
+        return False
     pkt = IP(dst=ip) / UDP(sport=RandShort(), dport=port)
     try:
         reply = sr1(pkt, timeout=TIMEOUT, verbose=0)
@@ -193,16 +214,18 @@ def _probe_smb_info(ip):
 
 
 def _probe_ssh_banner(ip):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(TIMEOUT)
     try:
-        sock.connect((ip, 22))
+        family, sockaddr = _get_sock_addr(ip, 22)
+        if sockaddr is None:
+            return ""
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        sock.settimeout(TIMEOUT)
+        sock.connect(sockaddr)
         banner = sock.recv(256).decode(errors="replace").strip()
-        return banner
-    except Exception:
-        return ""
-    finally:
         sock.close()
+        return banner
+    except (socket.gaierror, OSError):
+        return ""
 
 
 def _parse_ssh_banner(banner):
@@ -262,24 +285,28 @@ def _run_whatweb(ip, port, mode="direct"):
 
 
 def _probe_web_internal(ip, port):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(3)
     try:
-        sock.connect((ip, port))
-        sock.send(f"GET / HTTP/1.0\r\nHost: {ip}\r\n\r\n".encode())
-        resp = b""
-        while True:
-            try:
-                chunk = sock.recv(4096)
-                if not chunk:
+        family, sockaddr = _get_sock_addr(ip, port)
+        if sockaddr is None:
+            return ""
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        sock.settimeout(3)
+        try:
+            sock.connect(sockaddr)
+            sock.send(f"GET / HTTP/1.0\r\nHost: {ip}\r\n\r\n".encode())
+            resp = b""
+            while True:
+                try:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        break
+                    resp += chunk
+                except socket.timeout:
                     break
-                resp += chunk
-            except socket.timeout:
-                break
-    except Exception:
+        finally:
+            sock.close()
+    except (socket.gaierror, OSError):
         return ""
-    finally:
-        sock.close()
 
     resp_str = resp.decode(errors="replace")
     lines = resp_str.split("\r\n")
@@ -638,7 +665,11 @@ def _is_firewall_honeypot(ip, context):
     _dbg(f"  [firewall-check] probing random ports: {ports}")
     open_count = 0
     for p in ports:
-        result = context.port(p)
+        try:
+            result = context.port(p)
+        except (socket.gaierror, OSError):
+            _dbg(f"  [firewall-check] port {p}: error probing")
+            continue
         if result and result.get("open"):
             open_count += 1
             _dbg(f"  [firewall-check] port {p}: OPEN ({open_count}/3)")

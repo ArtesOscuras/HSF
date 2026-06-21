@@ -42,6 +42,14 @@ def chrome_profile_dir() -> Path:
 def lst_dir() -> Path:
     p = _get_data_home() / "lst"
     p.mkdir(parents=True, exist_ok=True)
+    if not any(p.iterdir()):
+        src = _PKG / "lst"
+        if src.is_dir():
+            for f in src.iterdir():
+                if f.is_file():
+                    _dst = p / f.name
+                    if not _dst.exists():
+                        _dst.write_bytes(f.read_bytes())
     return p
 
 def settings_file() -> Path:

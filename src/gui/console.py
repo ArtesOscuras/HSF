@@ -16,6 +16,26 @@ ERR_COLOR = "#f44747"
 
 
 class Console(tk.Frame):
+    @staticmethod
+    def _matches_word(prefix, word):
+        if word.startswith(prefix):
+            return True
+        if word.startswith("#") and word[1:].startswith(prefix):
+            return True
+        return False
+
+    @staticmethod
+    def _common_prefix(strings):
+        if not strings:
+            return ""
+        result = strings[0]
+        for s in strings[1:]:
+            while not s.startswith(result):
+                result = result[:-1]
+                if not result:
+                    return ""
+        return result
+
     def __init__(self, parent, initial_font_size=11, **kwargs):
         super().__init__(parent, **kwargs)
         self.commands = {}
@@ -41,6 +61,37 @@ class Console(tk.Frame):
         self._arg_listbox = None
         self._arg_matches = []
         self._arg_index = -1
+
+        self._arg2_providers = {}
+        self._arg2_popup = None
+        self._arg2_listbox = None
+        self._arg2_matches = []
+        self._arg2_index = -1
+
+        self._arg3_providers = {}
+        self._arg3_popup = None
+        self._arg3_listbox = None
+        self._arg3_matches = []
+        self._arg3_index = -1
+
+        self._arg2_contains = set()
+        self._arg3_contains = set()
+
+        self._arg4_providers = {}
+        self._arg4_popup = None
+        self._arg4_listbox = None
+        self._arg4_matches = []
+        self._arg4_index = -1
+
+        self._arg4_contains = set()
+
+        self._arg5_providers = {}
+        self._arg5_popup = None
+        self._arg5_listbox = None
+        self._arg5_matches = []
+        self._arg5_index = -1
+
+        self._arg5_contains = set()
 
         self.grid_propagate(False)
         self.config(bg=BG)
@@ -130,6 +181,30 @@ class Console(tk.Frame):
 
     def set_subcommands(self, name, items):
         self._subcommands[name] = items
+
+    def set_arg2_provider(self, cmd, subcmd, provider):
+        self._arg2_providers[(cmd, subcmd)] = provider
+
+    def set_arg3_provider(self, cmd, subcmd, provider):
+        self._arg3_providers[(cmd, subcmd)] = provider
+
+    def set_arg2_filter_contains(self, cmd, subcmd):
+        self._arg2_contains.add((cmd, subcmd))
+
+    def set_arg3_filter_contains(self, cmd, subcmd):
+        self._arg3_contains.add((cmd, subcmd))
+
+    def set_arg4_provider(self, cmd, subcmd, provider):
+        self._arg4_providers[(cmd, subcmd)] = provider
+
+    def set_arg4_filter_contains(self, cmd, subcmd):
+        self._arg4_contains.add((cmd, subcmd))
+
+    def set_arg5_provider(self, cmd, subcmd, provider):
+        self._arg5_providers[(cmd, subcmd)] = provider
+
+    def set_arg5_filter_contains(self, cmd, subcmd):
+        self._arg5_contains.add((cmd, subcmd))
 
     def set_system_handler(self, handler):
         self._system_handler = handler
@@ -238,6 +313,8 @@ class Console(tk.Frame):
         self.prompt_label.configure(font=new_font)
         if self._autocomplete_popup:
             self._close_arg_popup()
+            self._close_arg2_popup()
+            self._close_arg5_popup()
             self._autocomplete_listbox.configure(font=new_font)
             items = list(self._autocomplete_listbox.get(0, tk.END))
             longest = max((len(it.strip()) for it in items), default=10)
@@ -339,12 +416,139 @@ class Console(tk.Frame):
             arg1 = arg_prefix.split(None, 1)[0] if arg_prefix else ""
             sc_matches = [s for s in self._subcommands[cmd_prefix] if s.startswith(arg1)]
             if sc_matches:
-                if len(sc_matches) == 1 and arg_prefix:
+                if self._arg5_popup:
+                    if len(self._arg5_matches) == 1:
+                        _, insert = self._arg5_matches[0]
+                        if insert:
+                            p5 = prefix.split(None, 4)
+                            c = p5[0] if len(p5) > 0 else ""
+                            a1 = p5[1] if len(p5) > 1 else ""
+                            a2 = p5[2] if len(p5) > 2 else ""
+                            a3 = p5[3] if len(p5) > 3 else ""
+                            a4 = p5[4] if len(p5) > 4 else ""
+                            self.input_var.set(f"{c} {a1} {a2} {a3} {a4} {insert} ")
+                            self.input_entry.icursor(tk.END)
+                            self._filter_autocomplete()
+                        return "break"
+                    inserts = [i for _, i in self._arg5_matches if i]
+                    if inserts:
+                        cp = self._common_prefix(inserts)
+                        p5 = prefix.split(None, 5)
+                        a5_text = p5[5] if len(p5) > 5 else ""
+                        if len(cp) > len(a5_text):
+                            c = p5[0] if len(p5) > 0 else ""
+                            a1 = p5[1] if len(p5) > 1 else ""
+                            a2 = p5[2] if len(p5) > 2 else ""
+                            a3 = p5[3] if len(p5) > 3 else ""
+                            a4 = p5[4] if len(p5) > 4 else ""
+                            self.input_var.set(f"{c} {a1} {a2} {a3} {a4} {cp}")
+                            self.input_entry.icursor(tk.END)
+                            self._filter_autocomplete()
+                            return "break"
+                    self._arg5_index = (self._arg5_index + 1) % len(self._arg5_matches)
+                    self._arg5_listbox.selection_clear(0, tk.END)
+                    self._arg5_listbox.selection_set(self._arg5_index)
+                    self._arg5_listbox.activate(self._arg5_index)
+                    return "break"
+                if self._arg4_popup:
+                    if len(self._arg4_matches) == 1:
+                        _, insert = self._arg4_matches[0]
+                        if insert:
+                            p4 = prefix.split(None, 3)
+                            c = p4[0] if len(p4) > 0 else ""
+                            a1 = p4[1] if len(p4) > 1 else ""
+                            a2 = p4[2] if len(p4) > 2 else ""
+                            a3 = p4[3] if len(p4) > 3 else ""
+                            self.input_var.set(f"{c} {a1} {a2} {a3} {insert} ")
+                            self.input_entry.icursor(tk.END)
+                            self._filter_autocomplete()
+                        return "break"
+                    inserts = [i for _, i in self._arg4_matches if i]
+                    if inserts:
+                        cp = self._common_prefix(inserts)
+                        p4 = prefix.split(None, 4)
+                        a4_text = p4[4] if len(p4) > 4 else ""
+                        if len(cp) > len(a4_text):
+                            c = p4[0] if len(p4) > 0 else ""
+                            a1 = p4[1] if len(p4) > 1 else ""
+                            a2 = p4[2] if len(p4) > 2 else ""
+                            a3 = p4[3] if len(p4) > 3 else ""
+                            self.input_var.set(f"{c} {a1} {a2} {a3} {cp}")
+                            self.input_entry.icursor(tk.END)
+                            self._filter_autocomplete()
+                            return "break"
+                    self._arg4_index = (self._arg4_index + 1) % len(self._arg4_matches)
+                    self._arg4_listbox.selection_clear(0, tk.END)
+                    self._arg4_listbox.selection_set(self._arg4_index)
+                    self._arg4_listbox.activate(self._arg4_index)
+                    return "break"
+                if self._arg3_popup:
+                    if len(self._arg3_matches) == 1:
+                        _, insert = self._arg3_matches[0]
+                        if insert:
+                            p3 = prefix.split(None, 2)
+                            c = p3[0] if len(p3) > 0 else ""
+                            a1 = p3[1] if len(p3) > 1 else ""
+                            a2 = p3[2] if len(p3) > 2 else ""
+                            self.input_var.set(f"{c} {a1} {a2} {insert} ")
+                            self.input_entry.icursor(tk.END)
+                            self._filter_autocomplete()
+                        return "break"
+                    inserts = [i for _, i in self._arg3_matches if i]
+                    if inserts:
+                        cp = self._common_prefix(inserts)
+                        p3 = prefix.split(None, 3)
+                        a3_text = p3[3] if len(p3) > 3 else ""
+                        if len(cp) > len(a3_text):
+                            c = p3[0] if len(p3) > 0 else ""
+                            a1 = p3[1] if len(p3) > 1 else ""
+                            a2 = p3[2] if len(p3) > 2 else ""
+                            self.input_var.set(f"{c} {a1} {a2} {cp}")
+                            self.input_entry.icursor(tk.END)
+                            self._filter_autocomplete()
+                            return "break"
+                    self._arg3_index = (self._arg3_index + 1) % len(self._arg3_matches)
+                    self._arg3_listbox.selection_clear(0, tk.END)
+                    self._arg3_listbox.selection_set(self._arg3_index)
+                    self._arg3_listbox.activate(self._arg3_index)
+                    return "break"
+                if self._arg2_popup:
+                    if len(self._arg2_matches) == 1:
+                        _, insert = self._arg2_matches[0]
+                        if insert:
+                            self.input_var.set(f"{cmd_prefix} {arg1} {insert} ")
+                            self.input_entry.icursor(tk.END)
+                            self._filter_autocomplete()
+                        return "break"
+                    inserts = [i for _, i in self._arg2_matches if i]
+                    if inserts:
+                        cp = self._common_prefix(inserts)
+                        p2 = prefix.split(None, 2)
+                        a2_text = p2[2] if len(p2) > 2 else ""
+                        if len(cp) > len(a2_text):
+                            self.input_var.set(f"{cmd_prefix} {arg1} {cp}")
+                            self.input_entry.icursor(tk.END)
+                            self._filter_autocomplete()
+                            return "break"
+                    self._arg2_index = (self._arg2_index + 1) % len(self._arg2_matches)
+                    self._arg2_listbox.selection_clear(0, tk.END)
+                    self._arg2_listbox.selection_set(self._arg2_index)
+                    self._arg2_listbox.activate(self._arg2_index)
+                    return "break"
+                if len(sc_matches) == 1 and arg_prefix and arg_prefix != sc_matches[0]:
                     self.input_var.set(f"{cmd_prefix} {sc_matches[0]} ")
                     self.input_entry.icursor(tk.END)
+                    self._filter_autocomplete()
                     return "break"
+                if len(sc_matches) > 1 and self._arg_popup:
+                    cp = self._common_prefix(sc_matches)
+                    if len(cp) > len(arg1):
+                        self.input_var.set(f"{cmd_prefix} {cp}")
+                        self.input_entry.icursor(tk.END)
+                        self._filter_autocomplete()
+                        return "break"
                 if self._arg_popup:
-                    self._arg_index = (self._arg_index + 1) % len(sc_matches)
+                    self._arg_index = (self._arg_index + 1) % len(self._arg_matches)
                     self._arg_listbox.selection_clear(0, tk.END)
                     self._arg_listbox.selection_set(self._arg_index)
                     self._arg_listbox.activate(self._arg_index)
@@ -358,7 +562,15 @@ class Console(tk.Frame):
         if len(matches) == 1 and prefix:
             self.input_var.set(matches[0][0] + " ")
             self.input_entry.icursor(tk.END)
+            self._filter_autocomplete()
             return "break"
+        if len(matches) > 1:
+            cp = self._common_prefix([m[0] for m in matches])
+            if len(cp) > len(prefix):
+                self.input_var.set(cp)
+                self.input_entry.icursor(tk.END)
+                self._filter_autocomplete()
+                return "break"
 
         if self._autocomplete_popup:
             self._autocomplete_index = (self._autocomplete_index + 1) % len(self._autocomplete_matches)
@@ -442,10 +654,14 @@ class Console(tk.Frame):
             all_cmds = [(n, info["help"]) for n, info in self.commands.items()]
             all_cmds.sort(key=lambda x: x[0])
             self._close_arg_popup()
+            self._close_arg2_popup()
+            self._close_arg3_popup()
+            self._close_arg4_popup()
+            self._close_arg5_popup()
             self._show_or_update(all_cmds)
             return
 
-        parts = prefix.split(None, 1)
+        parts = prefix.split(None, 2)
         cmd_prefix = parts[0]
         arg_prefix = parts[1] if len(parts) > 1 else ""
         in_arg_mode = " " in raw.lstrip()
@@ -460,12 +676,126 @@ class Console(tk.Frame):
 
         if in_arg_mode and cmd_prefix in self._subcommands:
             sc_items = self._subcommands[cmd_prefix]
-            arg1 = arg_prefix.split(None, 1)[0] if arg_prefix else ""
-            sc_matches = [s for s in sc_items if s.startswith(arg1)]
+            arg1_text = arg_prefix.split(None, 1)[0] if arg_prefix else ""
+            sc_matches = [s for s in sc_items if s.startswith(arg1_text)]
             self._show_or_update(cmd_matches)
             self._show_arg_popup(sc_matches)
+
+            if len(parts) >= 2 and parts[1] in sc_items:
+                parts3 = prefix.split(None, 3)
+                parts4 = prefix.split(None, 5)
+
+                provider = self._arg2_providers.get((cmd_prefix, parts[1]))
+                if provider:
+                    arg2_text = parts3[2] if len(parts3) > 2 else ""
+                    raw_items = provider(arg2_text)
+                    normalized = []
+                    for it in raw_items:
+                        if isinstance(it, tuple):
+                            d, i = it
+                        else:
+                            d, i = it, it
+                        if (cmd_prefix, parts[1]) in self._arg2_contains:
+                            if not arg2_text or arg2_text in d:
+                                normalized.append((d, i))
+                        elif i.startswith(arg2_text) or any(self._matches_word(arg2_text, w) for w in d.split()):
+                            normalized.append((d, i))
+                    if normalized:
+                        self._show_arg2_popup(normalized)
+                    else:
+                        self._close_arg2_popup()
+                else:
+                    self._close_arg2_popup()
+
+                has_arg3 = len(parts3) >= 4 or (len(parts3) >= 3 and raw.rstrip() != raw)
+                if has_arg3:
+                    provider3 = self._arg3_providers.get((cmd_prefix, parts[1]))
+                    if provider3:
+                        arg3_text = parts4[3] if len(parts4) > 3 else ""
+                        arg2_value = parts3[2] if len(parts3) > 2 else ""
+                        raw3 = provider3(arg3_text, arg2_value)
+                        normalized3 = []
+                        for it in raw3:
+                            if isinstance(it, tuple):
+                                d, i = it
+                            else:
+                                d, i = it, it
+                            if (cmd_prefix, parts[1]) in self._arg3_contains:
+                                if not arg3_text or arg3_text in d:
+                                    normalized3.append((d, i))
+                            elif i.startswith(arg3_text) or any(self._matches_word(arg3_text, w) for w in d.split()):
+                                normalized3.append((d, i))
+                        if normalized3:
+                            self._show_arg3_popup(normalized3)
+                        else:
+                            self._close_arg3_popup()
+                    else:
+                        self._close_arg3_popup()
+                else:
+                    self._close_arg3_popup()
+
+                has_arg4 = len(parts4) >= 5 or (len(parts4) >= 4 and raw.rstrip() != raw)
+                if has_arg4:
+                    provider4 = self._arg4_providers.get((cmd_prefix, parts[1]))
+                    if provider4:
+                        arg4_text = parts4[4] if len(parts4) > 4 else ""
+                        raw4 = provider4(arg4_text)
+                        normalized4 = []
+                        for it in raw4:
+                            if isinstance(it, tuple):
+                                d, i = it
+                            else:
+                                d, i = it, it
+                            if (cmd_prefix, parts[1]) in self._arg4_contains:
+                                if not arg4_text or arg4_text in d:
+                                    normalized4.append((d, i))
+                            elif i.startswith(arg4_text) or any(self._matches_word(arg4_text, w) for w in d.split()):
+                                normalized4.append((d, i))
+                        if normalized4:
+                            self._show_arg4_popup(normalized4)
+                        else:
+                            self._close_arg4_popup()
+                    else:
+                        self._close_arg4_popup()
+                else:
+                    self._close_arg4_popup()
+
+                has_arg5 = len(parts4) >= 6 or (len(parts4) >= 5 and raw.rstrip() != raw)
+                if has_arg5:
+                    provider5 = self._arg5_providers.get((cmd_prefix, parts[1]))
+                    if provider5:
+                        arg5_text = parts4[5] if len(parts4) > 5 else ""
+                        raw5 = provider5(arg5_text)
+                        normalized5 = []
+                        for it in raw5:
+                            if isinstance(it, tuple):
+                                d, i = it
+                            else:
+                                d, i = it, it
+                            if (cmd_prefix, parts[1]) in self._arg5_contains:
+                                if not arg5_text or arg5_text in d:
+                                    normalized5.append((d, i))
+                            elif i.startswith(arg5_text) or any(self._matches_word(arg5_text, w) for w in d.split()):
+                                normalized5.append((d, i))
+                        if normalized5:
+                            self._show_arg5_popup(normalized5)
+                        else:
+                            self._close_arg5_popup()
+                    else:
+                        self._close_arg5_popup()
+                else:
+                    self._close_arg5_popup()
+            else:
+                self._close_arg2_popup()
+                self._close_arg3_popup()
+                self._close_arg4_popup()
+                self._close_arg5_popup()
         else:
             self._close_arg_popup()
+            self._close_arg2_popup()
+            self._close_arg3_popup()
+            self._close_arg4_popup()
+            self._close_arg5_popup()
             self._show_or_update(cmd_matches)
 
     def _show_arg_popup(self, items):
@@ -527,6 +857,337 @@ class Console(tk.Frame):
             self._arg_matches = []
             self._arg_index = -1
 
+    def _show_arg2_popup(self, items):
+        if not self._arg_popup:
+            return
+        normalized = []
+        for it in items:
+            if isinstance(it, tuple):
+                display, insert = it
+            else:
+                display, insert = it, it
+            normalized.append((display, insert))
+
+        displays = [d for d, _ in normalized]
+
+        fs = self._font_size
+        f = tkfont.Font(font=(fonts.family(), fs))
+        line_h = f.metrics("linespace")
+        longest = max((len(s) for s in displays), default=10)
+        h = len(displays) * line_h + 4 + len(displays)
+        popup_w = f.measure(" " * (longest + 3)) + 4
+
+        arg1_x = self._arg_popup.winfo_x()
+        arg1_w = self._arg_popup.winfo_width()
+        arg1_y = self._arg_popup.winfo_y()
+        arg1_h = self._arg_popup.winfo_height()
+        bottom = arg1_y + arg1_h
+
+        if self._arg2_popup:
+            lb = self._arg2_listbox
+            lb.delete(0, tk.END)
+            for d in displays:
+                lb.insert(tk.END, f"  {d}")
+            lb.selection_set(0)
+            lb.activate(0)
+            lb.configure(width=longest + 3)
+            self._arg2_matches = normalized
+            self._arg2_index = 0
+            self._arg2_popup.place_configure(
+                x=arg1_x + arg1_w, y=bottom - h, width=popup_w, height=h)
+            self._arg2_popup.lift()
+        else:
+            frame = tk.Frame(self.master, bg="#111111", highlightbackground="#333333", highlightthickness=1)
+            lb = tk.Listbox(frame, bg="#111111", fg="#FFFFFF", selectbackground="#333333",
+                            selectforeground="#FFFFFF", font=(fonts.family(), fs),
+                            width=longest + 3, borderwidth=0,
+                            highlightthickness=0, activestyle="none", exportselection=False)
+            lb.pack(fill=tk.BOTH, expand=True)
+            for d in displays:
+                lb.insert(tk.END, f"  {d}")
+            lb.selection_set(0)
+            lb.activate(0)
+            lb.bind("<ButtonRelease-1>", lambda e: self._on_arg2_click())
+            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
+
+            frame.place(x=arg1_x + arg1_w, y=bottom - h, width=popup_w, height=h)
+            frame.lift()
+
+            self._arg2_popup = frame
+            self._arg2_listbox = lb
+            self._arg2_matches = normalized
+            self._arg2_index = 0
+
+    def _close_arg2_popup(self):
+        if self._arg2_popup:
+            self._arg2_popup.destroy()
+            self._arg2_popup = None
+            self._arg2_listbox = None
+            self._arg2_matches = []
+            self._arg2_index = -1
+
+    def _on_arg2_click(self):
+        if self._arg2_index >= 0 and self._arg2_matches:
+            current = self.input_var.get().strip()
+            parts = current.split(None, 2)
+            cmd = parts[0] if len(parts) > 0 else ""
+            arg1_val = parts[1] if len(parts) > 1 else ""
+            _, insert = self._arg2_matches[self._arg2_index]
+            if insert:
+                self.input_var.set(f"{cmd} {arg1_val} {insert} ")
+                self.input_entry.icursor(tk.END)
+        self._close_autocomplete()
+        self.input_entry.focus()
+
+    def _show_arg3_popup(self, items):
+        if not self._arg2_popup:
+            return
+        normalized = []
+        for it in items:
+            if isinstance(it, tuple):
+                display, insert = it
+            else:
+                display, insert = it, it
+            normalized.append((display, insert))
+
+        displays = [d for d, _ in normalized]
+
+        fs = self._font_size
+        f = tkfont.Font(font=(fonts.family(), fs))
+        line_h = f.metrics("linespace")
+        longest = max((len(s) for s in displays), default=10)
+        h = len(displays) * line_h + 4 + len(displays)
+        popup_w = f.measure(" " * (longest + 3)) + 4
+
+        arg2_x = self._arg2_popup.winfo_x()
+        arg2_w = self._arg2_popup.winfo_width()
+        arg2_y = self._arg2_popup.winfo_y()
+        arg2_h = self._arg2_popup.winfo_height()
+        bottom = arg2_y + arg2_h
+
+        if self._arg3_popup:
+            lb = self._arg3_listbox
+            lb.delete(0, tk.END)
+            for d in displays:
+                lb.insert(tk.END, f"  {d}")
+            lb.selection_set(0)
+            lb.activate(0)
+            lb.configure(width=longest + 3)
+            self._arg3_matches = normalized
+            self._arg3_index = 0
+            self._arg3_popup.place_configure(
+                x=arg2_x + arg2_w, y=bottom - h, width=popup_w, height=h)
+            self._arg3_popup.lift()
+        else:
+            frame = tk.Frame(self.master, bg="#111111", highlightbackground="#333333", highlightthickness=1)
+            lb = tk.Listbox(frame, bg="#111111", fg="#FFFFFF", selectbackground="#333333",
+                            selectforeground="#FFFFFF", font=(fonts.family(), fs),
+                            width=longest + 3, borderwidth=0,
+                            highlightthickness=0, activestyle="none", exportselection=False)
+            lb.pack(fill=tk.BOTH, expand=True)
+            for d in displays:
+                lb.insert(tk.END, f"  {d}")
+            lb.selection_set(0)
+            lb.activate(0)
+            lb.bind("<ButtonRelease-1>", lambda e: self._on_arg3_click())
+            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
+
+            frame.place(x=arg2_x + arg2_w, y=bottom - h, width=popup_w, height=h)
+            frame.lift()
+
+            self._arg3_popup = frame
+            self._arg3_listbox = lb
+            self._arg3_matches = normalized
+            self._arg3_index = 0
+
+    def _close_arg3_popup(self):
+        if self._arg3_popup:
+            self._arg3_popup.destroy()
+            self._arg3_popup = None
+            self._arg3_listbox = None
+            self._arg3_matches = []
+            self._arg3_index = -1
+
+    def _on_arg3_click(self):
+        if self._arg3_index >= 0 and self._arg3_matches:
+            current = self.input_var.get().strip()
+            parts = current.split(None, 3)
+            cmd = parts[0] if len(parts) > 0 else ""
+            arg1_val = parts[1] if len(parts) > 1 else ""
+            arg2_val = parts[2] if len(parts) > 2 else ""
+            _, insert = self._arg3_matches[self._arg3_index]
+            if insert:
+                self.input_var.set(f"{cmd} {arg1_val} {arg2_val} {insert} ")
+                self.input_entry.icursor(tk.END)
+        self._close_autocomplete()
+        self.input_entry.focus()
+
+    def _show_arg4_popup(self, items):
+        if not self._arg3_popup:
+            return
+        normalized = []
+        for it in items:
+            if isinstance(it, tuple):
+                display, insert = it
+            else:
+                display, insert = it, it
+            normalized.append((display, insert))
+
+        displays = [d for d, _ in normalized]
+
+        fs = self._font_size
+        f = tkfont.Font(font=(fonts.family(), fs))
+        line_h = f.metrics("linespace")
+        longest = max((len(s) for s in displays), default=10)
+        h = len(displays) * line_h + 4 + len(displays)
+        popup_w = f.measure(" " * (longest + 3)) + 4
+
+        arg3_x = self._arg3_popup.winfo_x()
+        arg3_w = self._arg3_popup.winfo_width()
+        arg3_y = self._arg3_popup.winfo_y()
+        arg3_h = self._arg3_popup.winfo_height()
+        bottom = arg3_y + arg3_h
+
+        if self._arg4_popup:
+            lb = self._arg4_listbox
+            lb.delete(0, tk.END)
+            for d in displays:
+                lb.insert(tk.END, f"  {d}")
+            lb.selection_set(0)
+            lb.activate(0)
+            lb.configure(width=longest + 3)
+            self._arg4_matches = normalized
+            self._arg4_index = 0
+            self._arg4_popup.place_configure(
+                x=arg3_x + arg3_w, y=bottom - h, width=popup_w, height=h)
+            self._arg4_popup.lift()
+        else:
+            frame = tk.Frame(self.master, bg="#111111", highlightbackground="#333333", highlightthickness=1)
+            lb = tk.Listbox(frame, bg="#111111", fg="#FFFFFF", selectbackground="#333333",
+                            selectforeground="#FFFFFF", font=(fonts.family(), fs),
+                            width=longest + 3, borderwidth=0,
+                            highlightthickness=0, activestyle="none", exportselection=False)
+            lb.pack(fill=tk.BOTH, expand=True)
+            for d in displays:
+                lb.insert(tk.END, f"  {d}")
+            lb.selection_set(0)
+            lb.activate(0)
+            lb.bind("<ButtonRelease-1>", lambda e: self._on_arg4_click())
+            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
+
+            frame.place(x=arg3_x + arg3_w, y=bottom - h, width=popup_w, height=h)
+            frame.lift()
+
+            self._arg4_popup = frame
+            self._arg4_listbox = lb
+            self._arg4_matches = normalized
+            self._arg4_index = 0
+
+    def _close_arg4_popup(self):
+        if self._arg4_popup:
+            self._arg4_popup.destroy()
+            self._arg4_popup = None
+            self._arg4_listbox = None
+            self._arg4_matches = []
+            self._arg4_index = -1
+
+    def _on_arg4_click(self):
+        if self._arg4_index >= 0 and self._arg4_matches:
+            current = self.input_var.get().strip()
+            parts = current.split(None, 4)
+            cmd = parts[0] if len(parts) > 0 else ""
+            arg1_val = parts[1] if len(parts) > 1 else ""
+            arg2_val = parts[2] if len(parts) > 2 else ""
+            arg3_val = parts[3] if len(parts) > 3 else ""
+            _, insert = self._arg4_matches[self._arg4_index]
+            if insert:
+                self.input_var.set(f"{cmd} {arg1_val} {arg2_val} {arg3_val} {insert} ")
+                self.input_entry.icursor(tk.END)
+        self._close_autocomplete()
+        self.input_entry.focus()
+
+    def _show_arg5_popup(self, items):
+        if not self._arg4_popup:
+            return
+        normalized = []
+        for it in items:
+            if isinstance(it, tuple):
+                display, insert = it
+            else:
+                display, insert = it, it
+            normalized.append((display, insert))
+
+        displays = [d for d, _ in normalized]
+        fs = self._font_size
+        f = tkfont.Font(font=(fonts.family(), fs))
+        line_h = f.metrics("linespace")
+        longest = max((len(s) for s in displays), default=10)
+        h = len(displays) * line_h + 4 + len(displays)
+        popup_w = f.measure(" " * (longest + 3)) + 4
+
+        arg4_x = self._arg4_popup.winfo_x()
+        arg4_w = self._arg4_popup.winfo_width()
+        arg4_y = self._arg4_popup.winfo_y()
+        arg4_h = self._arg4_popup.winfo_height()
+        bottom = arg4_y + arg4_h
+
+        if self._arg5_popup:
+            lb = self._arg5_listbox
+            lb.delete(0, tk.END)
+            for d in displays:
+                lb.insert(tk.END, f"  {d}")
+            lb.selection_set(0)
+            lb.activate(0)
+            lb.configure(width=longest + 3)
+            self._arg5_matches = normalized
+            self._arg5_index = 0
+            self._arg5_popup.place_configure(
+                x=arg4_x + arg4_w, y=bottom - h, width=popup_w, height=h)
+            self._arg5_popup.lift()
+        else:
+            frame = tk.Frame(self.master, bg="#111111", highlightbackground="#333333", highlightthickness=1)
+            lb = tk.Listbox(frame, bg="#111111", fg="#FFFFFF", selectbackground="#333333",
+                            selectforeground="#FFFFFF", font=(fonts.family(), fs),
+                            width=longest + 3, borderwidth=0,
+                            highlightthickness=0, activestyle="none", exportselection=False)
+            lb.pack(fill=tk.BOTH, expand=True)
+            for d in displays:
+                lb.insert(tk.END, f"  {d}")
+            lb.selection_set(0)
+            lb.activate(0)
+            lb.bind("<ButtonRelease-1>", lambda e: self._on_arg5_click())
+            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
+            frame.place(x=arg4_x + arg4_w, y=bottom - h, width=popup_w, height=h)
+            frame.lift()
+            self._arg5_popup = frame
+            self._arg5_listbox = lb
+            self._arg5_matches = normalized
+            self._arg5_index = 0
+
+    def _close_arg5_popup(self):
+        if self._arg5_popup:
+            self._arg5_popup.destroy()
+            self._arg5_popup = None
+            self._arg5_listbox = None
+            self._arg5_matches = []
+            self._arg5_index = -1
+
+    def _on_arg5_click(self):
+        if self._arg5_index >= 0 and self._arg5_matches:
+            current = self.input_var.get().strip()
+            parts = current.split(None, 5)
+            cmd = parts[0] if len(parts) > 0 else ""
+            a1 = parts[1] if len(parts) > 1 else ""
+            a2 = parts[2] if len(parts) > 2 else ""
+            a3 = parts[3] if len(parts) > 3 else ""
+            a4 = parts[4] if len(parts) > 4 else ""
+            _, insert = self._arg5_matches[self._arg5_index]
+            if insert:
+                self.input_var.set(f"{cmd} {a1} {a2} {a3} {a4} {insert} ")
+                self.input_entry.icursor(tk.END)
+        self._close_autocomplete()
+        self.input_entry.focus()
+
     def _on_arg_click(self):
         if self._arg_index >= 0 and self._arg_matches:
             current = self.input_var.get().strip()
@@ -553,10 +1214,24 @@ class Console(tk.Frame):
         popup = self._autocomplete_popup
         if popup.winfo_containing(event.x_root, event.y_root) == popup:
             return
+        if self._arg_popup and self._arg_popup.winfo_containing(event.x_root, event.y_root) == self._arg_popup:
+            return
+        if self._arg2_popup and self._arg2_popup.winfo_containing(event.x_root, event.y_root) == self._arg2_popup:
+            return
+        if self._arg3_popup and self._arg3_popup.winfo_containing(event.x_root, event.y_root) == self._arg3_popup:
+            return
+        if self._arg4_popup and self._arg4_popup.winfo_containing(event.x_root, event.y_root) == self._arg4_popup:
+            return
+        if self._arg5_popup and self._arg5_popup.winfo_containing(event.x_root, event.y_root) == self._arg5_popup:
+            return
         self._close_autocomplete()
 
     def _close_autocomplete(self):
         self._close_arg_popup()
+        self._close_arg2_popup()
+        self._close_arg3_popup()
+        self._close_arg4_popup()
+        self._close_arg5_popup()
         if self._filter_id:
             self.after_cancel(self._filter_id)
             self._filter_id = None

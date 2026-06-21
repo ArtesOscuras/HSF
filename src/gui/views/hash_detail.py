@@ -217,8 +217,11 @@ class HashDetailView(BaseView):
         btn_frame = tk.Frame(self, bg="#000000")
         btn_frame.grid(row=2, column=0, sticky="ew", pady=(0, 15))
 
+        inner = tk.Frame(btn_frame, bg="#000000")
+        inner.pack(anchor="center")
+
         edit_btn = tk.Label(
-            btn_frame, text="  Edit  ", bg="#222222", fg="#ffffff",
+            inner, text="  Edit  ", bg="#222222", fg="#ffffff",
             font=fonts.view_font(12), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
@@ -228,7 +231,7 @@ class HashDetailView(BaseView):
         edit_btn.bind("<Leave>", lambda e: edit_btn.config(bg="#222222"))
 
         back_btn = tk.Label(
-            btn_frame, text="  \u2190 Back  ", bg="#222222", fg="#ffffff",
+            inner, text="  \u2190 Back  ", bg="#222222", fg="#ffffff",
             font=fonts.view_font(12), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )

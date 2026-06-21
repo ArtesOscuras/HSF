@@ -218,10 +218,10 @@ class HashListView(BaseView):
         self._poll_id = self.after(2000, self._poll)
 
     def _open_add_hash(self):
-        dialog = _HashDialog(self)
+        dialog = HashAddDialog(self)
 
 
-class _HashDialog(tk.Toplevel):
+class HashAddDialog(tk.Toplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self._sel_type = None

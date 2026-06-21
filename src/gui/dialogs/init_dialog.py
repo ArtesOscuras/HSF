@@ -41,6 +41,7 @@ def _checks():
     yield _check("hashcat", "hashcat", lambda: _resolve_binary("hashcat")[0], kind="binary", critical=False)
     yield _check("hydra", "hydra", lambda: _resolve_binary("hydra")[0], kind="binary", critical=False)
     yield _check("whatweb", "whatweb", lambda: _resolve_binary("whatweb")[0], kind="binary", critical=False)
+    yield _check("xfreerdp", "xfreerdp", lambda: _resolve_binary("xfreerdp")[0], kind="binary", critical=False)
     yield _check("browsers", "Chromium browser", lambda: _browser_check()[0], kind="binary", critical=False)
 
 
@@ -244,9 +245,9 @@ class InitDialog(tk.Toplevel):
         btn_frame.grid(row=2, column=0, sticky="ew", pady=(0, 15))
 
         self._ok_btn = tk.Label(
-            btn_frame, text="     Continue     ", bg="#222222", fg=BRIGHT,
-            font=fonts.view_font_bold(12), relief=tk.RAISED, bd=1,
-            padx=20, pady=8,
+            btn_frame, text="  Continue  ", bg="#222222", fg=BRIGHT,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6,
         )
         self._ok_btn.pack()
         self._ok_btn.bind("<Button-1>", lambda e: self.destroy())
@@ -343,6 +344,6 @@ class InitDialog(tk.Toplevel):
             self.text.insert(tk.END, "\n")
             self.text.see(tk.END)
             self.text.configure(state=tk.DISABLED)
-            self._ok_btn.config(text="     Continue     ")
+            self._ok_btn.config(text="  Continue  ")
 
         self.after(0, _ui)

@@ -328,6 +328,9 @@ class App(tk.Tk):
         self._identifying_ips = set()
         self._system_process = None
         self._recorder = None
+        self._bruteforce_dlg = None
+        self._bruteforce_engine = None
+        self._fuzz_dlg = None
         self._tcpscan_running = False
         self._tcpscan_process = None
         self._udpscan_running = False
@@ -423,13 +426,15 @@ class App(tk.Tk):
 
     def _register_commands(self):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
-        self.console.set_subcommands("view", ["list", "tools", "machines", "machine", "domains", "domain", "shells", "shell", "credentials", "credential", "hashes", "hash", "users", "passwords", "evidences", "evidence"])
+        self.console.set_subcommands("view", ["list", "tools", "machine", "domain", "shell", "credential", "hash", "users", "passwords", "evidence"])
         self.console.register_command("use", self._cmd_use, "Use a tool")
-        self.console.set_subcommands("use", ["scanner", "bannergrab", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "whatweb", "ftp"])
+        self.console.set_subcommands("use", ["scanner", "bannergrab", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "whatweb", "bruteforce"])
+        self.console.register_command("connect", self._cmd_connect, "Connect via FTP/SFTP/SSH/WinRM")
+        self.console.set_subcommands("connect", ["ftp", "sftp", "ssh", "winrm"])
         self.console.register_command("start", self._cmd_start, "Start listeners")
         self.console.set_subcommands("start", ["shells-listener", "mdns-listener"])
         self.console.register_command("stop", self._cmd_stop, "Stop listeners")
-        self.console.set_subcommands("stop", ["shells-listener", "mdns-listener"])
+        self.console.set_subcommands("stop", ["shells-listener", "mdns-listener", "scanner", "bruteforce", "fuzzer", "webrecorder", "tcpscan", "udpscan", "whatweb"])
         self.console.register_command("delete", self._cmd_delete, "Delete stored data")
         self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell"])
         self.console.register_command("add", self._cmd_add, "Add to inventory")
@@ -439,6 +444,369 @@ class App(tk.Tk):
 
         self.console.set_system_handler(self._run_system)
         self.console.set_system_stop_handler(self._stop_system)
+
+        self.console.set_arg2_provider("delete", "credential", self._autocomplete_credential_user)
+        self.console.set_arg2_provider("delete", "evidence", self._autocomplete_evidence)
+        self.console.set_arg2_provider("delete", "hash", self._autocomplete_hash)
+        self.console.set_arg2_provider("delete", "machine", self._autocomplete_store_ip)
+        self.console.set_arg2_provider("delete", "domain", self._autocomplete_domain)
+        self.console.set_arg2_provider("delete", "user", self._autocomplete_user)
+        self.console.set_arg2_provider("delete", "password", self._autocomplete_password)
+        self.console.set_arg2_provider("delete", "shell", self._autocomplete_shell)
+
+        self.console.set_arg2_provider("view", "machine", self._autocomplete_store_ip_noall)
+        self.console.set_arg2_provider("view", "domain", self._autocomplete_domain_only)
+        self.console.set_arg2_provider("view", "shell", self._autocomplete_shell_noall)
+        self.console.set_arg2_provider("view", "credential", self._autocomplete_credential_user_noall)
+        self.console.set_arg2_provider("view", "hash", self._autocomplete_hash_noall)
+        self.console.set_arg2_provider("view", "evidence", self._autocomplete_evidence_only)
+
+        self.console.set_arg2_provider("connect", "ftp", self._autocomplete_store_ip_noall)
+        self.console.set_arg2_provider("connect", "sftp", self._autocomplete_store_ip_noall)
+        self.console.set_arg2_provider("connect", "ssh", self._autocomplete_store_ip_noall)
+        self.console.set_arg2_provider("connect", "winrm", self._autocomplete_store_ip_noall)
+        self.console.set_arg3_provider("connect", "ftp", self._autocomplete_connect_credential)
+        self.console.set_arg3_provider("connect", "sftp", self._autocomplete_connect_credential)
+        self.console.set_arg3_provider("connect", "ssh", self._autocomplete_connect_credential)
+        self.console.set_arg3_provider("connect", "winrm", self._autocomplete_connect_credential)
+
+        self.console.set_arg2_provider("add", "machine", self._autocomplete_format_ip)
+        self.console.set_arg2_provider("add", "domain", self._autocomplete_format_domain)
+        self.console.set_arg2_provider("add", "credential", self._autocomplete_user_noall)
+        self.console.set_arg2_provider("add", "user", self._autocomplete_format_username)
+        self.console.set_arg2_provider("add", "password", self._autocomplete_format_password)
+        self.console.set_arg2_provider("add", "hash", self._autocomplete_hash_types)
+        self.console.set_arg2_filter_contains("add", "hash")
+
+        self.console.set_arg2_provider("use", "scanner", self._autocomplete_use_scanner)
+        self.console.set_arg3_provider("use", "scanner", self._autocomplete_use_scanner_ip)
+
+        self.console.set_arg2_provider("use", "nslookup", self._autocomplete_webrecorder_target)
+        self.console.set_arg2_provider("use", "ping", self._autocomplete_webrecorder_target)
+        self.console.set_arg2_provider("use", "tcpscan", self._autocomplete_use_tcpscan)
+        self.console.set_arg2_provider("use", "udpscan", self._autocomplete_use_udpscan)
+
+        self.console.set_arg2_provider("use", "whatweb", self._autocomplete_use_tcpscan)
+        self.console.set_arg3_provider("use", "whatweb", self._autocomplete_bannergrab_ports)
+
+        self.console.set_arg2_provider("use", "bruteforce", self._autocomplete_bruteforce_proto)
+        self.console.set_arg3_provider("use", "bruteforce", self._autocomplete_webrecorder_target)
+        self.console.set_arg4_provider("use", "bruteforce", self._autocomplete_bruteforce_userlist)
+        self.console.set_arg5_provider("use", "bruteforce", self._autocomplete_bruteforce_passlist)
+
+        self.console.set_arg2_provider("use", "bannergrab", self._autocomplete_use_bannergrab)
+        self.console.set_arg3_provider("use", "bannergrab", self._autocomplete_bannergrab_ports)
+
+        self.console.set_arg2_provider("use", "webrecorder", self._autocomplete_webrecorder_target)
+        self.console.set_arg3_provider("use", "webrecorder", self._autocomplete_webrecorder_ports)
+        self.console.set_arg4_provider("use", "webrecorder", self._autocomplete_webrecorder_scheme)
+
+        self.console.set_arg3_provider("add", "credential", self._autocomplete_password_noall)
+        self.console.set_arg3_provider("add", "hash", self._autocomplete_format_hash)
+
+    @staticmethod
+    def _autocomplete_store_ip(prefix):
+        results = [("all", "all")]
+        for m in store.get_all():
+            results.append((f"{m.ip}  #{m.id}", m.ip))
+        return results
+
+    @staticmethod
+    def _autocomplete_store_ip_noall(prefix):
+        results = []
+        for m in store.get_all():
+            results.append((f"{m.ip}  #{m.id}", m.ip))
+        return results
+
+    @staticmethod
+    def _autocomplete_credential_user(prefix):
+        from src.machines.credential_db import load_credentials
+        results = ["all"]
+        for c in load_credentials():
+            u = c.get("username", "")
+            if u:
+                results.append(u)
+        return results
+
+    @staticmethod
+    def _autocomplete_connect_credential(prefix, arg2_value=None):
+        from src.machines.credential_db import load_credentials
+        results = []
+        for c in load_credentials():
+            u = c.get("username", "")
+            if u:
+                results.append(u)
+        return results
+
+    @staticmethod
+    def _autocomplete_format_ip(prefix, arg2_value=None):
+        return [("<ip>", "")]
+
+    @staticmethod
+    def _autocomplete_format_domain(prefix, arg2_value=None):
+        return [("<domain>", "")]
+
+    @staticmethod
+    def _autocomplete_format_username(prefix, arg2_value=None):
+        return [("<username>", "")]
+
+    @staticmethod
+    def _autocomplete_format_password(prefix, arg2_value=None):
+        return [("<password>", "")]
+
+    @staticmethod
+    def _autocomplete_format_hash(prefix, arg2_value=None):
+        return [("<hash>", "")]
+
+    @staticmethod
+    def _autocomplete_user_noall(prefix, arg2_value=None):
+        from src.machines.credential_db import load_users
+        return list(load_users())
+
+    @staticmethod
+    def _autocomplete_password_noall(prefix, arg2_value=None):
+        from src.machines.credential_db import load_passwords
+        return list(load_passwords())
+
+    @staticmethod
+    def _autocomplete_hash_types(prefix):
+        import sqlite3
+        from src.hsf_paths import hashcat_db
+        results = []
+        try:
+            with sqlite3.connect(str(hashcat_db())) as conn:
+                rows = conn.execute(
+                    "SELECT \"Hash-Mode\", \"Hash-Name\" FROM DefaultMode ORDER BY \"Hash-Mode\""
+                ).fetchall()
+            for mode, name in rows:
+                if name:
+                    results.append((f"{mode}  {name}", str(mode)))
+        except (sqlite3.DatabaseError, sqlite3.OperationalError):
+            pass
+        return results
+
+    @staticmethod
+    def _autocomplete_use_scanner(prefix):
+        results = [("stop", "stop"), ("ip", "ip"), ("<ip>", "")]
+        for iface in netifaces.interfaces():
+            if iface == "lo0":
+                continue
+            addrs = netifaces.ifaddresses(iface).get(netifaces.AF_INET)
+            if addrs:
+                results.append((iface, iface))
+        return results
+
+    @staticmethod
+    def _autocomplete_use_scanner_ip(prefix, arg2_value=None):
+        if arg2_value != "ip":
+            return []
+        results = []
+        from src.machines import domain_db
+        for m in store.get_all():
+            results.append((f"{m.ip}  #{m.id}", m.ip))
+        for d in domain_db.list_all():
+            results.append((d, d))
+        return results
+
+    @staticmethod
+    def _autocomplete_use_bannergrab(prefix):
+        results = [("stop", "stop")]
+        for m in store.get_all():
+            results.append((f"{m.ip}  #{m.id}", m.ip))
+        return results
+
+    @staticmethod
+    def _autocomplete_use_tcpscan(prefix):
+        results = [("stop", "stop")]
+        from src.machines import domain_db
+        for m in store.get_all():
+            results.append((f"{m.ip}  #{m.id}", m.ip))
+        for d in domain_db.list_all():
+            results.append((d, d))
+        return results
+
+    @staticmethod
+    def _autocomplete_use_udpscan(prefix):
+        results = [("stop", "stop")]
+        from src.machines import domain_db
+        for m in store.get_all():
+            results.append((f"{m.ip}  #{m.id}", m.ip))
+        for d in domain_db.list_all():
+            results.append((d, d))
+        return results
+
+    @staticmethod
+    def _autocomplete_bruteforce_proto(prefix):
+        return [("ftp", "ftp"), ("ssh", "ssh"), ("smb", "smb"),
+                ("rdp", "rdp"), ("ldap", "ldap"), ("mssql", "mssql"),
+                ("mysql", "mysql"), ("pgsql", "pgsql")]
+
+    @staticmethod
+    def _autocomplete_bruteforce_userlist(prefix):
+        from src.hsf_paths import lst_dir
+        results = [("users", "users")]
+        try:
+            for fname in sorted(os.listdir(str(lst_dir()))):
+                if os.path.isfile(os.path.join(str(lst_dir()), fname)):
+                    results.append((fname, fname))
+        except OSError:
+            pass
+        return results
+
+    @staticmethod
+    def _autocomplete_bruteforce_passlist(prefix):
+        from src.hsf_paths import lst_dir
+        results = [("passwords", "passwords")]
+        try:
+            for fname in sorted(os.listdir(str(lst_dir()))):
+                if os.path.isfile(os.path.join(str(lst_dir()), fname)):
+                    results.append((fname, fname))
+        except OSError:
+            pass
+        return results
+
+    @staticmethod
+    def _autocomplete_bannergrab_ports(prefix, arg2_value=None):
+        results = [("<port>", "")]
+        if arg2_value:
+            from src.machines import machine_db
+            machine = store.get(arg2_value)
+            if not machine:
+                if arg2_value.startswith("#") and arg2_value[1:].isdigit():
+                    machine = store.get_by_id(int(arg2_value[1:]))
+                elif arg2_value.isdigit():
+                    machine = store.get_by_id(int(arg2_value))
+            if machine:
+                ports = machine_db.load_tcp_ports(machine.id)
+                for p in ports:
+                    results.append((str(p), str(p)))
+        return results
+
+    @staticmethod
+    def _autocomplete_webrecorder_target(prefix, arg2_value=None):
+        from src.machines import domain_db
+        results = []
+        for d in domain_db.list_all():
+            results.append((d, d))
+        for m in store.get_all():
+            results.append((f"{m.ip}  #{m.id}", m.ip))
+        return results
+
+    @staticmethod
+    def _autocomplete_domain_only(prefix):
+        from src.machines import domain_db
+        return list(domain_db.list_all())
+
+    @staticmethod
+    def _autocomplete_shell_noall(prefix):
+        from src.shells import shell_db
+        results = []
+        for s in shell_db.get_all():
+            results.append((f"{s['ip']}  #{s['id']}", s["ip"]))
+        return results
+
+    @staticmethod
+    def _autocomplete_credential_user_noall(prefix):
+        from src.machines.credential_db import load_credentials
+        results = []
+        for c in load_credentials():
+            u = c.get("username", "")
+            if u:
+                results.append(u)
+        return results
+
+    @staticmethod
+    def _autocomplete_hash_noall(prefix):
+        from src.machines.credential_db import load_hashes
+        results = []
+        for h in load_hashes():
+            results.append(h.get("hash", ""))
+        return results
+
+    @staticmethod
+    def _autocomplete_evidence_only(prefix):
+        from src.hsf_paths import evidence_dir
+        results = []
+        try:
+            for name in sorted(os.listdir(str(evidence_dir()))):
+                results.append(name)
+        except OSError:
+            pass
+        return results
+
+    @staticmethod
+    def _autocomplete_webrecorder_ports(prefix, arg2_value=None):
+        results = [("<port>", "")]
+        if arg2_value:
+            from src.machines import machine_db, domain_db
+            machine = store.get(arg2_value)
+            if not machine:
+                if arg2_value.startswith("#") and arg2_value[1:].isdigit():
+                    machine = store.get_by_id(int(arg2_value[1:]))
+                elif arg2_value.isdigit():
+                    machine = store.get_by_id(int(arg2_value))
+            if not machine and domain_db.exists(arg2_value):
+                for entry in domain_db.load_domain_machines(arg2_value):
+                    machine = store.get(entry.get("machine_ip", ""))
+                    if machine:
+                        break
+            if machine:
+                ports = machine_db.load_tcp_ports(machine.id)
+                for p in ports:
+                    results.append((str(p), str(p)))
+        return results
+
+    @staticmethod
+    def _autocomplete_webrecorder_scheme(prefix):
+        return [("http", "http"), ("https", "https")]
+
+    @staticmethod
+    def _autocomplete_domain(prefix):
+        from src.machines import domain_db
+        results = ["all"]
+        results.extend(domain_db.list_all())
+        return results
+
+    @staticmethod
+    def _autocomplete_user(prefix):
+        from src.machines.credential_db import load_users
+        results = ["all"]
+        results.extend(load_users())
+        return results
+
+    @staticmethod
+    def _autocomplete_password(prefix):
+        from src.machines.credential_db import load_passwords
+        results = ["all"]
+        results.extend(load_passwords())
+        return results
+
+    @staticmethod
+    def _autocomplete_hash(prefix):
+        from src.machines.credential_db import load_hashes
+        results = ["all"]
+        for h in load_hashes():
+            results.append(h.get("hash", ""))
+        return results
+
+    @staticmethod
+    def _autocomplete_evidence(prefix):
+        from src.hsf_paths import evidence_dir
+        results = ["all"]
+        try:
+            for name in sorted(os.listdir(str(evidence_dir()))):
+                results.append(name)
+        except OSError:
+            pass
+        return results
+
+    @staticmethod
+    def _autocomplete_shell(prefix):
+        from src.shells import shell_db
+        results = [("all", "all")]
+        for s in shell_db.get_all():
+            results.append((f"{s['ip']}  #{s['id']}", s["ip"]))
+        return results
 
     def _cmd_view(self, args):
         if not args:
@@ -457,18 +825,36 @@ class App(tk.Tk):
             else:
                 self.console.warning("No views available.")
         elif sub == "machine":
-            self._cmd_view_machine(rest)
+            if rest:
+                self._cmd_view_machine(rest)
+            else:
+                self.visualizer.activate_view("machines")
         elif sub == "domain":
-            self._cmd_view_domain(rest)
+            if rest:
+                self._cmd_view_domain(rest)
+            else:
+                self.visualizer.activate_view("domains")
         elif sub == "shell":
-            self._cmd_view_shell(rest)
+            if rest:
+                self._cmd_view_shell(rest)
+            else:
+                self.visualizer.activate_view("shells")
         elif sub == "credential":
-            self._cmd_view_credential(rest)
+            if rest:
+                self._cmd_view_credential(rest)
+            else:
+                self.visualizer.activate_view("credentials")
         elif sub == "hash":
-            self._cmd_view_hash(rest)
+            if rest:
+                self._cmd_view_hash(rest)
+            else:
+                self.visualizer.activate_view("hashes")
         elif sub == "evidence":
-            self._cmd_view_evidence_name(rest)
-        elif sub in ("tools", "machines", "domains", "shells", "credentials", "hashes", "users", "passwords", "evidences"):
+            if rest:
+                self._cmd_view_evidence_name(rest)
+            else:
+                self.visualizer.activate_view("evidences")
+        elif sub in ("tools", "users", "passwords"):
             target = "user-pass" if sub in ("users", "passwords") else sub
             self.visualizer.activate_view(target)
         else:
@@ -537,8 +923,8 @@ class App(tk.Tk):
             self._cmd_use_udpscan(rest)
         elif sub == "whatweb":
             self._cmd_use_whatweb(rest)
-        elif sub == "ftp":
-            self._cmd_ftp(rest)
+        elif sub == "bruteforce":
+            self._cmd_use_bruteforce(rest)
         else:
             self.console.error(f"Unknown tool: {sub}")
 
@@ -546,11 +932,55 @@ class App(tk.Tk):
         if not args:
             self._scan_active()
             return
-        ip = self._resolve_to_ip(args[0])
+        if args[0].lower() == "stop":
+            self._scan_stop()
+            return
+        if args[0].lower() == "ip":
+            if len(args) < 2:
+                self.console.body("Usage: use scanner ip <ip|id|domain>")
+                return
+            target = args[1]
+            ip = self._resolve_to_ip(target)
+            if not ip:
+                self.console.body("Usage: use scanner ip <ip|id|domain>")
+                return
+            self._scan_ip(ip)
+            return
+        target = args[0]
+        iface = self._resolve_interface(target)
+        if iface:
+            if self._active_scanner and self._active_scanner.is_running:
+                self.console.warning("Active scan is already running.")
+                return
+            self._selected_interface = iface
+            src.machines.interface_name = iface[0]
+            src.machines.interface_ip = iface[1]
+            try:
+                self._active_scanner = ActiveScanner(
+                    on_host_callback=self._on_host_discovered,
+                    interface_name=iface[0],
+                )
+                self._active_scanner.start()
+                self.console.info("Active scan started")
+                self.console.body(
+                    f"    Interface: {self._active_scanner.interface_name}  "
+                    f"Network: {self._active_scanner.network_cidr}"
+                )
+            except RuntimeError as e:
+                self.console.error(str(e))
+            return
+        ip = self._resolve_to_ip(target)
         if not ip:
-            self.console.body("Usage: use scanner [<ip|id|domain>]")
+            self.console.body("Usage: use scanner [<iface|ip|id|domain>|stop]")
             return
         self._scan_ip(ip)
+
+    @staticmethod
+    def _resolve_interface(name):
+        addrs = netifaces.ifaddresses(name).get(netifaces.AF_INET)
+        if addrs:
+            return (name, addrs[0]["addr"], addrs[0]["netmask"])
+        return None
 
     def _cmd_use_bannergrab(self, args):
         if not args:
@@ -562,7 +992,68 @@ class App(tk.Tk):
         self._cmd_fuzz(args)
 
     def _cmd_use_recorder(self, args):
-        self._cmd_recorder(args)
+        if not args:
+            self._cmd_recorder([])
+            return
+        if args[0].lower() == "stop":
+            self._cmd_recorder(args)
+            return
+
+        target = args[0]
+        port = None
+        scheme = "http"
+
+        for a in args[1:]:
+            al = a.lower()
+            if al in ("http", "https"):
+                scheme = al
+            else:
+                try:
+                    port = int(a)
+                except ValueError:
+                    pass
+
+        if scheme not in ("http", "https"):
+            scheme = "http"
+
+        self._resolve_to_ip(target)
+
+        from src.tools.webrecorder import find_browsers, Recorder
+        browsers = find_browsers()
+        if not browsers:
+            self.console.error("No supported browser found")
+            return
+        browser_path = list(browsers.keys())[0]
+
+        evidence_name = self._next_project_name()
+
+        url = f"{scheme}://{target}"
+        if port:
+            url = f"{url}:{port}"
+
+        def on_log(text, color=None):
+            c = {"success": "success", "error": "error", "info": "info"}.get(color)
+            if c:
+                getattr(self.console, c)(text.rstrip())
+            else:
+                self.console.body(text.rstrip())
+
+        if self._recorder and self._recorder.is_running():
+            self.console.warning("A webrecorder is already running.")
+            return
+
+        self._recorder = Recorder(url, browser_path, on_log=on_log, evidence_name=evidence_name)
+        self._recorder.start()
+        self.console.info(f"Recorder started: {url}  (evidence: {evidence_name})")
+
+    @staticmethod
+    def _next_project_name():
+        from src.hsf_paths import evidence_dir
+        for i in range(1, 100):
+            name = f"project_{i:02d}"
+            if not os.path.isdir(os.path.join(str(evidence_dir()), name)):
+                return name
+        return "project_01"
 
     def _cmd_use_nslookup(self, args):
         if not args:
@@ -584,6 +1075,317 @@ class App(tk.Tk):
 
     def _cmd_use_whatweb(self, args):
         self._cmd_whatweb(args)
+
+    def _cmd_use_bruteforce(self, args):
+        from .dialogs.bruteforce import BruteforceDialog
+        from src.tools.bruteforce import BruteForceEngine
+        protos = ["ftp", "ssh", "smb", "rdp", "ldap", "mssql", "mysql", "pgsql"]
+        ports = {"ftp": 21, "ssh": 22, "smb": 445, "rdp": 3389, "ldap": 389,
+                 "mssql": 1433, "mysql": 3306, "pgsql": 5432}
+        if not args:
+            self._bruteforce_dlg = BruteforceDialog(self)
+            return
+        if args[0].lower() == "stop":
+            if self._bruteforce_engine:
+                self._bruteforce_engine.stop()
+                self._bruteforce_engine = None
+            if self._bruteforce_dlg:
+                self._bruteforce_dlg._stop()
+            self.console.info("Bruteforce stopped")
+            return
+        proto = args[0].lower()
+        if proto not in protos:
+            self.console.body("Usage: use bruteforce [ftp|ssh|smb|rdp|ldap|mssql|mysql|pgsql] [ip|id|domain]")
+            return
+        if len(args) < 2:
+            dlg = BruteforceDialog(self)
+            self._bruteforce_dlg = dlg
+            dlg.select_tab(proto)
+            return
+        target = args[1]
+        ip = self._resolve_to_ip(target)
+        if not ip:
+            self.console.warning(f"No machine found for: {target}")
+            return
+
+        from src.machines.credential_db import load_users, load_passwords
+        from src.hsf_paths import lst_dir
+
+        userlist = None
+        users = None
+        if len(args) > 2 and args[2].lower() != "users":
+            path = os.path.join(str(lst_dir()), args[2])
+            if os.path.isfile(path):
+                userlist = path
+        if not userlist:
+            users = load_users()
+
+        passlist = None
+        passwords = None
+        if len(args) > 3 and args[3].lower() != "passwords":
+            path = os.path.join(str(lst_dir()), args[3])
+            if os.path.isfile(path):
+                passlist = path
+        if not passlist:
+            passwords = load_passwords()
+
+        if not users and not userlist:
+            self.console.warning("No users available")
+            return
+
+        def on_result(text, color=None):
+            stripped = text.strip()
+            if stripped.startswith("[+] "):
+                stripped = stripped[4:]
+            elif stripped.startswith("[*] "):
+                stripped = stripped[4:]
+            elif stripped.startswith("[!] "):
+                stripped = stripped[4:]
+            c = {"success": "success", "error": "error", "info": "info"}.get(color)
+            if c:
+                getattr(self.console, c)(stripped.rstrip())
+            else:
+                self.console.body(stripped.rstrip())
+        def on_found(p, tgt, port, user, pwd):
+            from src.machines.credential_db import save_credential, save_user, load_credentials
+            for c in load_credentials():
+                if c.get("username") == user and c.get("password") == pwd:
+                    return
+            machine = store.get(tgt)
+            dom = machine.domain if machine else ""
+            save_credential(user, pwd, domain=dom, password_origin=f"{p} bruteforce")
+            save_user(user)
+
+        user_desc = userlist or f"{len(users)} from inventory" if users else "none"
+        pass_desc = passlist or f"{len(passwords)} from inventory" if passwords else "none"
+        self.console.info(f"Starting {proto.upper()} brute force against {ip}:{ports[proto]}...")
+        self.console.info(f"Users: {user_desc}  Passwords: {pass_desc}")
+
+        engine = BruteForceEngine(
+            target=ip, port=ports[proto], protocol=proto,
+            userlist=userlist, passlist=passlist,
+            users=users, passwords=passwords,
+            on_result=on_result,
+            on_found=on_found,
+        )
+        self._bruteforce_engine = engine
+        engine.start()
+
+    def _cmd_connect(self, args):
+        if not args:
+            self.console.body("Usage: connect <ftp|sftp|ssh|winrm> ...")
+            return
+        sub = args[0].lower()
+        rest = args[1:]
+        if sub == "ftp":
+            self._cmd_connect_ftp(rest)
+        elif sub == "sftp":
+            self._cmd_connect_sftp(rest)
+        elif sub == "ssh":
+            self._cmd_connect_ssh(rest)
+        elif sub == "winrm":
+            self._cmd_connect_winrm(rest)
+        else:
+            self.console.error(f"Unknown protocol: {sub}")
+
+    def _cmd_connect_ftp(self, args):
+        from .dialogs.remote_access import RemoteAccessDialog
+        if not args:
+            dlg = RemoteAccessDialog(self)
+            dlg._notebook.select(0)
+            self.visualizer.activate_view("shells")
+            return
+        target = args[0]
+        ip = self._resolve_target_ip(target)
+        if not ip:
+            self.console.body("Usage: connect ftp <ip|id> [credential] [port]")
+            return
+        port = 21
+        cred_user = "anonymous"
+        cred_pass = ""
+        cred_idx = 1
+        if len(args) >= 2 and args[1] != "anonymous":
+            cred_user = args[1]
+            cred_idx = 2
+        elif len(args) >= 2:
+            cred_idx = 2
+        if len(args) > cred_idx:
+            try:
+                port = int(args[cred_idx])
+                if port < 1 or port > 65535:
+                    self.console.body("Usage: connect ftp <ip|id> [credential] [port]")
+                    return
+            except ValueError:
+                self.console.body("Usage: connect ftp <ip|id> [credential] [port]")
+                return
+        if cred_user != "anonymous":
+            found = False
+            from src.machines import credential_db
+            for c in credential_db.load_credentials():
+                if c.get("username") == cred_user:
+                    cred_pass = c.get("password") or ""
+                    found = True
+                    break
+            if not found:
+                self.console.warning(f"No credential found for: {cred_user}")
+                return
+        self.console.info(f"Connecting FTP to {ip}:{port}...")
+        threading.Thread(target=self._run_ftp_connect, args=(ip, port, cred_user, cred_pass), daemon=True).start()
+        self.visualizer.activate_view("shells")
+
+    def _cmd_connect_sftp(self, args):
+        from .dialogs.remote_access import RemoteAccessDialog
+        if not args:
+            dlg = RemoteAccessDialog(self)
+            dlg._notebook.select(0)
+            dlg._ftp_proto.set("sftp")
+            self.visualizer.activate_view("shells")
+            return
+        target = args[0]
+        ip = self._resolve_target_ip(target)
+        if not ip:
+            self.console.body("Usage: connect sftp <ip|id> [credential] [port]")
+            return
+        port = 22
+        cred_user = "anonymous"
+        cred_pass = ""
+        cred_idx = 1
+        if len(args) >= 2 and args[1] != "anonymous":
+            cred_user = args[1]
+            cred_idx = 2
+        elif len(args) >= 2:
+            cred_idx = 2
+        if len(args) > cred_idx:
+            try:
+                port = int(args[cred_idx])
+                if port < 1 or port > 65535:
+                    self.console.body("Usage: connect sftp <ip|id> [credential] [port]")
+                    return
+            except ValueError:
+                self.console.body("Usage: connect sftp <ip|id> [credential] [port]")
+                return
+        if cred_user != "anonymous":
+            found = False
+            from src.machines import credential_db
+            for c in credential_db.load_credentials():
+                if c.get("username") == cred_user:
+                    cred_pass = c.get("password") or ""
+                    found = True
+                    break
+            if not found:
+                self.console.warning(f"No credential found for: {cred_user}")
+                return
+        self.console.info(f"Connecting SFTP to {ip}:{port}...")
+        from src.shells.sftp_shell import SFTPConnectionThread
+        def on_connected(sid):
+            self.console.success(f"SFTP session #{sid} to {ip}:{port}")
+        def on_error(msg):
+            self.console.error(f"SFTP failed: {msg}")
+        t = SFTPConnectionThread(ip, port, cred_user, cred_pass, on_connected=on_connected, on_error=on_error)
+        t.start()
+        self.visualizer.activate_view("shells")
+
+    def _cmd_connect_ssh(self, args):
+        from .dialogs.remote_access import RemoteAccessDialog
+        if not args:
+            dlg = RemoteAccessDialog(self)
+            dlg._notebook.select(1)
+            self.visualizer.activate_view("shells")
+            return
+        target = args[0]
+        ip = self._resolve_target_ip(target)
+        if not ip:
+            self.console.body("Usage: connect ssh <ip|id> <credential> [port]")
+            return
+        if len(args) < 2:
+            self.console.body("Usage: connect ssh <ip|id> <credential> [port]")
+            return
+        cred_user = args[1]
+        port = 22
+        if len(args) >= 3:
+            try:
+                port = int(args[2])
+                if port < 1 or port > 65535:
+                    self.console.body("Usage: connect ssh <ip|id> <credential> [port]")
+                    return
+            except ValueError:
+                self.console.body("Usage: connect ssh <ip|id> <credential> [port]")
+                return
+        cred_pass = ""
+        from src.machines import credential_db
+        for c in credential_db.load_credentials():
+            if c.get("username") == cred_user:
+                cred_pass = c.get("password") or ""
+                break
+        else:
+            self.console.warning(f"No credential found for: {cred_user}")
+            return
+        self.console.info(f"Connecting SSH to {ip}:{port}...")
+        from src.shells.ssh_shell import SSHConnectionThread
+        def on_connected(sid):
+            self.console.success(f"SSH session #{sid} to {ip}:{port}")
+        def on_error(msg):
+            self.console.error(f"SSH failed: {msg}")
+        t = SSHConnectionThread(ip, port, cred_user, cred_pass, on_connected=on_connected, on_error=on_error)
+        t.start()
+        self.visualizer.activate_view("shells")
+
+    def _cmd_connect_winrm(self, args):
+        from .dialogs.remote_access import RemoteAccessDialog
+        if not args:
+            dlg = RemoteAccessDialog(self)
+            dlg._notebook.select(2)
+            self.visualizer.activate_view("shells")
+            return
+        target = args[0]
+        ip = self._resolve_target_ip(target)
+        if not ip:
+            self.console.body("Usage: connect winrm <ip|id> <credential> [port]")
+            return
+        if len(args) < 2:
+            self.console.body("Usage: connect winrm <ip|id> <credential> [port]")
+            return
+        cred_user = args[1]
+        port = 5985
+        if len(args) >= 3:
+            try:
+                port = int(args[2])
+                if port < 1 or port > 65535:
+                    self.console.body("Usage: connect winrm <ip|id> <credential> [port]")
+                    return
+            except ValueError:
+                self.console.body("Usage: connect winrm <ip|id> <credential> [port]")
+                return
+        cred_pass = ""
+        cred_hash = ""
+        from src.machines import credential_db
+        for c in credential_db.load_credentials():
+            if c.get("username") == cred_user:
+                cred_pass = c.get("password") or ""
+                cred_hash = c.get("hash_nt") or ""
+                break
+        else:
+            self.console.warning(f"No credential found for: {cred_user}")
+            return
+        self.console.info(f"Connecting WinRM to {ip}:{port}...")
+        from src.shells.winrm_shell import WinRMConnectionThread
+        def on_connected(sid):
+            self.console.success(f"WinRM session #{sid} to {ip}:{port}")
+        def on_error(msg):
+            self.console.error(f"WinRM failed: {msg}")
+        t = WinRMConnectionThread(ip, port, cred_user, cred_pass, hash_nt=cred_hash, on_connected=on_connected, on_error=on_error)
+        t.start()
+        self.visualizer.activate_view("shells")
+
+    def _resolve_target_ip(self, target):
+        if re.match(r"^\d+\.\d+\.\d+\.\d+$", target):
+            return target
+        if re.match(r"^\d+$", target):
+            mid = int(target)
+            for m in store.get_all():
+                if m.id == mid:
+                    return m.ip
+        return None
 
     def _cmd_view_machine(self, args):
         if not args:
@@ -735,6 +1537,8 @@ class App(tk.Tk):
             self._cmd_fuzz([])
         elif action == "webrecorder":
             self._cmd_recorder([])
+        elif action == "bruteforce":
+            self._cmd_use_bruteforce([])
 
     def _open_domain_view(self, domain):
         self._cmd_view_domain([domain])
@@ -830,7 +1634,7 @@ class App(tk.Tk):
 
     def _cmd_stop(self, args):
         if not args:
-            self.console.body("Usage: stop <shells-listener|mdns-listener>")
+            self.console.body("Usage: stop <shells-listener|mdns-listener|scanner>")
             return
         sub = args[0].lower()
         if sub == "shells-listener":
@@ -847,6 +1651,43 @@ class App(tk.Tk):
                 self.console.info("Passive mDNS scanner stopped")
             else:
                 self.console.warning("Passive mDNS scanner is not running")
+        elif sub == "scanner":
+            self._scan_stop()
+        elif sub == "bruteforce":
+            if self._bruteforce_engine:
+                self._bruteforce_engine.stop()
+                self._bruteforce_engine = None
+            if self._bruteforce_dlg:
+                self._bruteforce_dlg._stop()
+            self.console.info("Bruteforce stopped")
+        elif sub == "fuzzer":
+            if self._fuzz_dlg:
+                self._fuzz_dlg._stop()
+            self.console.info("Fuzzer stopped")
+        elif sub == "webrecorder":
+            if self._recorder and self._recorder.is_running():
+                self._recorder.stop()
+                self._recorder.kill_browser()
+                self._recorder = None
+                self.console.info("Recorder stopped")
+            else:
+                self.console.warning("No webrecorder is running")
+        elif sub == "tcpscan":
+            if self._tcpscan_running:
+                self._tcpscan_running = False
+                if self._tcpscan_process:
+                    self._tcpscan_process.kill()
+                self.console.info("TCP scan stopped")
+            else:
+                self.console.warning("No tcp scan is running")
+        elif sub == "udpscan":
+            if self._udpscan_running:
+                self._udpscan_running = False
+                self.console.info("UDP scan stopped")
+            else:
+                self.console.warning("No udp scan is running")
+        elif sub == "whatweb":
+            self.console.info("whatweb scan finished")
         else:
             self.console.error(f"Unknown stop target: {sub}")
 
@@ -1401,6 +2242,9 @@ class App(tk.Tk):
             else:
                 self.console.body("Usage: whatweb <ip|id|domain> [port]")
                 return
+        if args[0].lower() == "stop":
+            self.console.info("whatweb scan finished")
+            return
         target = args[0]
         port = 80
         if len(args) >= 2:
@@ -1688,9 +2532,23 @@ class App(tk.Tk):
             return
 
         existing = store.get(ip)
-        machine = store.add_or_update(ip=ip, hostname=hostname, mac=mac, method=method)
+        if existing is None and hostname:
+            existing = store.get_by_hostname(hostname)
 
-        _dbg(f"[discovery] ip={ip} hostname={hostname} method={method} is_new={existing is None} prev_type={existing.device_type if existing else 'N/A'}")
+        is_new = existing is None
+
+        if existing is not None:
+            existing.update(hostname=hostname, mac=mac, method=method)
+            is_ipv6 = ":" in ip
+            if is_ipv6:
+                if not existing.ipv6:
+                    existing.ipv6 = ip
+            machine_db.save_machine_info(existing)
+            machine = existing
+            _dbg(f"[discovery] ip={ip} hostname={hostname} method={method} merged into #{existing.id}" + (" (new)" if is_new else ""))
+        else:
+            machine = store.add_or_update(ip=ip, hostname=hostname, mac=mac, method=method)
+            _dbg(f"[discovery] ip={ip} hostname={hostname} method={method} new machine #{machine.id}")
 
         if ip in self._identifying_ips:
             return
@@ -2049,16 +2907,49 @@ class App(tk.Tk):
         self.console.success("Password added")
 
     def _cmd_add_hash(self, args):
+        if not args:
+            from .views import HashAddDialog
+            dialog = HashAddDialog(self)
+            if dialog.result:
+                self.console.success("Hash added")
+            return
         if len(args) < 2:
             self.console.body("Usage: add hash <type> <hash>")
             return
+        hash_type = args[0]
+        resolved = self._resolve_hash_type(hash_type)
+        if resolved:
+            hash_type = resolved
         from src.machines.credential_db import save_hash_entry
-        hid = save_hash_entry(args[0], args[1], origin="manual")
+        hid = save_hash_entry(hash_type, args[1], origin="manual")
         self.console.success(f"Hash #{hid} added")
+
+    @staticmethod
+    def _resolve_hash_type(type_str):
+        if not type_str.isdigit():
+            return None
+        mode = int(type_str)
+        import sqlite3
+        from src.hsf_paths import hashcat_db
+        try:
+            with sqlite3.connect(str(hashcat_db())) as conn:
+                row = conn.execute(
+                    "SELECT \"Hash-Name\" FROM DefaultMode WHERE \"Hash-Mode\" = ?", (mode,)
+                ).fetchone()
+            if row and row[0]:
+                return row[0]
+        except (sqlite3.DatabaseError, sqlite3.OperationalError):
+            pass
+        return None
 
     def _cmd_fuzz(self, args):
         from .dialogs.fuzz import FuzzDialog
-        FuzzDialog(self)
+        if args and args[0].lower() == "stop":
+            if self._fuzz_dlg:
+                self._fuzz_dlg._stop()
+            self.console.info("Fuzzer stopped")
+            return
+        self._fuzz_dlg = FuzzDialog(self)
 
     def _cmd_ftp(self, args):
         if not args:

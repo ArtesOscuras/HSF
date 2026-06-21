@@ -126,35 +126,34 @@ class _WordlistSection:
             fg=FG, bg=BG,
         ).grid(row=row, column=0, sticky="nw", padx=15, pady=(10, 5))
 
-        frame = tk.Frame(parent, bg=BG_WIDGET)
-        frame.grid(row=row, column=1, sticky="nsew", padx=15, pady=(10, 5))
-        frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(0, weight=1)
+        self._path = tk.StringVar()
 
-        self._listbox = tk.Listbox(
-            frame, bg=BG_WIDGET, fg=FG,
-            selectbackground=SEL_BG, selectforeground=FG,
-            font=fonts.view_font(11), borderwidth=0, highlightthickness=0,
-            activestyle="none", exportselection=False, height=3,
-        )
-        self._listbox.grid(row=0, column=0, sticky="nsew")
+        path_frame = tk.Frame(parent, bg=BG)
+        path_frame.grid(row=row, column=1, sticky="ew", padx=15, pady=(10, 5))
 
-        self._files = []
-        from src.hsf_paths import lst_dir as _lst_dir
-        lst_dir = str(_lst_dir())
-        if os.path.isdir(lst_dir):
-            for fname in sorted(os.listdir(lst_dir)):
-                if os.path.isfile(os.path.join(lst_dir, fname)):
-                    self._files.append(os.path.join(lst_dir, fname))
-                    self._listbox.insert(tk.END, f"  {fname}")
-        if self._files:
-            self._listbox.selection_set(0)
+        path_label = tk.Label(path_frame, textvariable=self._path, fg=FG, bg=BG,
+                              font=fonts.view_font(9), anchor="w")
+        path_label.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+
+        browse_btn = tk.Label(path_frame, text="  Browse...  ", bg="#222222", fg=FG,
+                              font=fonts.view_font(10), relief=tk.RAISED, bd=1, padx=10, pady=4)
+        browse_btn.pack(side=tk.LEFT)
+        browse_btn.bind("<Button-1>", lambda e: self._browse())
+        browse_btn.bind("<Enter>", lambda e: browse_btn.config(bg="#333333"))
+        browse_btn.bind("<Leave>", lambda e: browse_btn.config(bg="#222222"))
+
+    def _browse(self):
+        from tkinter import filedialog
+        from src.hsf_paths import lst_dir
+        f = filedialog.askopenfilename(
+            initialdir=str(lst_dir()),
+            title="Select wordlist",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+        if f:
+            self._path.set(f)
 
     def selected(self):
-        sel = self._listbox.curselection()
-        if not sel:
-            return None
-        return self._files[sel[0]]
+        return self._path.get() or None
 
 
 class FuzzDialog(tk.Toplevel):

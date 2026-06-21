@@ -43,6 +43,7 @@ class Machine:
     def __init__(self, ip, hostname="", mac="", method=""):
         self.id = 0
         self.ip = ip
+        self.ipv6 = ""
         self.hostname = hostname
         self.mac = mac
         self.device_type = ""
@@ -66,6 +67,7 @@ class Machine:
         return {
             "id": self.id,
             "ip": self.ip,
+            "ipv6": self.ipv6,
             "hostname": self.hostname,
             "mac": self.mac,
             "device_type": self.device_type,
@@ -95,6 +97,20 @@ class MachineStore:
 
     def get(self, ip):
         return self._machines.get(ip)
+
+    def get_by_hostname(self, hostname):
+        if not hostname:
+            return None
+        for m in self._machines.values():
+            if m.hostname.lower() == hostname.lower():
+                return m
+        return None
+
+    def get_by_id(self, mid):
+        for m in self._machines.values():
+            if m.id == mid:
+                return m
+        return None
 
     def get_all(self):
         return list(self._machines.values())
@@ -126,6 +142,7 @@ class MachineStore:
                     CREATE TABLE IF NOT EXISTS machines (
                         id INTEGER PRIMARY KEY,
                         ip TEXT UNIQUE,
+                        ipv6 TEXT,
                         hostname TEXT,
                         mac TEXT,
                         device_type TEXT,
@@ -137,15 +154,20 @@ class MachineStore:
                         last_seen TEXT
                     )
                 """)
+                cur = conn.execute("PRAGMA table_info(machines)")
+                cols = [r[1] for r in cur.fetchall()]
+                if "ipv6" not in cols:
+                    conn.execute("ALTER TABLE machines ADD COLUMN ipv6 TEXT")
                 conn.execute("DELETE FROM machines")
                 for m in self._machines.values():
                     conn.execute(
                         """INSERT OR REPLACE INTO machines
-                           (id, ip, hostname, mac, device_type, model, os, domain, methods, first_seen, last_seen)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                           (id, ip, ipv6, hostname, mac, device_type, model, os, domain, methods, first_seen, last_seen)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                         (
                             m.id,
                             m.ip,
+                            m.ipv6,
                             m.hostname,
                             m.mac,
                             m.device_type,
@@ -175,7 +197,7 @@ class MachineStore:
                     self._next_id = 1
                     return
                 rows = conn.execute(
-                    "SELECT id, ip, hostname, mac, device_type, model, os, domain, methods, first_seen, last_seen FROM machines"
+                    "SELECT id, ip, ipv6, hostname, mac, device_type, model, os, domain, methods, first_seen, last_seen FROM machines"
                 ).fetchall()
         except (sqlite3.DatabaseError, sqlite3.OperationalError):
             _dbg("[store.load] db error")
@@ -183,7 +205,7 @@ class MachineStore:
 
         max_id = 0
         for row in rows:
-            mid, ip, hostname, mac, device_type, model, os_val, domain_val, methods_json, first_seen, last_seen = row
+            mid, ip, ipv6, hostname, mac, device_type, model, os_val, domain_val, methods_json, first_seen, last_seen = row
             m = Machine(ip, hostname=hostname, mac=mac)
             try:
                 m.id = int(mid)
@@ -191,6 +213,7 @@ class MachineStore:
                 pass
             if m.id > max_id:
                 max_id = m.id
+            m.ipv6 = ipv6 or ""
             m.device_type = device_type
             m.model = model or ""
             m.os = os_val or ""

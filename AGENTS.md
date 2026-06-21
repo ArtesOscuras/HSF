@@ -65,173 +65,35 @@ When modifying navigation behavior:
 
 ---
 
-## Command System
+### Mouse and Clickable Elements
 
-The console provides a structured command system with subcommand routing, argument autocomplete, and help sections. All commands are registered imperatively via two methods on the `Console` instance.
+HSF uses a **hover-only** interaction model. The mouse cursor never changes (`cursor` is always the system default, never `"hand2"`). Clickability is communicated through visual hover effects:
 
-### Registration
-
-Commands are registered in `src/gui/app.py` → `_register_commands()` and in `src/gui/console.py` → `Console.__init__()` (built-in commands).
-
-```python
-# Register a command with subcommands (autocomplete popup)
-self.console.register_command("delete", self._cmd_delete, "Delete stored data")
-self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash",
-                                          "machine", "domain", "user", "password", "shell"])
-
-# Register a command without subcommands
-self.console.register_command("help", self._cmd_help, "Show this help message")
-```
-
-**Key methods:**
-- `register_command(name, handler, help_text)` — registers a command. `handler` receives `(args: list[str])`.
-- `set_subcommands(name, items)` — registers the argument-1 autocomplete list for a command. Items are simple strings.
-- `add_help_section(title, items)` — adds a documentation-only section to the `help` output.
-
-### Argument Parsing
-
-In `_execute(raw)` (console.py), the input line is split by whitespace: `cmd = parts[0].lower()`, `args = parts[1:]`. Each handler is responsible for its own validation and routing. For commands with subcommands, a common pattern is:
+**Clickable text** (nav links, machine names, domain links, hash types, etc.):
+- Normal state: no underline, `fg="#ffffff"` (bright) or `fg="#888888"` (muted)
+- Hover state: **underline** + slightly lighter color
+- Pattern: `<Enter>` sets `font=(..., "underline")`, `<Leave>` restores
 
 ```python
-def _cmd_delete(self, args):
-    if not args:
-        self.console.body("Usage: delete <...>")
-        return
-    sub = args[0].lower()
-    rest = args[1:]
-    if sub == "dbs":
-        self._cmd_delete_dbs(rest)
-    elif sub == "credential":
-        self._cmd_delete_credential(rest)
-    ...
+btn.bind("<Enter>", lambda e: btn.config(font=fonts.view_font_bold_under(11)))
+btn.bind("<Leave>", lambda e: btn.config(font=fonts.view_font_bold(11)))
 ```
 
-### Target Resolution
+**Buttons** (clickable Labels styled as buttons):
+- Normal state: `bg="#222222"`
+- Hover state: `bg="#333333"` (subtle lightening)
+- Pattern: `<Enter>` sets `bg="#333333"`, `<Leave>` restores `bg="#222222"`
 
-Many handlers accept targets that can be an IP, a numeric machine ID, or a domain name. A helper `_resolve_target(target)` in app.py returns `(ip, machine)` by checking:
+```python
+btn.bind("<Enter>", lambda e: btn.config(bg="#333333"))
+btn.bind("<Leave>", lambda e: btn.config(bg="#222222"))
+```
 
-1. IP regex → returns target as IP.
-2. Numeric ID → looks up `store.get_all()` for matching machine ID.
-3. IP lookup → `store.get(target)`.
-4. Domain lookup → `domain_db.list_all()` for matching domain name.
-
-Use `_resolve_to_ip(target)` when DNS resolution should be attempted for unknown targets (e.g., `use scanner <domain>` adds the domain+IP to the inventory via `socket.getaddrinfo`).
-
-### Autocomplete System
-
-Defined in `src/gui/console.py`. Supports **two-stage autocomplete**:
-
-- **Command popup** — shows matching command names as the user types. Positioned above the console separator, growing upward.
-- **Argument popup** — appears to the right of the command popup when the user types a space after a command that has registered subcommands. Filters subcommands by the typed prefix. Uses `set_subcommands()` data.
-
-Key methods:
-- `_filter_autocomplete()` — debounced (80ms), handles two-token input.
-- `_show_autocomplete(matches)` / `_show_or_update(matches)` — create/update the command popup.
-- `_show_arg_popup(items)` — create/update the argument popup (in-place, no blink).
-- `_on_tab()` — cycles selections or auto-fills when only one match.
-
-Popup dimensions are calculated using `tkfont.Font` metrics (`f.measure()` for width, `f.metrics("linespace")` for height), never `update_idletasks()`.
-
-### Command Taxonomy
-
-#### `add` — Add items to the inventory
-
-Defined in `src/gui/app.py` → `_cmd_add()`.
-
-| Subcommand | Args | Behaviour |
-|---|---|---|
-| `machine` | `<ip>` | Validates IP format, adds to store |
-| `domain` | `<domain>` | Resolves DNS, creates machine if needed, saves domain |
-| `credential` | `<username> <password\|nt_hash>` | Detects NT hash (32 hex chars) vs password |
-| `user` | `<username>` | Adds to user list |
-| `password` | `<password>` | Adds to password list |
-| `hash` | `<type> <hash>` | Adds hash entry |
-
-#### `delete` — Delete items or groups
-
-Defined in `src/gui/app.py` → `_cmd_delete()`.
-
-| Subcommand | Args | `all` support? | Behaviour |
-|---|---|---|---|
-| `dbs` | — | N/A | Wipes all databases |
-| `credential` | `<username\|all>` | Yes | Deletes matching credential or all |
-| `evidence` | `<name\|all>` | Yes | Deletes one evidence session or all |
-| `hash` | `<hash\|id\|all>` | Yes | Deletes by hash value, ID, or all |
-| `machine` | `<ip\|id\|all>` | Yes | Deletes one machine or all |
-| `domain` | `<domain\|all>` | Yes | Deletes one domain or all |
-| `user` | `<username\|all>` | Yes | Deletes one user or all |
-| `password` | `<password\|all>` | Yes | Deletes one password or all |
-| `shell` | `<ip\|id\|all>` | Yes | Closes one shell session or all |
-
-All item-level subcommands try **specific value first, then numeric ID fallback** (e.g., `delete machine` tries IP lookup, then ID lookup). `all` deletes everything of that type.
-
-#### `view` — Switch views
-
-Defined in `src/gui/app.py` → `_cmd_view()`.
-
-| Subcommand | Args | Behaviour |
-|---|---|---|
-| `list` | — | Lists all available views |
-| `tools`, `machines`, `domains`, `shells`, `credentials`, `hashes`, `evidences` | — | Activate the list view |
-| `users`, `passwords` | — | Activate `user-pass` view |
-| `machine` | `<id\|ip>` | Open machine detail view (IP-first, then ID fallback) |
-| `domain` | `<name>` | Open domain detail view |
-| `shell` | `<id\|ip>` | Open shell detail view (IP-first, then ID fallback) |
-| `credential` | `<username>` | Open credential detail view by username |
-| `hash` | `<hash\|id>` | Open hash detail view by hash value or ID |
-| `evidence` | `<name>` | Open evidence detail view |
-
-#### `use` — Run tools
-
-Defined in `src/gui/app.py` → `_cmd_use()`. Replaces old standalone commands (`scan`, `tcpscan`, `whatweb`, `bannergrab`, `ping`, `nslookup`, `fuzz`, `webrecorder`, `ftp`).
-
-| Subcommand | Args | Behaviour |
-|---|---|---|
-| `scanner` | `[ip\|id\|domain]` | Active scan. No args → opens scan dialog |
-| `bannergrab` | `<ip\|id> <port>` | Multi-probe banner grab |
-| `fuzzer` | — | Opens Fuzz dialog |
-| `webrecorder` | — | Opens WebRecorder dialog |
-| `nslookup` | `<ip\|id\|domain>` | DNS lookup |
-| `ping` | `<ip\|id\|domain>` | ICMP or system ping |
-| `tcpscan` | `[ip\|id]` | TCP port scan (opens dialog if no args) |
-| `udpscan` | `[ip\|id]` | UDP port scan (opens dialog if no args) |
-| `whatweb` | `<ip\|id\|domain> [port]` | Web technology scan |
-| `ftp` | `<...>` | FTP/SFTP connection |
-
-#### `start` / `stop` — Service listeners
-
-Defined in `src/gui/app.py` → `_cmd_start()` / `_cmd_stop()`.
-
-| Command | Subcommand | Args | Behaviour |
-|---|---|---|---|
-| `start` | `shells-listener` | `[port]` | Start reverse shell listener (default 443/8443) |
-| `start` | `mdns-listener` | — | Start passive mDNS scanner |
-| `stop` | `shells-listener` | — | Stop reverse shell listener |
-| `stop` | `mdns-listener` | — | Stop passive mDNS scanner |
-
-### Adding a New Command
-
-1. **Add the handler** in `src/gui/app.py`:
-   ```python
-   def _cmd_foo(self, args):
-       if not args:
-           self.console.body("Usage: foo <bar|baz>")
-           return
-       sub = args[0].lower()
-       rest = args[1:]
-       if sub == "bar":
-           ...
-   ```
-
-2. **Register it** in `_register_commands()`:
-   ```python
-   self.console.register_command("foo", self._cmd_foo, "Description")
-   self.console.set_subcommands("foo", ["bar", "baz"])
-   ```
-
-3. **If the command changes views**, update `add_help_section("Views", ...)`.
-
-4. **Test** with `pipx install --force . ; hsf ; pipx uninstall hsf`.
+**Rules:**
+- Never set `cursor="hand2"` or any custom cursor.
+- Do not change font weight on hover (bold stays bold, regular stays regular).
+- For underlined hover on bold text, use `view_font_bold_under(size)` which preserves `"bold"` weight while adding underline.
+- All text widgets (non-clickable) set `cursor=""` explicitly to prevent I-beam on disabled widgets.
 
 ---
 
