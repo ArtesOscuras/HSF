@@ -121,15 +121,15 @@ class UserPassView(BaseView):
             btn_frame2,
             text="  Generate credentials  ",
             bg="#222222", fg=BRIGHT,
-            font=fonts.view_font(12),
+            font=fonts.view_font(10),
             relief=tk.RAISED, bd=1,
-            padx=15, pady=8,
+            padx=15, pady=6,
         )
         gen_btn.pack(side=tk.LEFT, padx=(0, 10))
 
         back_btn = tk.Label(
             btn_frame2, text="  \u2190 Back  ", bg="#222222", fg=BRIGHT,
-            font=fonts.view_font(12), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         back_btn.pack(side=tk.LEFT)

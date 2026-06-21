@@ -200,7 +200,7 @@ class ShellDetailView(BaseView):
             bar, text="  Record evidence  ",
             bg="#222222", fg=BRIGHT,
             font=fonts.view_font(10), relief=tk.RAISED, bd=1,
-            padx=10, pady=4, cursor="",
+            padx=15, pady=6, cursor="",
         )
         self._record_btn.pack(side=tk.RIGHT)
         self._record_btn.bind("<Button-1>", lambda e: self._on_record())

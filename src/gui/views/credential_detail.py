@@ -165,7 +165,7 @@ class CredentialDetailView(BaseView):
 
         edit_btn = tk.Label(
             btn_frame, text="  Edit  ", bg="#222222", fg="#ffffff",
-            font=fonts.view_font(12), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         edit_btn.pack(side=tk.LEFT, padx=(0, 10))
@@ -175,7 +175,7 @@ class CredentialDetailView(BaseView):
 
         back_btn = tk.Label(
             btn_frame, text="  \u2190 Back  ", bg="#222222", fg="#ffffff",
-            font=fonts.view_font(12), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         back_btn.pack(side=tk.LEFT)

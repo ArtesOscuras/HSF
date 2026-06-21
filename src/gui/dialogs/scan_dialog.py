@@ -128,8 +128,8 @@ class ScanDialog(tk.Toplevel):
 
         select_btn = tk.Label(
             frame, text="  Scan  ", bg="#222222", fg="#ffffff",
-            font=fonts.view_font(11), relief=tk.RAISED, bd=1,
-            padx=20, pady=6, cursor="",
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6, cursor="",
         )
         select_btn.grid(row=2, column=0, sticky="e", padx=15, pady=(5, 8))
         select_btn.bind("<Button-1>", lambda e: self._select_scan())
@@ -204,8 +204,8 @@ class ScanDialog(tk.Toplevel):
 
         select_btn = tk.Label(
             frame, text="  Scan  ", bg="#222222", fg="#ffffff",
-            font=fonts.view_font(11), relief=tk.RAISED, bd=1,
-            padx=20, pady=6, cursor="",
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6, cursor="",
         )
         select_btn.grid(row=2, column=0, sticky="e", padx=15, pady=(5, 8))
         select_btn.bind("<Button-1>", lambda e: self._select_port(action, machine_list, lb))
@@ -273,8 +273,8 @@ class ScanDialog(tk.Toplevel):
 
         select_btn = tk.Label(
             frame, text="  Scan  ", bg="#222222", fg="#ffffff",
-            font=fonts.view_font(11), relief=tk.RAISED, bd=1,
-            padx=20, pady=6, cursor="",
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6, cursor="",
         )
         select_btn.grid(row=2, column=0, sticky="e", padx=15, pady=(5, 8))
         select_btn.bind("<Button-1>", lambda e: self._select_banner(machine_list, lb, banner_port_var))

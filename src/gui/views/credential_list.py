@@ -71,14 +71,14 @@ class CredentialListView(BaseView):
 
         usr_btn = tk.Label(
             btn_frame, text="  Users / Passwords  ", bg="#222222", fg=BRIGHT,
-            font=fonts.view_font(12), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         usr_btn.pack(side=tk.LEFT, padx=(0, 10))
 
         hash_btn = tk.Label(
             btn_frame, text="  Hashes  ", bg="#222222", fg=BRIGHT,
-            font=fonts.view_font(12), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         hash_btn.pack(side=tk.LEFT)

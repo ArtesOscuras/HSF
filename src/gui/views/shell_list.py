@@ -79,7 +79,7 @@ class ShellListView(BaseView):
 
         remote_btn = tk.Label(
             btn_frame, text="  New remote connection  ", bg="#222222", fg="#ffffff",
-            font=fonts.view_font(12), relief=tk.RAISED, bd=1,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
         remote_btn.pack()
