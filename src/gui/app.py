@@ -8,7 +8,7 @@ import threading
 import time
 import tkinter as tk
 from concurrent.futures import ThreadPoolExecutor, as_completed
-import netifaces
+from src.network_iface import interfaces, ifaddresses, AF_INET
 from . import fonts
 from .console import Console
 from .visualizer import Visualizer
@@ -588,10 +588,10 @@ class App(tk.Tk):
     @staticmethod
     def _autocomplete_use_scanner(prefix):
         results = [("stop", "stop"), ("ip", "ip"), ("<ip>", "")]
-        for iface in netifaces.interfaces():
+        for iface in interfaces():
             if iface == "lo0":
                 continue
-            addrs = netifaces.ifaddresses(iface).get(netifaces.AF_INET)
+            addrs = ifaddresses(iface).get(AF_INET)
             if addrs:
                 results.append((iface, iface))
         return results
@@ -977,7 +977,7 @@ class App(tk.Tk):
 
     @staticmethod
     def _resolve_interface(name):
-        addrs = netifaces.ifaddresses(name).get(netifaces.AF_INET)
+        addrs = ifaddresses(name).get(AF_INET)
         if addrs:
             return (name, addrs[0]["addr"], addrs[0]["netmask"])
         return None
@@ -1742,7 +1742,7 @@ class App(tk.Tk):
     def _scan_iface(self, args):
         if args:
             name = args[0]
-            addrs = netifaces.ifaddresses(name).get(netifaces.AF_INET)
+            addrs = ifaddresses(name).get(AF_INET)
             if addrs:
                 self._selected_interface = (name, addrs[0]["addr"], addrs[0]["netmask"])
                 src.machines.interface_name = name
@@ -1753,10 +1753,10 @@ class App(tk.Tk):
             return
 
         self.console.title("Available interfaces")
-        for iface in netifaces.interfaces():
+        for iface in interfaces():
             if iface == "lo0":
                 continue
-            addrs = netifaces.ifaddresses(iface).get(netifaces.AF_INET)
+            addrs = ifaddresses(iface).get(AF_INET)
             if addrs:
                 marker = " <--" if self._selected_interface and self._selected_interface[0] == iface else ""
                 self.console.body(f"  {iface:<8} {addrs[0]['addr']:<18}{marker}")

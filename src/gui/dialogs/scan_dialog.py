@@ -1,7 +1,7 @@
 from src.gui import fonts
 import tkinter as tk
 from tkinter import ttk
-import netifaces
+from src.network_iface import interfaces, ifaddresses, AF_INET
 from src.machines import store
 
 
@@ -139,10 +139,10 @@ class ScanDialog(tk.Toplevel):
     @staticmethod
     def _list_interfaces():
         result = []
-        for iface in netifaces.interfaces():
+        for iface in interfaces():
             if iface == "lo0":
                 continue
-            addrs = netifaces.ifaddresses(iface).get(netifaces.AF_INET)
+            addrs = ifaddresses(iface).get(AF_INET)
             if addrs:
                 result.append((iface, addrs[0]["addr"], addrs[0]["netmask"]))
         return result

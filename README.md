@@ -1,102 +1,62 @@
 # HSF — Hack Station Framework
 
-Herramienta gráfica para análisis de redes, shells remotas y documentación de evidencias en pentest.
+A GUI and CLI pentest application to help beginners in a friendly environment.
 
-## Requisitos
+## Requirements
 
 - **Python ≥ 3.11**
-- **Tkinter** (interfaz gráfica)
-- **Nmap** (escaneo de puertos — opcional pero recomendado)
+- **Git** (to clone the repository)
+- **Homebrew** (macOS only)
 
-## Instalación
+## Install
 
-### 1. Dependencias del sistema
+### Linux
 
-**macOS (Homebrew)**
-```bash
-brew install python-tk
-brew install nmap             # opcional
+```
+sudo apt update && sudo apt install -y python3 python3-tk pipx fontconfig
+pipx ensurepath
+source ~/.bashrc
+
+(Optional)
+sudo apt install -y nmap hydra hashcat whatweb freerdp2-x11 chromium-browser
+
+(Recommended)
+sudo setcap cap_net_raw+ep $(readlink -f $(which python3))
+
+git clone https://github.com/ArtesOscuras/HSF.git ; cd HSF ; pipx install .
 ```
 
-**Debian / Ubuntu**
-```bash
-sudo apt install python3-tk nmap    # nmap es opcional
+### macOS
+
+```
+brew install python-tk pipx fontconfig
+pipx ensurepath
+source ~/.zshrc
+
+(Optional)
+brew install nmap hydra hashcat whatweb freerdp chromium
+
+git clone https://github.com/ArtesOscuras/HSF.git ; cd HSF ; pipx install .
 ```
 
-**Fedora**
-```bash
-sudo dnf install python3-tkinter nmap
+## Usage
+
+`hsf`
+
+`sudo "$(which hsf)"` (only if you need extra permissions for the scanner tools)
+
+## Network permissions
+
+Some scanners (passive mDNS listener, active identification) need extra network permissions on Linux. You can grant them once with:
+
 ```
-
-**Arch**
-```bash
-sudo pacman -S tk nmap
-```
-
-### 2. Instalar HSF
-
-```bash
-pipx install https://github.com/tuusuario/hsf
-```
-
-O desde el repositorio clonado:
-
-```bash
-git clone <repo>
-cd hack_station_framework
-pipx install .
-```
-
-### 3. Verificar
-
-```bash
-hsf
-```
-
-### Binarios externos (no incluidos)
-
-El programa funciona sin ellos, pero ciertas funcionalidades los requieren:
-
-| Herramienta | Uso |
-|---|---|
-| **Nmap** | Escaneo SYN y detección de SO/servicios |
-| **Hydra** | Ataques de fuerza bruta |
-| **Hashcat** | Crackeo de hashes |
-
-Instálalos con el gestor de paquetes de tu sistema.
-
-## Datos runtime
-
-Los datos de sesión (bases de datos, credenciales, evidencias) se almacenan en:
-
-- `~/.local/share/hsf/` (por defecto)
-- `$HSF_HOME/` (si se define la variable de entorno)
-
-## Permisos de red
-
-Algunos escáneres (mDNS pasivo, identificación activa) requieren acceso raw a la red.
-Tienes dos opciones:
-
-### Linux: otorgar CAP_NET_RAW (recomendado)
-
-```bash
 sudo setcap cap_net_raw+ep $(readlink -f $(which python3))
 ```
 
-Esto evita tener que usar sudo. Para deshacerlo: `sudo setcap -r $(readlink -f $(which python3))`.
+This avoids having to run HSF as root.
 
-### Ejecutar como root
+## Data stored
 
-```bash
-sudo "$(which hsf)"
-```
+Wordlists, databases, credentials, evidence files... are stored at:
 
-**Nota**: `which hsf` resuelve la ruta antes de sudo, así funciona con pipx.
-
-## Desarrollo
-
-```bash
-pip install -e .
-python main.py
-python -m src
-```
+- `~/.local/share/hsf/` (default)

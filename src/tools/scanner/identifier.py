@@ -3,7 +3,7 @@ import os
 import re
 import subprocess
 import time as _time
-import netifaces
+from src.network_iface import gateways, AF_INET
 from scapy.all import IP, ICMP, TCP, UDP, DNS, DNSQR, sr1, RandShort
 
 
@@ -332,7 +332,7 @@ def _probe_web_internal(ip, port):
 
 def get_gateway_ip():
     try:
-        return netifaces.gateways()["default"][netifaces.AF_INET][0]
+        return gateways()["default"][AF_INET][0]
     except (KeyError, IndexError):
         return None
 

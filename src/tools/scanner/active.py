@@ -6,7 +6,7 @@ import threading
 import shutil
 import ipaddress
 from concurrent.futures import ThreadPoolExecutor
-import netifaces
+from src.network_iface import interfaces, ifaddresses, AF_INET
 from scapy.all import ARP, Ether, srp
 from scapy.config import conf
 from zeroconf import Zeroconf, ServiceBrowser, BadTypeInNameException
@@ -113,17 +113,17 @@ class ActiveScanner:
 
     def _resolve_interface(self):
         if self._preferred_iface:
-            addrs = netifaces.ifaddresses(self._preferred_iface).get(netifaces.AF_INET)
+            addrs = ifaddresses(self._preferred_iface).get(AF_INET)
             if addrs:
                 return (self._preferred_iface, addrs[0]["addr"], addrs[0]["netmask"])
             raise RuntimeError(f"Interface '{self._preferred_iface}' not found or has no IPv4")
         return self._detect_interface()
 
     def _detect_interface(self):
-        for iface in netifaces.interfaces():
+        for iface in interfaces():
             if iface == "lo0":
                 continue
-            addrs = netifaces.ifaddresses(iface).get(netifaces.AF_INET)
+            addrs = ifaddresses(iface).get(AF_INET)
             if addrs:
                 return (iface, addrs[0]["addr"], addrs[0]["netmask"])
         return None

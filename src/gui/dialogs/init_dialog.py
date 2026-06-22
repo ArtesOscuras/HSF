@@ -17,6 +17,10 @@ INFO = "#5ba3ec"
 
 _checks_order = []
 
+from src import info as _info
+_info.set("platform", sys.platform)
+_info.set("platform_name", platform.system())
+
 
 def _checks():
     # --- System ---
@@ -24,8 +28,12 @@ def _checks():
     yield _check("root", "Root", lambda: is_root, kind="system", critical=False,
                  detail="yes" if is_root else "no")
     yield _check("python_version", f"Python {platform.python_version()}",
-                 lambda: sys.version_info >= (3, 8),
+                 lambda: sys.version_info >= (3, 11),
                  kind="system", critical=True)
+    yield _check("platform", f"Platform: {platform.system()}",
+                 lambda: sys.platform in ("linux", "darwin"),
+                 kind="system", critical=True,
+                 detail=platform.system())
 
     # --- Python dependencies ---
     yield _check("scapy", "scapy", lambda: _has_module("scapy"), kind="python", critical=True)
@@ -33,8 +41,13 @@ def _checks():
     yield _check("impacket", "impacket", lambda: _has_module("impacket"), kind="python", critical=True)
     yield _check("websocket", "websocket-client", lambda: _has_module("websocket"), kind="python", critical=True)
     yield _check("pillow", "Pillow", lambda: _has_module("PIL"), kind="python", critical=True)
-    yield _check("netifaces", "netifaces", lambda: _has_module("netifaces"), kind="python", critical=True)
     yield _check("paramiko", "paramiko", lambda: _has_module("paramiko"), kind="python", critical=False)
+
+    # --- Network interfaces ---
+    yield _check("network_ifaces", "Network interfaces",
+                 lambda: _check_interfaces(),
+                 kind="system", critical=True,
+                 detail=str(len(_list_interfaces())))
 
     # --- Binaries ---
     yield _check("nmap_bin", "nmap", lambda: _resolve_binary("nmap")[0], kind="binary", critical=False)
@@ -154,6 +167,22 @@ def _browser_check():
     if browsers:
         return True, list(browsers.keys())[0]
     return False, ""
+
+
+def _list_interfaces():
+    from src.network_iface import interfaces, ifaddresses, AF_INET
+    result = []
+    for iface in interfaces():
+        if iface == "lo0":
+            continue
+        addrs = ifaddresses(iface).get(AF_INET)
+        if addrs:
+            result.append(iface)
+    return result
+
+
+def _check_interfaces():
+    return len(_list_interfaces()) > 0
 
 
 def run_checks():

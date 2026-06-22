@@ -1,6 +1,6 @@
 from src.gui import fonts
 import tkinter as tk
-import netifaces
+from src.network_iface import interfaces, ifaddresses, AF_INET
 
 
 class InterfaceSelector(tk.Toplevel):
@@ -135,10 +135,10 @@ class InterfaceSelector(tk.Toplevel):
     @staticmethod
     def _list_interfaces():
         result = []
-        for iface in netifaces.interfaces():
+        for iface in interfaces():
             if iface == "lo0":
                 continue
-            addrs = netifaces.ifaddresses(iface).get(netifaces.AF_INET)
+            addrs = ifaddresses(iface).get(AF_INET)
             if addrs:
                 result.append((iface, addrs[0]["addr"], addrs[0]["netmask"]))
         return result
