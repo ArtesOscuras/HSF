@@ -5,8 +5,8 @@ _ORDER = [
     ("Tools", "tools"),
     ("Machines", "machines"),
     ("Domains", "domains"),
+    ("Inventory", "inventory"),
     ("Shells", "shells"),
-    ("Credentials", "credentials"),
     ("Evidences", "evidences"),
 ]
 

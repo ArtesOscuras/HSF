@@ -1,6 +1,21 @@
+import os
+import time
 import tkinter as tk
+from datetime import datetime
 from src.gui import fonts
+from src.hsf_paths import logs_dir
 from .views import BaseView
+
+_DBG_FILE = os.path.join(logs_dir(), "debugging_logs")
+
+
+def _dbg(msg):
+    try:
+        os.makedirs(os.path.dirname(_DBG_FILE), exist_ok=True)
+        with open(_DBG_FILE, "a") as f:
+            f.write(f"[{datetime.now().isoformat()}] {msg}\n")
+    except (PermissionError, OSError):
+        pass
 
 
 class Visualizer(tk.Frame):
@@ -39,16 +54,45 @@ class Visualizer(tk.Frame):
         return self._active_view_name
 
     def activate_view(self, name):
+        t0 = time.perf_counter()
         if name not in self.views:
             raise ValueError(f"Unknown view: {name}")
 
+        _dbg(f"[view] activate_view START: {name}")
+
         if self._active_view:
+            _dbg(f"[view]   on_deactivate: {self._active_view_name}")
+            t1 = time.perf_counter()
             self._active_view.on_deactivate()
+            _dbg(f"[view]   on_deactivate DONE ({time.perf_counter() - t1:.3f}s)")
+            t1 = time.perf_counter()
             self._active_view.grid_forget()
+            _dbg(f"[view]   grid_forget DONE ({time.perf_counter() - t1:.3f}s)")
 
         self._placeholder.place_forget()
 
         self._active_view_name = name
         self._active_view = self.views[name]
+        t1 = time.perf_counter()
         self._active_view.grid(row=0, column=0, sticky="nsew")
+        _dbg(f"[view]   grid DONE ({time.perf_counter() - t1:.3f}s)")
+        t1 = time.perf_counter()
         self._active_view.on_activate()
+        _dbg(f"[view]   on_activate DONE ({time.perf_counter() - t1:.3f}s)")
+        self.winfo_toplevel().update_idletasks()
+        self._active_view.update_idletasks()
+        self._refresh_labels(self._active_view)
+        self.winfo_toplevel().update_idletasks()
+        _dbg(f"[view] activate_view DONE ({time.perf_counter() - t0:.3f}s)")
+
+    @staticmethod
+    def _refresh_labels(widget):
+        if isinstance(widget, tk.Label):
+            try:
+                f = widget.cget("font")
+                if f:
+                    widget.config(font=f)
+            except Exception:
+                pass
+        for child in widget.winfo_children():
+            Visualizer._refresh_labels(child)

@@ -12,7 +12,7 @@ from src.network_iface import interfaces, ifaddresses, AF_INET
 from . import fonts
 from .console import Console
 from .visualizer import Visualizer
-from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UserPassView, HashListView, ShellListView, ToolsView
+from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UsersView, PasswordsView, HashListView, ShellListView, ToolsView, InventoryView
 from .dialogs import ScanDialog
 from src import settings as hsf_settings
 from src.machines import store, start_autosave as start_machines_autosave, stop_autosave as stop_machines_autosave
@@ -345,6 +345,11 @@ class App(tk.Tk):
         from src.gui.views.nav import set_initial_zoom as _nav_set_zoom
         _nav_set_zoom(view_scale)
 
+        self.visualizer.winfo_toplevel().update_idletasks()
+        self.visualizer._refresh_labels(
+            self.visualizer.get_active_view())
+        self.visualizer.winfo_toplevel().update_idletasks()
+
         load_mdns_cache()
         start_autosave()
         store.load()
@@ -406,11 +411,15 @@ class App(tk.Tk):
         cred_view._on_cred_click = self._open_credential_view
         self.visualizer.register_view("credentials", cred_view)
 
-        user_pass_view = UserPassView(self.visualizer)
-        def _log_cred(user, pwd):
-            self.console.info(f"credentials {user} / {pwd} created")
-        user_pass_view._on_cred_created = _log_cred
-        self.visualizer.register_view("user-pass", user_pass_view)
+        users_view = UsersView(self.visualizer)
+        self.visualizer.register_view("users", users_view)
+
+        passwords_view = PasswordsView(self.visualizer)
+        self.visualizer.register_view("passwords", passwords_view)
+
+        inventory_view = InventoryView(self.visualizer)
+        inventory_view._on_item_click = self._on_inventory_click
+        self.visualizer.register_view("inventory", inventory_view)
 
         hash_view = HashListView(self.visualizer)
         hash_view._on_hash_click = self._open_hash_view
@@ -426,15 +435,15 @@ class App(tk.Tk):
 
     def _register_commands(self):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
-        self.console.set_subcommands("view", ["list", "tools", "machine", "domain", "shell", "credential", "hash", "users", "passwords", "evidence"])
+        self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "users", "passwords", "evidence"])
         self.console.register_command("use", self._cmd_use, "Use a tool")
-        self.console.set_subcommands("use", ["scanner", "bannergrab", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "whatweb", "bruteforce"])
+        self.console.set_subcommands("use", ["scanner", "bannergrab", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "whatweb", "bruteforce", "hashcat"])
         self.console.register_command("connect", self._cmd_connect, "Connect via FTP/SFTP/SSH/WinRM")
         self.console.set_subcommands("connect", ["ftp", "sftp", "ssh", "winrm"])
         self.console.register_command("start", self._cmd_start, "Start listeners")
         self.console.set_subcommands("start", ["shells-listener", "mdns-listener"])
         self.console.register_command("stop", self._cmd_stop, "Stop listeners")
-        self.console.set_subcommands("stop", ["shells-listener", "mdns-listener", "scanner", "bruteforce", "fuzzer", "webrecorder", "tcpscan", "udpscan", "whatweb", "bannergrab"])
+        self.console.set_subcommands("stop", ["shells-listener", "mdns-listener", "scanner", "bruteforce", "fuzzer", "webrecorder", "tcpscan", "udpscan", "whatweb", "bannergrab", "hashcat"])
         self.console.register_command("delete", self._cmd_delete, "Delete stored data")
         self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell"])
         self.console.register_command("add", self._cmd_add, "Add to inventory")
@@ -500,6 +509,9 @@ class App(tk.Tk):
         self.console.set_arg2_provider("use", "webrecorder", self._autocomplete_webrecorder_target)
         self.console.set_arg3_provider("use", "webrecorder", self._autocomplete_webrecorder_ports)
         self.console.set_arg4_provider("use", "webrecorder", self._autocomplete_webrecorder_scheme)
+
+        self.console.set_arg2_provider("use", "hashcat", self._autocomplete_hashcat_hash)
+        self.console.set_arg3_provider("use", "hashcat", self._autocomplete_hashcat_wordlist)
 
         self.console.set_arg3_provider("add", "credential", self._autocomplete_password_noall)
         self.console.set_arg3_provider("add", "hash", self._autocomplete_format_hash)
@@ -657,6 +669,26 @@ class App(tk.Tk):
     def _autocomplete_bruteforce_passlist(prefix):
         from src.hsf_paths import lst_dir
         results = [("passwords", "passwords")]
+        try:
+            for fname in sorted(os.listdir(str(lst_dir()))):
+                if os.path.isfile(os.path.join(str(lst_dir()), fname)):
+                    results.append((fname, fname))
+        except OSError:
+            pass
+        return results
+
+    @staticmethod
+    def _autocomplete_hashcat_hash(prefix):
+        from src.machines.credential_db import load_hashes
+        results = []
+        for h in load_hashes():
+            results.append(h.get("hash", ""))
+        return results
+
+    @staticmethod
+    def _autocomplete_hashcat_wordlist(prefix, arg2_value=None):
+        from src.hsf_paths import lst_dir
+        results = []
         try:
             for fname in sorted(os.listdir(str(lst_dir()))):
                 if os.path.isfile(os.path.join(str(lst_dir()), fname)):
@@ -854,9 +886,8 @@ class App(tk.Tk):
                 self._cmd_view_evidence_name(rest)
             else:
                 self.visualizer.activate_view("evidences")
-        elif sub in ("tools", "users", "passwords"):
-            target = "user-pass" if sub in ("users", "passwords") else sub
-            self.visualizer.activate_view(target)
+        elif sub in ("tools", "users", "passwords", "inventory"):
+            self.visualizer.activate_view(sub)
         else:
             self.console.error(f"Unknown view subcommand: {sub}. Use 'view list' to see available views.")
 
@@ -1179,9 +1210,106 @@ class App(tk.Tk):
             HashcatDialog(self)
             return
         if args[0].lower() == "stop":
-            self.console.info("Hashcat: use the dialog Stop button.")
+            if hasattr(self, "_hashcat_engine") and self._hashcat_engine:
+                self._hashcat_engine.stop()
+                self.console.info("Hashcat stopped.")
+            else:
+                self.console.info("No hashcat engine running.")
             return
-        HashcatDialog(self)
+
+        hash_val = args[0]
+        wordlist_name = args[1] if len(args) > 1 else None
+        if not wordlist_name:
+            self.console.body(
+                "Usage: use hashcat <hash> <wordlist>\n"
+                "       wordlists from lst/ directory"
+            )
+            return
+
+        from src.machines.credential_db import load_hashes
+        from src.hsf_paths import hashcat_db, lst_dir
+
+        mode = None
+        htype = ""
+        for h in load_hashes():
+            if h.get("hash") == hash_val:
+                htype = h.get("type", "")
+                mode = h.get("hascat_mode", "")
+                break
+
+        if not mode and htype:
+            try:
+                import sqlite3
+                conn = sqlite3.connect(str(hashcat_db()))
+                row = conn.execute(
+                    'SELECT "Hash-Mode" FROM DefaultMode WHERE "Hash-Name" = ?',
+                    (htype,)
+                ).fetchone()
+                conn.close()
+                if row and row[0] and row[0] != -1:
+                    mode = str(row[0])
+            except Exception:
+                pass
+
+        if not mode:
+            self.console.error(
+                f"Could not determine hashcat mode for hash. "
+                f"Add the hash first via GUI or 'add hash'."
+            )
+            return
+
+        wl_path = os.path.join(str(lst_dir()), wordlist_name)
+        if not os.path.isfile(wl_path):
+            self.console.error(f"Wordlist not found: {wl_path}")
+            return
+
+        self._hashcat_console_cracked = []
+
+        def on_output(text, color=None):
+            stripped = text.strip()
+            if not stripped:
+                return
+            c = {"success": "success", "error": "error",
+                 "info": "info"}.get(color)
+            if c:
+                getattr(self.console, c)(stripped)
+            else:
+                self.console.body(stripped)
+
+        def on_progress(done, total, recovered):
+            pass
+
+        def on_cracked(hash_val, plain):
+            self._hashcat_console_cracked.append(plain)
+            from src.machines.credential_db import save_password
+            save_password(plain)
+            self.console.success(f"Cracked: {plain}  (saved to inventory)")
+
+        def on_done(cracked):
+            self._hashcat_engine = None
+            if cracked:
+                self.console.success(
+                    f"Done. {len(cracked)} password(s) cracked.")
+            else:
+                self.console.info("Done. No passwords found.")
+
+        from src.tools.hashcat import HashcatEngine
+        self.console.info(
+            f"hashcat -m {mode} "
+            f"'{hash_val[:40]}...' {wordlist_name}"
+        )
+
+        engine = HashcatEngine(
+            mode=mode,
+            hash_value=hash_val,
+            wordlist=wl_path,
+            on_output=on_output,
+            on_cracked=on_cracked,
+            on_done=on_done,
+            on_progress=on_progress,
+        )
+        self._hashcat_engine = engine
+        engine.start()
 
     def _cmd_connect(self, args):
         if not args:
@@ -1554,6 +1682,9 @@ class App(tk.Tk):
         elif action == "hashcat":
             self._cmd_use_hashcat([])
 
+    def _on_inventory_click(self, action):
+        self.visualizer.activate_view(action)
+
     def _open_domain_view(self, domain):
         self._cmd_view_domain([domain])
 
@@ -1708,6 +1839,13 @@ class App(tk.Tk):
                 self.console.info("Bannergrab stopped")
             else:
                 self.console.warning("No bannergrab is running")
+        elif sub == "hashcat":
+            if hasattr(self, "_hashcat_engine") and self._hashcat_engine:
+                self._hashcat_engine.stop()
+                self._hashcat_engine = None
+                self.console.info("Hashcat stopped")
+            else:
+                self.console.warning("No hashcat engine is running")
         else:
             self.console.error(f"Unknown stop target: {sub}")
 
@@ -2929,7 +3067,7 @@ class App(tk.Tk):
     def _cmd_add_hash(self, args):
         if not args:
             from .dialogs.hashcat import HashcatDialog
-            HashcatDialog(self, active_tab=1)
+            HashcatDialog(self, active_tab=2)
             return
         if len(args) < 2:
             self.console.body("Usage: add hash <type> <hash>")

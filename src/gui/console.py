@@ -420,7 +420,7 @@ class Console(tk.Frame):
                     if len(self._arg5_matches) == 1:
                         _, insert = self._arg5_matches[0]
                         if insert:
-                            p5 = prefix.split(None, 4)
+                            p5 = prefix.split(None, 5)
                             c = p5[0] if len(p5) > 0 else ""
                             a1 = p5[1] if len(p5) > 1 else ""
                             a2 = p5[2] if len(p5) > 2 else ""
@@ -454,7 +454,7 @@ class Console(tk.Frame):
                     if len(self._arg4_matches) == 1:
                         _, insert = self._arg4_matches[0]
                         if insert:
-                            p4 = prefix.split(None, 3)
+                            p4 = prefix.split(None, 4)
                             c = p4[0] if len(p4) > 0 else ""
                             a1 = p4[1] if len(p4) > 1 else ""
                             a2 = p4[2] if len(p4) > 2 else ""
@@ -486,7 +486,7 @@ class Console(tk.Frame):
                     if len(self._arg3_matches) == 1:
                         _, insert = self._arg3_matches[0]
                         if insert:
-                            p3 = prefix.split(None, 2)
+                            p3 = prefix.split(None, 3)
                             c = p3[0] if len(p3) > 0 else ""
                             a1 = p3[1] if len(p3) > 1 else ""
                             a2 = p3[2] if len(p3) > 2 else ""

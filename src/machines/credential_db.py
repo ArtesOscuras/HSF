@@ -259,3 +259,63 @@ def delete_hash_entry(hash_id):
             conn.execute("DELETE FROM hashes WHERE id = ?", (hash_id,))
     except (PermissionError, OSError, sqlite3.OperationalError):
         pass
+
+
+def _init_tickets_table(conn):
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS tickets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            principal TEXT,
+            realm TEXT,
+            service TEXT,
+            ticket_type TEXT,
+            ticket_data TEXT,
+            origin TEXT,
+            obtained_date_time TEXT
+        )
+    """)
+
+
+def save_ticket(principal, realm, service, ticket_type, ticket_data, origin=""):
+    _init_db_path()
+    now = datetime.now().isoformat()
+    try:
+        with sqlite3.connect(_DB_PATH) as conn:
+            _init_tickets_table(conn)
+            conn.execute(
+                "INSERT INTO tickets (principal, realm, service, ticket_type, "
+                "ticket_data, origin, obtained_date_time) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (principal, realm, service, ticket_type, ticket_data, origin, now),
+            )
+            return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    except (PermissionError, OSError, sqlite3.OperationalError):
+        return None
+
+
+def load_tickets():
+    _init_db_path()
+    if not os.path.isfile(_DB_PATH):
+        return []
+    try:
+        with sqlite3.connect(_DB_PATH) as conn:
+            _init_tickets_table(conn)
+            rows = conn.execute(
+                "SELECT id, principal, realm, service, ticket_type, "
+                "ticket_data, origin, obtained_date_time "
+                "FROM tickets ORDER BY id DESC"
+            ).fetchall()
+            return [{"id": r[0], "principal": r[1], "realm": r[2],
+                     "service": r[3], "ticket_type": r[4],
+                     "ticket_data": r[5], "origin": r[6],
+                     "obtained_date_time": r[7]} for r in rows]
+    except (sqlite3.DatabaseError, sqlite3.OperationalError):
+        return []
+
+
+def delete_ticket(ticket_id):
+    _init_db_path()
+    try:
+        with sqlite3.connect(_DB_PATH) as conn:
+            conn.execute("DELETE FROM tickets WHERE id = ?", (ticket_id,))
+    except (PermissionError, OSError, sqlite3.OperationalError):
+        pass

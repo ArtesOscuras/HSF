@@ -125,6 +125,74 @@ When adding new views, **always use `view_font` / `view_font_bold` instead of ra
 
 ---
 
+### GUI Layout Stability on macOS Aqua
+
+Tkinter on macOS Aqua has a known issue where `Label` widgets created before their parent window is fully mapped cache incorrect font metrics. This causes navigation bars, view titles, and other `Label`-based components to render with compressed or incorrect sizing. The layout corrects itself only when an explicit widget reconfiguration (e.g., font change on hover) triggers a full re-measurement.
+
+**Symptoms:**
+
+* Navigation bar buttons appear compressed (too close together) and spread apart only when the mouse hovers over them.
+* View titles appear clipped or truncated.
+* The problem occurs on every application startup and every GUI resize.
+* Switching away from the window and back (alt+tab) temporarily fixes the layout, as does pressing Tab or clicking a nav button.
+
+**Root Cause:**
+
+All views are constructed during `_register_views()` (called from `App.__init__`). At construction time, each view calls `_build_ui()` which creates its widget tree — including the nav bar and title labels — but the view has not yet been gridded into the visualizer. The parent widget width is 1 pixel.
+
+`tk.Label` (and the underlying Tcl `label` widget) calculates its preferred size using CoreText font metrics. On macOS, these metrics may be computed differently when the parent is unmapped or has a degenerate width. The cached preferred size persists even after the view is later gridded at its real width, because `Label` does not re-measure unless explicitly reconfigured (e.g., via `config(font=...)`).
+
+When the user hovers over a nav button, the `<Enter>` handler calls `btn.config(font=hover_font)`, which triggers a full re-measurement of the Label. The new preferred size is correct (computed against the now-mapped parent), and the `pack` layout manager recalculates positions. This is why the layout "fixes itself" on hover.
+
+After `set_initial_zoom()` (which calls `fonts.set_view_scale()`), all named fonts are reconfigured with new sizes. This triggers a resize of all Labels using those fonts, but the Labels again use potentially-stale metrics from before the view was properly mapped.
+
+**Solution (implemented in `src/gui/visualizer.py`):**
+
+After every view activation (`activate_view()`), and after the initial zoom configuration in `App.__init__`, force all `Label` widgets in the active view to re-measure by calling a recursive `_refresh_labels()` helper, then process pending geometry with `update_idletasks()`.
+
+```python
+# visualizer.py - activate_view()
+self._active_view.grid(row=0, column=0, sticky="nsew")
+self._active_view.on_activate()
+self.winfo_toplevel().update_idletasks()
+self._active_view.update_idletasks()
+self._refresh_labels(self._active_view)
+self.winfo_toplevel().update_idletasks()
+```
+
+```python
+# visualizer.py - _refresh_labels (static method)
+@staticmethod
+def _refresh_labels(widget):
+    if isinstance(widget, tk.Label):
+        try:
+            f = widget.cget("font")
+            if f:
+                widget.config(font=f)  # idempotent, forces re-measurement
+        except Exception:
+            pass
+    for child in widget.winfo_children():
+        Visualizer._refresh_labels(child)
+```
+
+The same `_refresh_labels()` call is made in `App.__init__` after `set_initial_zoom()` to handle the startup zoom configuration:
+
+```python
+# app.py - after set_initial_zoom()
+self.visualizer.winfo_toplevel().update_idletasks()
+self.visualizer._refresh_labels(self.visualizer.get_active_view())
+self.visualizer.winfo_toplevel().update_idletasks()
+```
+
+**Rules for future development:**
+
+* Do NOT modify the navigation bar layout from `pack` to `grid` or vice versa — the original `pack`-based centering with expandable springs is correct and must be preserved.
+* Do NOT add `<Configure>` event handlers to nav bar frames as a workaround — these fire unpredictably on macOS and cause multiple redundant layout passes.
+* When adding new views with `Label`-based components (titles, nav bars, headers), the `_refresh_labels` mechanism in `activate_view()` handles them automatically — no per-view workaround is needed.
+* If a new view is constructed AFTER the initial `activate_view("tools")` call (e.g., lazy-created detail views), it will be built when the visualizer is already mapped, so its Labels will have correct metrics from the start. Only views created during startup registration are affected.
+
+---
+
 ### Path Centralization (`src/hsf_paths.py`)
 
 All filesystem paths are defined in a single module. Never use `os.path.dirname(__file__)` to locate resources.

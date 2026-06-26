@@ -1,6 +1,9 @@
 import os
+import re
+import sqlite3
 import threading
 import tkinter as tk
+from collections import defaultdict
 from tkinter import ttk
 from src.gui import fonts
 from src.machines import credential_db
@@ -25,6 +28,7 @@ class HashcatDialog(tk.Toplevel):
         self._hash_items = []
         self._modes_by_type = {}
         self._hw = None
+        self._detect_db = None
         self.result = None
 
         self.title("Hashcat")
@@ -56,12 +60,20 @@ class HashcatDialog(tk.Toplevel):
         self._nb.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 0))
 
         self._tab_crack = tk.Frame(self._nb, bg=BG)
-        self._nb.add(self._tab_crack, text="  Crack  ")
+        self._nb.add(self._tab_crack, text="  Hashcat Wrdlst  ")
         self._build_crack_tab(self._tab_crack)
+
+        self._tab_mask = tk.Frame(self._nb, bg=BG)
+        self._nb.add(self._tab_mask, text="  Hashcat Mask  ")
+        self._build_mask_tab(self._tab_mask)
 
         self._tab_add = tk.Frame(self._nb, bg=BG)
         self._nb.add(self._tab_add, text="  Add Hash  ")
         self._build_add_tab(self._tab_add)
+
+        self._tab_detect = tk.Frame(self._nb, bg=BG)
+        self._nb.add(self._tab_detect, text="  Detect  ")
+        self._build_detect_tab(self._tab_detect)
 
         self._nb.select(active_tab)
 
@@ -286,6 +298,424 @@ class HashcatDialog(tk.Toplevel):
         start_btn.bind("<Enter>", lambda e: start_btn.config(bg="#333333"))
         start_btn.bind("<Leave>", lambda e: start_btn.config(bg="#222222"))
 
+    # ─── Mask Tab ──────────────────────────────────────────────
+
+    def _build_mask_tab(self, parent):
+        parent.columnconfigure(0, weight=0)
+        parent.columnconfigure(1, weight=1)
+
+        row = 0
+
+        tk.Label(
+            parent, text="Hash", font=fonts.view_font_bold(11),
+            fg=FG, bg=BG,
+        ).grid(row=row, column=0, sticky="nw", padx=15, pady=(10, 2))
+
+        hash_frame = tk.Frame(parent, bg=BG_WIDGET)
+        hash_frame.grid(row=row, column=1, sticky="ew", padx=15, pady=(10, 2))
+        hash_frame.columnconfigure(0, weight=1)
+        hash_frame.rowconfigure(0, weight=1)
+
+        self._mask_hash_listbox = tk.Listbox(
+            hash_frame, bg=BG_WIDGET, fg=FG,
+            selectbackground=SEL_BG, selectforeground=FG,
+            font=fonts.view_font(11), borderwidth=0, highlightthickness=0,
+            activestyle="none", exportselection=False, height=3,
+        )
+        self._mask_hash_listbox.grid(row=0, column=0, sticky="nsew")
+
+        hash_scroll = tk.Scrollbar(hash_frame, orient=tk.VERTICAL,
+                                   command=self._mask_hash_listbox.yview)
+        hash_scroll.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
+                              width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
+        hash_scroll.grid(row=0, column=1, sticky="ns")
+        self._mask_hash_listbox.configure(yscrollcommand=hash_scroll.set)
+        self._mask_hash_listbox.bind("<<ListboxSelect>>", self._on_mask_hash_select)
+        row += 1
+
+        tk.Label(
+            parent, text="Hash value", font=fonts.view_font(11),
+            fg=FG_DIM, bg=BG,
+        ).grid(row=row, column=0, sticky="w", padx=15, pady=(3, 0))
+        self._mask_hash_val_entry = tk.Entry(
+            parent, textvariable=self._hash_val_var,
+            bg=BG_WIDGET, fg=FG, insertbackground=FG,
+            font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
+            highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
+        )
+        self._mask_hash_val_entry.grid(row=row, column=1, sticky="ew", padx=15, pady=(3, 0))
+        row += 1
+
+        tk.Label(
+            parent, text="Hash type", font=fonts.view_font(11),
+            fg=FG_DIM, bg=BG,
+        ).grid(row=row, column=0, sticky="w", padx=15, pady=(3, 0))
+        self._mask_type_label = tk.Label(
+            parent, textvariable=self._type_label_var,
+            fg=SUCCESS, bg=BG, font=fonts.view_font(11), anchor="w",
+        )
+        self._mask_type_label.grid(row=row, column=1, sticky="w", padx=15, pady=(3, 0))
+        row += 1
+
+        tk.Label(
+            parent, text="Mode", font=fonts.view_font(11),
+            fg=FG_DIM, bg=BG,
+        ).grid(row=row, column=0, sticky="w", padx=15, pady=(3, 5))
+        self._mask_mode_entry = tk.Entry(
+            parent, textvariable=self._mode_var,
+            bg=BG_WIDGET, fg=FG, insertbackground=FG, width=8,
+            font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
+            highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
+        )
+        self._mask_mode_entry.grid(row=row, column=1, sticky="w", padx=15, pady=(3, 5))
+        row += 1
+
+        tk.Label(
+            parent, text="Device", font=fonts.view_font_bold(11),
+            fg=FG, bg=BG,
+        ).grid(row=row, column=0, sticky="nw", padx=15, pady=(3, 3))
+        self._mask_hw_frame = tk.Frame(parent, bg=BG)
+        self._mask_hw_frame.grid(row=row, column=1, sticky="ew", padx=15, pady=(3, 3))
+        self._mask_hw_placeholder = tk.Label(
+            self._mask_hw_frame, text="Detecting hardware...",
+            font=fonts.view_font(11), fg=FG_DIM, bg=BG,
+        )
+        self._mask_hw_placeholder.pack(side=tk.LEFT)
+        row += 1
+
+        tk.Label(
+            parent, text="Mask", font=fonts.view_font_bold(11),
+            fg=FG, bg=BG,
+        ).grid(row=row, column=0, sticky="w", padx=15, pady=(10, 5))
+
+        mask_entry_frame = tk.Frame(parent, bg=BG)
+        mask_entry_frame.grid(row=row, column=1, sticky="ew", padx=15, pady=(10, 5))
+        mask_entry_frame.columnconfigure(0, weight=1)
+
+        self._mask_var = tk.StringVar()
+        self._mask_entry = tk.Entry(
+            mask_entry_frame, textvariable=self._mask_var,
+            bg=BG_WIDGET, fg=FG, insertbackground=FG,
+            font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
+            highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
+        )
+        self._mask_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+
+        help_label = tk.Label(
+            mask_entry_frame, text=" ?l=a-z ?u=A-Z ?d=0-9 ?s=spc ?a=all",
+            font=fonts.view_font(9), fg=FG_DIM, bg=BG,
+        )
+        help_label.pack(side=tk.RIGHT)
+        self._mask_var.trace_add("write", self._on_mask_changed)
+        row += 1
+
+        tk.Label(
+            parent, text="Quick masks", font=fonts.view_font(9),
+            fg=FG_DIM, bg=BG,
+        ).grid(row=row, column=0, sticky="nw", padx=15, pady=(2, 3))
+
+        quick_frame = tk.Frame(parent, bg=BG)
+        quick_frame.grid(row=row, column=1, sticky="ew", padx=15, pady=(2, 3))
+
+        quick_masks = [
+            ("?l?l?l?l?l?l", "6 lower"),
+            ("?l?l?l?l?l?l?l?l", "8 lower"),
+            ("?l?l?l?l?d?d?d?d", "4 lower + 4 digits"),
+            ("?u?l?l?l?l?l?l?l", "1 upper + 7 lower"),
+            ("?u?l?l?l?l?l?d?d", "common password"),
+            ("?d?d?d?d?d?d?d?d", "8 digits"),
+            ("?a?a?a?a?a?a", "6 all-printable"),
+        ]
+        for mask, desc in quick_masks:
+            qb = tk.Label(
+                quick_frame, text=f" {desc} ", bg="#333333", fg=FG_DIM,
+                font=fonts.view_font(8), relief=tk.FLAT, padx=6, pady=2,
+            )
+            qb.pack(side=tk.LEFT, padx=(0, 4), pady=2)
+            qb.bind("<Button-1>", lambda e, m=mask: self._mask_var.set(m))
+            qb.bind("<Enter>", lambda e, b=qb: b.config(fg=FG, bg="#444444"))
+            qb.bind("<Leave>", lambda e, b=qb: b.config(fg=FG_DIM, bg="#333333"))
+        row += 1
+
+        tk.Label(
+            parent, text="Custom charsets", font=fonts.view_font_bold(11),
+            fg=FG, bg=BG,
+        ).grid(row=row, column=0, sticky="nw", padx=15, pady=(8, 3))
+
+        cs_frame = tk.Frame(parent, bg=BG)
+        cs_frame.grid(row=row, column=1, sticky="ew", padx=15, pady=(8, 3))
+        cs_frame.columnconfigure(1, weight=1)
+
+        self._mask_cs_vars = {}
+        cs_hint = {"1": "e.g. ?l?d", "2": "e.g. ?u?d",
+                   "3": "e.g. ?s", "4": "e.g. ?l?u?d"}
+        for i, key in enumerate(["1", "2", "3", "4"]):
+            tk.Label(
+                cs_frame, text=f"-{key}", font=fonts.view_font(11),
+                fg=FG_DIM, bg=BG,
+            ).grid(row=i, column=0, sticky="w", padx=(0, 10), pady=(1, 0))
+            var = tk.StringVar()
+            self._mask_cs_vars[key] = var
+            tk.Entry(
+                cs_frame, textvariable=var,
+                bg=BG_WIDGET, fg=FG, insertbackground=FG,
+                font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
+                highlightthickness=1, highlightcolor="#333333",
+                highlightbackground="#333333", width=20,
+            ).grid(row=i, column=1, sticky="w", pady=(1, 0))
+            tk.Label(
+                cs_frame, text=cs_hint[key],
+                font=fonts.view_font(8), fg=FG_DIM, bg=BG,
+            ).grid(row=i, column=2, sticky="w", padx=(5, 0), pady=(1, 0))
+        row += 1
+
+        tk.Label(
+            parent, text="Output", font=fonts.view_font_bold(11),
+            fg=FG, bg=BG,
+        ).grid(row=row, column=0, sticky="nw", padx=15, pady=(5, 2))
+
+        output_frame = tk.Frame(parent, bg=BG_WIDGET)
+        output_frame.grid(row=row, column=1, sticky="nsew", padx=15, pady=(5, 2))
+        parent.rowconfigure(row, weight=1)
+        output_frame.columnconfigure(0, weight=1)
+        output_frame.rowconfigure(0, weight=1)
+
+        self._mask_output_text = tk.Text(
+            output_frame, bg=BG_WIDGET, fg=FG_DIM, insertbackground=FG,
+            font=fonts.view_font(10), borderwidth=0, highlightthickness=0,
+            state=tk.DISABLED, wrap=tk.WORD,
+        )
+        self._mask_output_text.grid(row=0, column=0, sticky="nsew")
+
+        output_scroll = tk.Scrollbar(
+            output_frame, orient=tk.VERTICAL,
+            command=self._mask_output_text.yview,
+        )
+        output_scroll.configure(
+            bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
+            width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0,
+        )
+        output_scroll.grid(row=0, column=1, sticky="ns")
+        self._mask_output_text.configure(yscrollcommand=output_scroll.set)
+
+        self._mask_output_text.tag_configure("success", foreground=SUCCESS)
+        self._mask_output_text.tag_configure("error", foreground=ERR_COLOR)
+        self._mask_output_text.tag_configure("info", foreground=INFO_COLOR)
+        row += 1
+
+        self._mask_progress_var = tk.IntVar(value=0)
+        self._mask_progress_bar = ttk.Progressbar(
+            parent, variable=self._mask_progress_var, maximum=100,
+        )
+        self._mask_progress_bar.grid(
+            row=row, column=0, columnspan=2, sticky="ew", padx=15, pady=(5, 2),
+        )
+        row += 1
+
+        self._mask_progress_label = tk.Label(
+            parent, text="Ready", font=fonts.view_font(9),
+            fg=FG_DIM, bg=BG, anchor="w",
+        )
+        self._mask_progress_label.grid(
+            row=row, column=0, columnspan=2, sticky="ew", padx=15,
+        )
+        row += 1
+
+        mask_btn_frame = tk.Frame(parent, bg=BG)
+        mask_btn_frame.grid(
+            row=row, column=0, columnspan=2, sticky="ew", padx=15, pady=(8, 10),
+        )
+
+        close_btn = tk.Label(
+            mask_btn_frame, text="  Close  ", bg="#222222", fg=FG,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6, cursor="",
+        )
+        close_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        close_btn.bind("<Button-1>", lambda e: self._on_close())
+        close_btn.bind("<Enter>", lambda e: close_btn.config(bg="#333333"))
+        close_btn.bind("<Leave>", lambda e: close_btn.config(bg="#222222"))
+
+        stop_btn = tk.Label(
+            mask_btn_frame, text="  Stop  ", bg="#222222", fg=FG,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6, cursor="",
+        )
+        stop_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        stop_btn.bind("<Button-1>", lambda e: self._stop())
+        stop_btn.bind("<Enter>", lambda e: stop_btn.config(bg="#333333"))
+        stop_btn.bind("<Leave>", lambda e: stop_btn.config(bg="#222222"))
+
+        start_btn = tk.Label(
+            mask_btn_frame, text="  Start  ", bg="#222222", fg=FG,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6, cursor="",
+        )
+        start_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        start_btn.bind("<Button-1>", lambda e: self._start_mask())
+        start_btn.bind("<Enter>", lambda e: start_btn.config(bg="#333333"))
+        start_btn.bind("<Leave>", lambda e: start_btn.config(bg="#222222"))
+
+        self._populate_mask_hashes()
+
+    def _populate_mask_hashes(self):
+        items = credential_db.load_hashes()
+        if not items:
+            return
+        self._mask_hash_listbox.delete(0, tk.END)
+        for item in items:
+            htype = item.get("type", "")
+            mode = self._modes_by_type.get(htype, item.get("hascat_mode", ""))
+            mode_str = f"  [{mode}] " if mode else "  "
+            label = f"{mode_str}{htype:<30} {item.get('hash', '')[:30]}"
+            self._mask_hash_listbox.insert(tk.END, label)
+        self._mask_hash_listbox.selection_set(0)
+        self._on_mask_hash_select()
+
+    def _on_mask_hash_select(self, event=None):
+        items = credential_db.load_hashes()
+        sel = self._mask_hash_listbox.curselection()
+        if not sel or sel[0] >= len(items):
+            return
+        item = items[sel[0]]
+        htype = item.get("type", "")
+        mode = self._modes_by_type.get(htype, item.get("hascat_mode", ""))
+        self._mode_var.set(mode or "")
+        self._hash_val_var.set(item.get("hash", ""))
+        self._type_label_var.set(htype)
+
+    def _on_mask_changed(self, *_):
+        mask = self._mask_var.get()
+        if mask:
+            self._mask_progress_label.config(
+                text=f"  Mask: {mask} ({mask.count('?')} chars)")
+        else:
+            self._mask_progress_label.config(text="  Ready")
+
+    def _build_mask_hw_buttons(self, hw):
+        self._mask_hw_placeholder.destroy()
+
+        def _build_rb(text, value):
+            return tk.Radiobutton(
+                self._mask_hw_frame, text=text, variable=self._hw_var,
+                value=value, bg=BG, fg=FG, selectcolor=BG,
+                font=fonts.view_font(11), activebackground=BG,
+                activeforeground=FG, indicatoron=False, relief=tk.FLAT,
+            )
+
+        auto_rb = _build_rb("  Auto  ", "auto")
+        auto_rb.pack(side=tk.LEFT, padx=(0, 5))
+        auto_rb.bind("<Enter>", lambda e: auto_rb.config(bg="#333333"))
+        auto_rb.bind("<Leave>", lambda e: auto_rb.config(bg=BG))
+
+        if hw.get("cpu", True):
+            cpu_rb = _build_rb("  CPU  ", "1")
+            cpu_rb.pack(side=tk.LEFT, padx=(0, 5))
+            cpu_rb.bind("<Enter>", lambda e: cpu_rb.config(bg="#333333"))
+            cpu_rb.bind("<Leave>", lambda e: cpu_rb.config(bg=BG))
+            cpu_rb.select()
+
+        if hw.get("gpu", True):
+            gpu_rb = _build_rb("  GPU  ", "2")
+            gpu_rb.pack(side=tk.LEFT, padx=(0, 5))
+            gpu_rb.bind("<Enter>", lambda e: gpu_rb.config(bg="#333333"))
+            gpu_rb.bind("<Leave>", lambda e: gpu_rb.config(bg=BG))
+
+        auto_rb.select()
+
+    def _start_mask(self):
+        mode = self._mode_var.get().strip()
+        if not mode:
+            self._mask_write_output("Hashcat mode is required.\n", "error")
+            return
+        hash_val = self._hash_val_var.get().strip()
+        if not hash_val:
+            self._mask_write_output("No hash selected. Switch to Crack tab.\n", "error")
+            return
+        mask = self._mask_var.get().strip()
+        if not mask:
+            self._mask_write_output("Mask is required.\n", "error")
+            return
+
+        custom_charsets = {}
+        for key, var in self._mask_cs_vars.items():
+            val = var.get().strip()
+            if val:
+                custom_charsets[key] = val
+
+        self._cracked = []
+        self._mask_output_text.configure(state=tk.NORMAL)
+        self._mask_output_text.delete("1.0", tk.END)
+        self._mask_output_text.configure(state=tk.DISABLED)
+        self._mask_progress_var.set(0)
+        self._mask_progress_label.config(text=f"  Mask: {mask} ({mask.count('?')} chars)")
+
+        backend = self._hw_var.get()
+        if backend == "auto":
+            backend = None
+
+        engine = HashcatEngine(
+            mode=mode,
+            hash_value=hash_val,
+            mask=mask,
+            custom_charsets=custom_charsets,
+            backend=backend,
+            on_output=lambda t, c=None: self._mask_write_output(t, c),
+            on_cracked=self._on_mask_cracked,
+            on_done=self._on_mask_done,
+            on_progress=self._on_mask_progress,
+        )
+        self._engine = engine
+        engine.start()
+
+    def _on_mask_done(self, cracked):
+        self._engine = None
+        def _update():
+            if not self.winfo_exists():
+                return
+            self._mask_progress_var.set(100)
+            if cracked:
+                self._mask_write_output(
+                    f"\n[+] Done. {len(cracked)} password(s) cracked.\n", "success")
+                self._mask_progress_label.config(
+                    text=f"  Done. {len(cracked)} cracked")
+            else:
+                self._mask_write_output(
+                    "\n[-] Done. No passwords found.\n", "info")
+                self._mask_progress_label.config(
+                    text="  Done. No passwords found")
+        self.after(0, _update)
+
+    def _on_mask_progress(self, done, total, recovered):
+        if not self.winfo_exists():
+            return
+        pct = int(done * 100 / max(total, 1))
+        def _update():
+            if not self.winfo_exists():
+                return
+            self._mask_progress_var.set(pct)
+            parts = [f"  {done}/{total}"]
+            if recovered:
+                parts.append(f"  recovered: {recovered}")
+            self._mask_progress_label.config(text="".join(parts))
+        self.after(0, _update)
+
+    def _mask_write_output(self, text, color=None):
+        self.after(0, lambda: self._mask_do_write(text, color))
+
+    def _mask_do_write(self, text, color=None):
+        if not self.winfo_exists():
+            return
+        self._mask_output_text.configure(state=tk.NORMAL)
+        is_at_bottom = self._mask_output_text.yview()[1] >= 1.0
+        if color:
+            self._mask_output_text.insert(tk.END, text, color)
+        else:
+            self._mask_output_text.insert(tk.END, text)
+        if is_at_bottom:
+            self._mask_output_text.see(tk.END)
+        self._mask_output_text.configure(state=tk.DISABLED)
+
     # ─── Add Hash Tab ───────────────────────────────────────────
 
     def _build_add_tab(self, parent):
@@ -439,6 +869,8 @@ class HashcatDialog(tk.Toplevel):
         self._hash_listbox.delete(0, tk.END)
         self._modes_by_type.clear()
         self._populate_hashes()
+        if hasattr(self, "_mask_hash_listbox"):
+            self._populate_mask_hashes()
 
     def _populate_hashes(self):
         items = credential_db.load_hashes()
@@ -540,6 +972,9 @@ class HashcatDialog(tk.Toplevel):
 
         self._hw_auto_rb.select()
 
+        if hasattr(self, "_mask_hw_placeholder"):
+            self._build_mask_hw_buttons(hw)
+
     def _start(self):
         mode = self._mode_var.get().strip()
         if not mode:
@@ -589,11 +1024,18 @@ class HashcatDialog(tk.Toplevel):
         if self._engine:
             self._engine.stop()
             self._write_output("Stopped.\n", "info")
+            self._mask_write_output("Stopped.\n", "info")
 
     def _on_cracked(self, hash_val, plain):
         self._cracked.append(plain)
         credential_db.save_password(plain)
         self.after(0, lambda: self._write_output(
+            f"\n[+] Cracked: {plain}  (saved to inventory)\n", "success"))
+
+    def _on_mask_cracked(self, hash_val, plain):
+        self._cracked.append(plain)
+        credential_db.save_password(plain)
+        self.after(0, lambda: self._mask_write_output(
             f"\n[+] Cracked: {plain}  (saved to inventory)\n", "success"))
 
     def _on_done(self, cracked):
@@ -646,6 +1088,366 @@ class HashcatDialog(tk.Toplevel):
         self._output_text.delete("1.0", tk.END)
         self._output_text.configure(state=tk.DISABLED)
 
+    # ─── Detect Tab ─────────────────────────────────────────────
+
+    def _build_detect_tab(self, parent):
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=0)
+        parent.rowconfigure(1, weight=0)
+        parent.rowconfigure(2, weight=0)
+        parent.rowconfigure(3, weight=0)
+
+        tk.Label(
+            parent, text="Paste text or load a file to detect hash types",
+            font=fonts.view_font_bold(11), fg=FG, bg=BG,
+        ).grid(row=0, column=0, sticky="w", padx=15, pady=(10, 5))
+
+        text_frame = tk.Frame(parent, bg=BG_WIDGET)
+        text_frame.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 5))
+        text_frame.columnconfigure(0, weight=1)
+        text_frame.rowconfigure(0, weight=1)
+
+        self._detect_text = tk.Text(
+            text_frame, bg=BG_WIDGET, fg=FG, insertbackground=FG,
+            font=fonts.view_font(11), borderwidth=0, highlightthickness=0,
+            wrap=tk.WORD, height=6,
+        )
+        self._detect_text.grid(row=0, column=0, sticky="nsew")
+
+        detect_scroll = tk.Scrollbar(text_frame, orient=tk.VERTICAL,
+                                     command=self._detect_text.yview)
+        detect_scroll.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
+                                width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
+        detect_scroll.grid(row=0, column=1, sticky="ns")
+        self._detect_text.configure(yscrollcommand=detect_scroll.set)
+
+        detect_btn_frame = tk.Frame(parent, bg=BG)
+        detect_btn_frame.grid(row=2, column=0, sticky="ew", padx=15, pady=(5, 5))
+
+        load_btn = tk.Label(
+            detect_btn_frame, text="  Load file...  ", bg="#222222", fg=FG,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6,
+        )
+        load_btn.pack(side=tk.LEFT)
+        load_btn.bind("<Button-1>", lambda e: self._detect_load_file())
+        load_btn.bind("<Enter>", lambda e: load_btn.config(bg="#333333"))
+        load_btn.bind("<Leave>", lambda e: load_btn.config(bg="#222222"))
+
+        detect_btn = tk.Label(
+            detect_btn_frame, text="  Detect  ", bg="#222222", fg=FG,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6,
+        )
+        detect_btn.pack(side=tk.LEFT, padx=(10, 0))
+        detect_btn.bind("<Button-1>", lambda e: self._detect_hashes())
+        detect_btn.bind("<Enter>", lambda e: detect_btn.config(bg="#333333"))
+        detect_btn.bind("<Leave>", lambda e: detect_btn.config(bg="#222222"))
+
+        self._detect_count_label = tk.Label(
+            parent, text="", font=fonts.view_font(9),
+            fg=FG_DIM, bg=BG, anchor="w",
+        )
+        self._detect_count_label.grid(row=3, column=0, sticky="w", padx=15, pady=(0, 5))
+
+        results_frame = tk.Frame(parent, bg=BG_WIDGET)
+        results_frame.grid(row=4, column=0, sticky="nsew", padx=15, pady=(0, 5))
+        results_frame.columnconfigure(0, weight=1)
+        results_frame.rowconfigure(0, weight=1)
+        parent.rowconfigure(4, weight=1)
+
+        self._detect_listbox = tk.Listbox(
+            results_frame, bg=BG_WIDGET, fg=FG,
+            selectbackground=SEL_BG, selectforeground=FG,
+            font=fonts.view_font(10), borderwidth=0, highlightthickness=0,
+            activestyle="none", exportselection=False,
+        )
+        self._detect_listbox.grid(row=0, column=0, sticky="nsew")
+
+        list_scroll = tk.Scrollbar(results_frame, orient=tk.VERTICAL,
+                                   command=self._detect_listbox.yview)
+        list_scroll.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
+                              width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
+        list_scroll.grid(row=0, column=1, sticky="ns")
+        self._detect_listbox.configure(yscrollcommand=list_scroll.set)
+
+        self._detect_listbox.bind("<Double-Button-1>", lambda e: self._detect_save_selected())
+
+        self._detect_results = []
+
+        btn_frame = tk.Frame(parent, bg=BG)
+        btn_frame.grid(row=5, column=0, sticky="ew", padx=15, pady=(10, 10))
+
+        close_btn = tk.Label(
+            btn_frame, text="  Close  ", bg="#222222", fg=FG,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6,
+        )
+        close_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        close_btn.bind("<Button-1>", lambda e: self._on_close())
+        close_btn.bind("<Enter>", lambda e: close_btn.config(bg="#333333"))
+        close_btn.bind("<Leave>", lambda e: close_btn.config(bg="#222222"))
+
+        save_sel_btn = tk.Label(
+            btn_frame, text="  Save selected  ", bg="#222222", fg=FG,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6,
+        )
+        save_sel_btn.pack(side=tk.RIGHT)
+        save_sel_btn.bind("<Button-1>", lambda e: self._detect_save_selected())
+        save_sel_btn.bind("<Enter>", lambda e: save_sel_btn.config(bg="#333333"))
+        save_sel_btn.bind("<Leave>", lambda e: save_sel_btn.config(bg="#222222"))
+
+    def _build_detect_db(self):
+        if self._detect_db is not None:
+            return
+        self._detect_db = {"prefix": [], "length": defaultdict(list), "structured": []}
+        try:
+            db_path = str(_hashcat_db())
+            if not os.path.isfile(db_path):
+                return
+            conn = sqlite3.connect(db_path)
+            rows = conn.execute(
+                'SELECT "Hash-Mode", "Hash-Name", "Example" FROM DefaultMode'
+            ).fetchall()
+            conn.close()
+        except Exception:
+            return
+
+        for mode, name, example in rows:
+            if not example or example.startswith("http"):
+                continue
+            mode = str(mode) if mode != -1 else ""
+            hash_part = example.split(":")[0]
+
+            prefix = _extract_prefix(hash_part)
+            if prefix:
+                if prefix == "$2a$" or prefix == "$2b$" or prefix == "$2y$":
+                    prefix = r"\$2[aby]\$"
+                else:
+                    prefix = re.escape(prefix)
+                pref_re = re.compile(r"(?:^|\s)(" + prefix + r"\S+)")
+                self._detect_db["prefix"].append((pref_re, mode, name, hash_part))
+                continue
+
+            fields = example.split(":")
+            if len(fields) >= 3:
+                pattern = _build_structured_pattern(fields)
+                if pattern:
+                    try:
+                        compiled = re.compile(pattern)
+                        self._detect_db["structured"].append((compiled, mode, name))
+                    except re.error:
+                        pass
+                continue
+
+            cs = _charset_type(hash_part)
+            if cs:
+                key = (len(hash_part), cs)
+                self._detect_db["length"][key].append((mode, name))
+
+    def _detect_hashes(self):
+        self._build_detect_db()
+        if not self._detect_db:
+            return
+
+        text = self._detect_text.get("1.0", tk.END).strip()
+        if not text:
+            self._detect_count_label.config(text="")
+            self._detect_listbox.delete(0, tk.END)
+            self._detect_results.clear()
+            return
+
+        results = []
+        seen = set()
+
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+
+            matched = False
+            if ":" in line:
+                for regex, mode, name in self._detect_db["structured"]:
+                    if regex.match(line):
+                        key = f"{mode}:{line[:40]}"
+                        if key not in seen:
+                            seen.add(key)
+                            results.append((line, [(mode, name)]))
+                        matched = True
+                        break
+
+            tokens = _extract_tokens(line) if not matched else []
+            for token in tokens:
+                if token in seen:
+                    continue
+                matches = self._match_token(token)
+                if matches:
+                    seen.add(token)
+                    results.append((token, matches))
+
+        self._detect_results = results
+        self._detect_listbox.delete(0, tk.END)
+
+        if results:
+            self._detect_count_label.config(
+                text=f"  {len(results)} hash(es) found")
+            for token, matches in results:
+                for mode, name in matches:
+                    display = token if len(token) <= 40 else token[:37] + "..."
+                    mode_str = f"[{mode}]" if mode else "[?]"
+                    self._detect_listbox.insert(
+                        tk.END, f"  {mode_str:<8} {name:<28} {display}")
+        else:
+            self._detect_count_label.config(text="  No hashes detected")
+
+    def _match_token(self, token):
+        matches = []
+        for pref_re, mode, name, _example in self._detect_db["prefix"]:
+            if pref_re.match(token) or pref_re.search(token):
+                matches.append((mode, name))
+        if matches:
+            return matches
+        for charset in ("hex", "crypt", "b64"):
+            cs = _charset_type_max(token, charset)
+            if cs:
+                key = (len(token), cs)
+                matches.extend(self._detect_db["length"].get(key, []))
+                if matches:
+                    break
+        return matches
+
+    def _detect_load_file(self):
+        from tkinter import filedialog
+        f = filedialog.askopenfilename(
+            title="Load file for hash detection",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")])
+        if not f:
+            return
+        try:
+            with open(f, "r", encoding="utf-8", errors="replace") as fh:
+                content = fh.read()
+        except Exception:
+            return
+        self._detect_text.delete("1.0", tk.END)
+        self._detect_text.insert("1.0", content)
+
+    def _detect_save_selected(self):
+        sel = self._detect_listbox.curselection()
+        if not sel or not self._detect_results:
+            return
+        line_idx = sel[0]
+        current = 0
+        for token, matches in self._detect_results:
+            count = len(matches)
+            if current + count > line_idx:
+                match_idx = line_idx - current
+                mode, name = matches[match_idx]
+                credential_db.save_hash_entry(
+                    hash_type=name,
+                    hash_value=token,
+                    hascat_mode=mode,
+                    origin="detected",
+                )
+                self._detect_count_label.config(
+                    text=f"  Saved: [{mode}] {name}")
+                self._refresh_hash_list()
+                self.after(1500, lambda: self._detect_count_label.config(
+                    text=f"  {len(self._detect_results)} hash(es) found"))
+                return
+            current += count
+
     def _on_close(self):
         self._stop()
         self.destroy()
+
+
+# ─── Hash Detection Helpers ─────────────────────────────────────
+
+_HEX_RE = re.compile(r"^[a-fA-F0-9]+$")
+_CRYPT_RE = re.compile(r"^[./0-9A-Za-z]+$")
+_B64_RE = re.compile(r"^[A-Za-z0-9+/=]+$")
+_TOKEN_RE = re.compile(
+    r"\b[a-fA-F0-9]{16,}\b"
+    r"|\b[./0-9A-Za-z]{13,}\b"
+    r"|\b[A-Za-z0-9+/=]{20,}\b"
+)
+
+
+def _extract_prefix(s):
+    if s.startswith("$"):
+        m = re.match(r"(\$[^$]+\$)", s)
+        if m:
+            return m.group(1)
+    if s.startswith("{") and "}" in s:
+        m = re.match(r"(\{[^}]+\})", s)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _build_structured_pattern(fields):
+    parts = []
+    for i, f in enumerate(fields):
+        f = f.strip()
+        if not f:
+            parts.append(r":?")
+        elif _HEX_RE.match(f):
+            n = len(f)
+            if i == len(fields) - 1 and n >= 32:
+                parts.append(r"[a-fA-F0-9]{32,}")
+            else:
+                parts.append(f"[a-fA-F0-9]{{{n}}}")
+        elif _CRYPT_RE.match(f):
+            parts.append(f"[./0-9A-Za-z]{{{len(f)}}}")
+        else:
+            parts.append(r"[^\s:]+")
+    return r"^" + r":".join(parts) + r"$"
+
+
+def _charset_type(s):
+    if _HEX_RE.match(s):
+        return "hex"
+    if _CRYPT_RE.match(s):
+        return "crypt"
+    if _B64_RE.match(s):
+        return "b64"
+    return None
+
+
+def _charset_type_max(s, default_cs):
+    if default_cs == "hex" and _HEX_RE.match(s):
+        return "hex"
+    if default_cs == "crypt" and _CRYPT_RE.match(s):
+        return "crypt"
+    if default_cs == "b64" and _B64_RE.match(s):
+        return "b64"
+    return None
+
+
+def _extract_tokens(line):
+    if line.startswith("$") or line.startswith("{"):
+        return [line]
+    tokens = []
+    for token in _TOKEN_RE.findall(line):
+        if token and not _is_junk(token):
+            tokens.append(token)
+    return tokens
+
+
+_JUNK_RE = re.compile(
+    r"^(\d)\1{7,}$"             # all same digit  1111111111111111
+    r"|^0+$"                     # all zeros      0000000000000000
+    r"|^[a-fA-F](\d)\1{6,}$"    # hex with trailing repeated digit
+)
+
+
+def _is_junk(token):
+    if not token:
+        return True
+    s = set(token.lower())
+    if len(s) <= 2:
+        return True
+    if _JUNK_RE.match(token):
+        return True
+    return False

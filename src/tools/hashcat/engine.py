@@ -12,13 +12,16 @@ _RECOVERED_RE = re.compile(r"Recovered\.+:\s+(\d+)/(\d+).*?Digests")
 
 
 class HashcatEngine:
-    def __init__(self, mode, hash_value, wordlist, rules_file=None,
+    def __init__(self, mode, hash_value, wordlist=None, mask=None,
+                 custom_charsets=None, rules_file=None,
                  backend=None,
                  on_output=None, on_cracked=None, on_done=None,
                  on_progress=None):
         self._mode = str(mode)
         self._hash_value = hash_value
         self._wordlist = wordlist
+        self._mask = mask
+        self._custom_charsets = custom_charsets or {}
         self._rules_file = rules_file
         self._backend = backend
         self._on_output = on_output
@@ -72,22 +75,32 @@ class HashcatEngine:
             self._finish(None)
             return
 
-        cmd = [
-            binary,
-            "-m", self._mode,
-            self._hash_value,
-            self._wordlist,
-            "--quiet",
-            "--status",
-            "--status-timer=1",
-            "--potfile-disable",
-        ]
+        cmd = [binary, "-m", self._mode, self._hash_value]
+
+        if self._mask:
+            cmd.extend(["-a", "3", self._mask, "--increment"])
+            for key, charset in sorted(self._custom_charsets.items()):
+                if charset:
+                    cmd.extend([f"-{key}", charset])
+        else:
+            cmd.append(self._wordlist)
+
+        cmd.extend([
+            "--quiet", "--status", "--status-timer=1", "--potfile-disable",
+        ])
         if self._backend:
             cmd.extend(["-D", self._backend])
         if self._rules_file:
             cmd.extend(["-r", self._rules_file])
 
-        self._emit(f"\n[>] hashcat -m {self._mode} '{self._hash_value[:40]}...' {self._wordlist}\n", "info")
+        if self._mask:
+            self._emit(
+                f"\n[>] hashcat -m {self._mode} -a 3 "
+                f"'{self._hash_value[:40]}...' {self._mask}\n", "info")
+        else:
+            self._emit(
+                f"\n[>] hashcat -m {self._mode} "
+                f"'{self._hash_value[:40]}...' {self._wordlist}\n", "info")
 
         try:
             self._proc = subprocess.Popen(

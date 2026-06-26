@@ -34,14 +34,14 @@ class HashListView(BaseView):
         nav_frame = tk.Frame(header, bg="#000000")
         nav_frame.pack(pady=(0, 10))
 
-        build_nav(header, "credentials", self.master)
+        build_nav(header, "hashes", self.master)
 
         self._title_label = tk.Label(
             header, text="Hashes",
             font=fonts.view_font_bold(22), fg=BRIGHT, bg="#000000",
         )
         self._title_label.pack(anchor="center")
-        self._title_label.bind("<Button-1>", lambda e: self.master.activate_view("credentials"))
+        self._title_label.bind("<Button-1>", lambda e: self.master.activate_view("inventory"))
         self._title_label.bind("<Enter>", lambda e: self._title_label.config(font=fonts.view_font_bold_under(22)))
         self._title_label.bind("<Leave>", lambda e: self._title_label.config(font=fonts.view_font_bold(22)))
 
@@ -78,7 +78,7 @@ class HashListView(BaseView):
             padx=15, pady=6,
         )
         back_btn.pack(side=tk.RIGHT, padx=(10, 0))
-        back_btn.bind("<Button-1>", lambda e: self.master.activate_view("credentials"))
+        back_btn.bind("<Button-1>", lambda e: self.master.activate_view("inventory"))
         back_btn.bind("<Enter>", lambda e: back_btn.config(bg="#333333"))
         back_btn.bind("<Leave>", lambda e: back_btn.config(bg="#222222"))
 

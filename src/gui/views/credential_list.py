@@ -70,7 +70,7 @@ class CredentialListView(BaseView):
         btn_frame.grid(row=2, column=0, pady=(15, 15))
 
         usr_btn = tk.Label(
-            btn_frame, text="  Users / Passwords  ", bg="#222222", fg=BRIGHT,
+            btn_frame, text="  Inventory  ", bg="#222222", fg=BRIGHT,
             font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
@@ -83,7 +83,7 @@ class CredentialListView(BaseView):
         )
         hash_btn.pack(side=tk.LEFT)
 
-        usr_btn.bind("<Button-1>", lambda e: self.master.activate_view("user-pass"))
+        usr_btn.bind("<Button-1>", lambda e: self.master.activate_view("inventory"))
         usr_btn.bind("<Enter>", lambda e: usr_btn.config(bg="#333333"))
         usr_btn.bind("<Leave>", lambda e: usr_btn.config(bg="#222222"))
         hash_btn.bind("<Button-1>", lambda e: self.master.activate_view("hashes"))

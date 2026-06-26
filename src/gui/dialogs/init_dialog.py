@@ -19,6 +19,22 @@ _info.set("platform", sys.platform)
 _info.set("platform_name", platform.system())
 
 
+def _has_list(name):
+    from src.wordlist_download import is_installed
+    try:
+        return is_installed(name)
+    except Exception:
+        return False
+
+
+def _has_rockyou():
+    return _has_list("rockyou")
+
+
+def _has_usernames():
+    return _has_list("usernames")
+
+
 def _checks():
     # --- System ---
     is_root = os.geteuid() == 0 if hasattr(os, "geteuid") else False
@@ -53,6 +69,16 @@ def _checks():
     yield _check("whatweb", "whatweb", lambda: _resolve_binary("whatweb")[0], kind="binary", critical=False)
     yield _check("xfreerdp", "xfreerdp", lambda: _resolve_binary("xfreerdp")[0], kind="binary", critical=False)
     yield _check("browsers", "Chromium browser", lambda: _browser_check()[0], kind="binary", critical=False)
+
+    # --- Wordlists ---
+    yield _check("rockyou", "rockyou.txt wordlist",
+                 lambda: _has_rockyou(),
+                 kind="wordlist", critical=False,
+                 detail="installed" if _has_rockyou() else "not installed (download lists)")
+    yield _check("usernames", "usernames.txt wordlist",
+                 lambda: _has_usernames(),
+                 kind="wordlist", critical=False,
+                 detail="installed" if _has_usernames() else "not installed (download lists)")
 
 
 def _check(key, label, fn, kind="", critical=False, detail=""):
@@ -185,12 +211,26 @@ class InitDialog(tk.Toplevel):
         btn_frame = tk.Frame(self, bg="#111111")
         btn_frame.grid(row=2, column=0, sticky="ew", pady=(0, 15))
 
-        self._ok_btn = tk.Label(
-            btn_frame, text="  Continue  ", bg="#222222", fg=BRIGHT,
+        btn_inner = tk.Frame(btn_frame, bg="#111111")
+        btn_inner.pack(expand=True)
+
+        self._dl_btn = tk.Label(
+            btn_inner, text="  Download lists  ", bg="#222222", fg=BRIGHT,
             font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
-        self._ok_btn.pack()
+        self._dl_btn.pack(side=tk.LEFT, padx=(0, 10))
+        self._dl_btn.bind("<Button-1>", lambda e: self._start_download())
+        self._dl_btn.bind("<Enter>", lambda e: self._dl_btn.config(bg="#333333"))
+        self._dl_btn.bind("<Leave>", lambda e: self._dl_btn.config(bg="#222222"))
+        self._dl_btn.pack_forget()
+
+        self._ok_btn = tk.Label(
+            btn_inner, text="  Continue  ", bg="#222222", fg=BRIGHT,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6,
+        )
+        self._ok_btn.pack(side=tk.LEFT)
         self._ok_btn.bind("<Button-1>", lambda e: self.destroy())
         self._ok_btn.bind("<Enter>", lambda e: self._ok_btn.config(bg="#333333"))
         self._ok_btn.bind("<Leave>", lambda e: self._ok_btn.config(bg="#222222"))
@@ -269,6 +309,68 @@ class InitDialog(tk.Toplevel):
 
         self.after(0, _insert)
 
+    def _start_download(self):
+        self._dl_btn.config(text="  Downloading...  ")
+        self._dl_btn.unbind("<Button-1>")
+        self._log("\n", "bright")
+        self._log("  Downloading wordlists...\n", "info")
+        threading.Thread(target=self._run_download, daemon=True).start()
+
+    def _run_download(self):
+        from src.wordlist_download import download, any_missing, is_installed
+        missing = any_missing()
+        if not missing:
+            self.after(0, lambda: self._log("  All lists already installed.\n", "muted"))
+            self.after(200, self._start_checks)
+            return
+
+        failed = []
+        for name in missing:
+            self.after(0, lambda n=name: self._log(
+                f"\n  [{n}.txt]\n", "info"))
+            try:
+                last_pct = [-1]
+                def progress(pct):
+                    if pct - last_pct[0] >= 25:
+                        last_pct[0] = pct
+                        self.after(0, lambda p=pct, n=name: self._log(
+                            f"  {n}.txt ... {p}%\n", "muted"))
+                download(name, on_progress=progress)
+                if is_installed(name):
+                    self.after(0, lambda n=name: self._log(
+                        f"  {n}.txt  Done. ✓\n", "success"))
+                else:
+                    raise RuntimeError("verification failed")
+            except Exception as e:
+                failed.append(name)
+                self.after(0, lambda n=name, e=str(e): self._log(
+                    f"  {n}.txt  Failed: {e}\n", "fail"))
+
+        if failed:
+            self.after(0, lambda: self._log(
+                f"\n  {len(missing) - len(failed)}/{len(missing)} lists installed.\n", "muted"))
+            self.after(0, lambda: (
+                self._dl_btn.config(text="  Retry download  "),
+                self._dl_btn.bind("<Button-1>", lambda e: self._start_download()),
+            ))
+        else:
+            self.after(0, lambda: self._log(
+                f"\n  {len(missing)} list(s) installed.\n", "success"))
+            self.after(200, lambda: (
+                self.text.configure(state=tk.NORMAL),
+                self.text.delete("1.0", tk.END),
+                self.text.configure(state=tk.DISABLED),
+            ))
+            self.after(600, self._start_checks)
+
+    def _log(self, text, tag=None):
+        if not self.winfo_exists():
+            return
+        self.text.configure(state=tk.NORMAL)
+        self.text.insert(tk.END, text, tag if tag else "bright")
+        self.text.see(tk.END)
+        self.text.configure(state=tk.DISABLED)
+
     def _finish(self):
         if not self.winfo_exists():
             return
@@ -285,6 +387,16 @@ class InitDialog(tk.Toplevel):
             self.text.insert(tk.END, "\n")
             self.text.see(tk.END)
             self.text.configure(state=tk.DISABLED)
-            self._ok_btn.config(text="  Continue  ")
+
+            from src.wordlist_download import any_missing
+            try:
+                missing = bool(any_missing())
+            except Exception:
+                missing = False
+            if missing:
+                self._dl_btn.pack(side=tk.LEFT, padx=(0, 10),
+                                   before=self._ok_btn)
+            else:
+                self._dl_btn.pack_forget()
 
         self.after(0, _ui)
