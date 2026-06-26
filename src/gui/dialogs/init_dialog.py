@@ -1,9 +1,6 @@
 from src.gui import fonts
 import os
 import platform
-import re
-import shutil
-import subprocess
 import sys
 import threading
 import tkinter as tk
@@ -71,94 +68,9 @@ def _has_module(name):
 
 
 def _resolve_binary(name):
-    """Find a binary using 3 levels: PATH, shell rc file aliases, interactive shell."""
-    # Level 1 — standard PATH
-    found = shutil.which(name)
-    if found:
-        return True, found
-
-    # Level 2 — parse shell rc file for aliases
-    found = _parse_rc_for_binary(name)
-    if found:
-        return True, found
-
-    # Level 3 — interactive shell fallback
-    found = _find_via_interactive_shell(name)
-    if found:
-        return True, found
-
-    return False, ""
-
-
-def _shell_rc_file():
-    shell = os.environ.get("SHELL", "")
-    home = os.path.expanduser("~")
-    candidates = []
-    if "zsh" in shell:
-        candidates = [os.path.join(home, ".zshrc")]
-    elif "bash" in shell:
-        candidates = [os.path.join(home, ".bashrc"), os.path.join(home, ".bash_profile")]
-    candidates.append(os.path.join(home, ".zshrc"))
-    candidates.append(os.path.join(home, ".bashrc"))
-    for c in candidates:
-        if os.path.isfile(c) and os.access(c, os.R_OK):
-            return c
-    return None
-
-
-def _parse_rc_for_binary(name):
-    rc_file = _shell_rc_file()
-    if not rc_file:
-        return ""
-
-    try:
-        with open(rc_file) as f:
-            content = f.read()
-    except (OSError, UnicodeDecodeError):
-        return ""
-
-    # Find alias definitions: alias name='/path' or alias name="/path"
-    for pattern in [
-        rf"alias\s+{re.escape(name)}\s*=\s*'([^']+)'",
-        rf'alias\s+{re.escape(name)}\s*=\s*"([^"]+)"',
-    ]:
-        m = re.search(pattern, content)
-        if m:
-            path = m.group(1).strip()
-            if os.path.isfile(path) and os.access(path, os.X_OK):
-                return path
-
-    # Find PATH exports and scan those dirs
-    for pattern in [
-        r'export\s+PATH\s*=\s*"([^"]+)"',
-        r"export\s+PATH\s*=\s*'([^']+)'",
-        r'export\s+PATH\s*=\s*([^\n]+)',
-    ]:
-        for m in re.finditer(pattern, content):
-            extra_paths = m.group(1).strip()
-            for p in extra_paths.split(":"):
-                p = os.path.expandvars(p.strip())
-                candidate = os.path.join(p, name)
-                if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-                    return candidate
-
-    return ""
-
-
-def _find_via_interactive_shell(name):
-    shell = os.environ.get("SHELL", "/bin/sh")
-    shell_name = os.path.basename(shell)
-    try:
-        r = subprocess.run(
-            [shell, "-ic", f"command -v {name}"],
-            capture_output=True, timeout=5, text=True,
-        )
-        out = r.stdout.strip()
-        if out and os.path.isfile(out):
-            return out
-    except (FileNotFoundError, PermissionError, subprocess.TimeoutExpired, OSError):
-        pass
-    return ""
+    from src.resolve_binary import resolve
+    found = resolve(name)
+    return (True, found) if found else (False, "")
 
 
 def _browser_check():

@@ -925,6 +925,8 @@ class App(tk.Tk):
             self._cmd_use_whatweb(rest)
         elif sub == "bruteforce":
             self._cmd_use_bruteforce(rest)
+        elif sub == "hashcat":
+            self._cmd_use_hashcat(rest)
         else:
             self.console.error(f"Unknown tool: {sub}")
 
@@ -1170,6 +1172,16 @@ class App(tk.Tk):
         )
         self._bruteforce_engine = engine
         engine.start()
+
+    def _cmd_use_hashcat(self, args):
+        from .dialogs.hashcat import HashcatDialog
+        if not args:
+            HashcatDialog(self)
+            return
+        if args[0].lower() == "stop":
+            self.console.info("Hashcat: use the dialog Stop button.")
+            return
+        HashcatDialog(self)
 
     def _cmd_connect(self, args):
         if not args:
@@ -1539,6 +1551,8 @@ class App(tk.Tk):
             self._cmd_recorder([])
         elif action == "bruteforce":
             self._cmd_use_bruteforce([])
+        elif action == "hashcat":
+            self._cmd_use_hashcat([])
 
     def _open_domain_view(self, domain):
         self._cmd_view_domain([domain])
@@ -2914,10 +2928,8 @@ class App(tk.Tk):
 
     def _cmd_add_hash(self, args):
         if not args:
-            from .views import HashAddDialog
-            dialog = HashAddDialog(self)
-            if dialog.result:
-                self.console.success("Hash added")
+            from .dialogs.hashcat import HashcatDialog
+            HashcatDialog(self, active_tab=1)
             return
         if len(args) < 2:
             self.console.body("Usage: add hash <type> <hash>")
