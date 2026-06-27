@@ -262,14 +262,17 @@ class _CredentialGenerator(tk.Toplevel):
 
         users = credential_db.load_users()
         pwds = credential_db.load_passwords()
+        self._users_data = {}
         for u in users:
-            self._user_listbox.insert(tk.END, f"  {u}")
+            name = u["username"]
+            self._user_listbox.insert(tk.END, f"  {name}")
+            self._users_data[name] = u
         for p in pwds:
             self._pwd_listbox.insert(tk.END, f"  {p}")
         if users:
             self._user_listbox.selection_set(0)
 
-        self._sel_user = users[0] if users else None
+        self._sel_user = users[0]["username"] if users else None
         self._sel_pwd = None
 
         self._user_listbox.bind("<<ListboxSelect>>", self._on_user_select)
@@ -374,6 +377,9 @@ class _CredentialGenerator(tk.Toplevel):
         idx = self._user_listbox.curselection()
         if idx:
             self._sel_user = self._user_listbox.get(idx[0]).strip()
+            u = self._users_data.get(self._sel_user)
+            if u:
+                self._domain_var.set(u.get("domain", ""))
 
     def _on_pwd_select(self, event):
         idx = self._pwd_listbox.curselection()

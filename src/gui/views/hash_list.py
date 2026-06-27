@@ -217,5 +217,5 @@ class HashListView(BaseView):
 
     def _open_add_hash(self):
         from src.gui.dialogs.hashcat import HashcatDialog
-        HashcatDialog(self, active_tab=1)
+        HashcatDialog(self, active_tab=2)
 

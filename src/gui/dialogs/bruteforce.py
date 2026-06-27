@@ -395,8 +395,8 @@ class BruteforceDialog(tk.Toplevel):
         pass_src = vars_["pass_src"].get()
 
         if user_src == "inventory":
-            from src.machines.credential_db import load_users
-            users = load_users()
+            from src.machines.credential_db import load_usernames
+            users = load_usernames()
             if not users:
                 self._log("No users in inventory", "error")
                 return

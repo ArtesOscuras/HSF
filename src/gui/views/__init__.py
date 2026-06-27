@@ -8,6 +8,7 @@ from .evidence_detail import EvidenceDetailView
 from .credential_list import CredentialListView
 from .credential_detail import CredentialDetailView
 from .users import UsersView
+from .user_detail import UserDetailView
 from .passwords import PasswordsView
 from .hash_list import HashListView
 from .hash_detail import HashDetailView

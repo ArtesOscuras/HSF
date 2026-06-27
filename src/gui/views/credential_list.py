@@ -36,10 +36,22 @@ class CredentialListView(BaseView):
 
         build_nav(header, "credentials", self.master)
 
-        tk.Label(
+        self._title_label = tk.Label(
             header, text="Credentials",
             font=fonts.view_font_bold(22), fg="#ffffff", bg="#000000",
-        ).pack(anchor="center")
+        )
+        self._title_label.pack(anchor="center")
+        self._title_label.bind(
+            "<Button-1>",
+            lambda e: self.master.activate_view("inventory"))
+        self._title_label.bind(
+            "<Enter>",
+            lambda e: self._title_label.config(
+                font=fonts.view_font_bold_under(22)))
+        self._title_label.bind(
+            "<Leave>",
+            lambda e: self._title_label.config(
+                font=fonts.view_font_bold(22)))
 
         text_frame = tk.Frame(self, bg="#000000")
         text_frame.grid(row=1, column=0, sticky="nsew")
@@ -69,30 +81,34 @@ class CredentialListView(BaseView):
         btn_frame = tk.Frame(self, bg="#000000")
         btn_frame.grid(row=2, column=0, pady=(15, 15))
 
-        usr_btn = tk.Label(
-            btn_frame, text="  Inventory  ", bg="#222222", fg=BRIGHT,
+        new_btn = tk.Label(
+            btn_frame, text="  New credential  ", bg="#222222", fg=BRIGHT,
             font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
-        usr_btn.pack(side=tk.LEFT, padx=(0, 10))
+        new_btn.pack(side=tk.LEFT, padx=(0, 10))
+        new_btn.bind("<Button-1>", lambda e: self._open_generator())
+        new_btn.bind("<Enter>", lambda e: new_btn.config(bg="#333333"))
+        new_btn.bind("<Leave>", lambda e: new_btn.config(bg="#222222"))
 
-        hash_btn = tk.Label(
-            btn_frame, text="  Hashes  ", bg="#222222", fg=BRIGHT,
+        back_btn = tk.Label(
+            btn_frame, text="  \u2190 Back  ", bg="#222222", fg=BRIGHT,
             font=fonts.view_font(10), relief=tk.RAISED, bd=1,
             padx=15, pady=6,
         )
-        hash_btn.pack(side=tk.LEFT)
-
-        usr_btn.bind("<Button-1>", lambda e: self.master.activate_view("inventory"))
-        usr_btn.bind("<Enter>", lambda e: usr_btn.config(bg="#333333"))
-        usr_btn.bind("<Leave>", lambda e: usr_btn.config(bg="#222222"))
-        hash_btn.bind("<Button-1>", lambda e: self.master.activate_view("hashes"))
-        hash_btn.bind("<Enter>", lambda e: hash_btn.config(bg="#333333"))
-        hash_btn.bind("<Leave>", lambda e: hash_btn.config(bg="#222222"))
+        back_btn.pack(side=tk.LEFT)
+        back_btn.bind("<Button-1>",
+                      lambda e: self.master.activate_view("inventory"))
+        back_btn.bind("<Enter>", lambda e: back_btn.config(bg="#333333"))
+        back_btn.bind("<Leave>", lambda e: back_btn.config(bg="#222222"))
 
         self._last_hash = None
         self._poll_id = None
         self._resize_id = None
+
+    def _open_generator(self):
+        from .user_pass import _CredentialGenerator
+        _CredentialGenerator(self)
 
     def _on_resize(self, event):
         if self._resize_id:

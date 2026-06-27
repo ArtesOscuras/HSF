@@ -109,16 +109,75 @@ def delete_credential(cred_id):
         pass
 
 
-def save_user(username):
-    _init_db_path()
+def _migrate_users_table():
     try:
         with sqlite3.connect(_DB_PATH) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    username TEXT UNIQUE
-                )
-            """)
-            conn.execute("INSERT OR IGNORE INTO users VALUES (?)", (username,))
+            existing = [r[1] for r in conn.execute(
+                "PRAGMA table_info(users)").fetchall()]
+            if "id" not in existing:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS users_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username TEXT UNIQUE NOT NULL,
+                        origin TEXT DEFAULT '',
+                        type TEXT DEFAULT '',
+                        machine TEXT DEFAULT '',
+                        domain TEXT DEFAULT '',
+                        groups TEXT DEFAULT ''
+                    )
+                """)
+                try:
+                    rows = conn.execute(
+                        "SELECT username FROM users"
+                    ).fetchall()
+                    for (u,) in rows:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO users_new (username) "
+                            "VALUES (?)", (u,))
+                except (sqlite3.OperationalError, sqlite3.DatabaseError):
+                    pass
+                conn.execute("DROP TABLE IF EXISTS users")
+                conn.execute("ALTER TABLE users_new RENAME TO users")
+    except (sqlite3.OperationalError, sqlite3.DatabaseError):
+        conn = sqlite3.connect(_DB_PATH)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                origin TEXT DEFAULT '',
+                type TEXT DEFAULT '',
+                machine TEXT DEFAULT '',
+                domain TEXT DEFAULT '',
+                groups TEXT DEFAULT ''
+            )
+        """)
+
+
+def save_user(username, origin="", utype="", machine="", domain="", groups=""):
+    _init_db_path()
+    _migrate_users_table()
+    try:
+        with sqlite3.connect(_DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO users (username, origin, type, machine, "
+                "domain, groups) VALUES (?, ?, ?, ?, ?, ?)",
+                (username, origin, utype, machine, domain, groups),
+            )
+            return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    except (PermissionError, OSError, sqlite3.OperationalError):
+        return None
+
+
+def update_user(username, origin="", utype="", machine="", domain="", groups=""):
+    _init_db_path()
+    _migrate_users_table()
+    try:
+        with sqlite3.connect(_DB_PATH) as conn:
+            conn.execute(
+                "UPDATE users SET origin=?, type=?, machine=?, domain=?, "
+                "groups=? WHERE username=?",
+                (origin, utype, machine, domain, groups, username),
+            )
     except (PermissionError, OSError, sqlite3.OperationalError):
         pass
 
@@ -127,17 +186,22 @@ def load_users():
     _init_db_path()
     if not os.path.isfile(_DB_PATH):
         return []
+    _migrate_users_table()
     try:
         with sqlite3.connect(_DB_PATH) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    username TEXT UNIQUE
-                )
-            """)
-            rows = conn.execute("SELECT username FROM users ORDER BY username").fetchall()
-            return [r[0] for r in rows]
+            rows = conn.execute(
+                "SELECT id, username, origin, type, machine, domain, groups "
+                "FROM users ORDER BY username"
+            ).fetchall()
+            return [{"id": r[0], "username": r[1], "origin": r[2],
+                     "type": r[3], "machine": r[4], "domain": r[5],
+                     "groups": r[6]} for r in rows]
     except (sqlite3.DatabaseError, sqlite3.OperationalError):
         return []
+
+
+def load_usernames():
+    return [u["username"] for u in load_users()]
 
 
 def delete_user(username):

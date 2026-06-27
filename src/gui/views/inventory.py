@@ -100,13 +100,16 @@ class InventoryView(BaseView):
 
         self._items = [
             {"name": "Users", "action": "users",
-             "desc": "Stored usernames for brute-force attacks.",
+             "desc": "Stored users found",
              "icon": "user.png", "enabled": True},
             {"name": "Groups", "action": "groups",
-             "desc": "Domain groups (not yet implemented).",
+             "desc": "(not yet implemented)",
              "icon": "group.png", "enabled": False},
+            {"name": "People", "action": "people",
+             "desc": "(not yet implemented)",
+             "icon": "people.png", "enabled": False},
             {"name": "Passwords", "action": "passwords",
-             "desc": "Stored passwords for brute-force attacks.",
+             "desc": "Stored passwords found",
              "icon": "passwords.png", "enabled": True},
             {"name": "Hashes", "action": "hashes",
              "desc": "Stored hashes for cracking.",
@@ -115,7 +118,7 @@ class InventoryView(BaseView):
              "desc": "Kerberos tickets (not yet implemented).",
              "icon": "ticket.png", "enabled": False},
             {"name": "Credentials", "action": "credentials",
-             "desc": "User / password credentials.",
+             "desc": "Valid users and password / hash_nt",
              "icon": "credential.png", "enabled": True},
         ]
 

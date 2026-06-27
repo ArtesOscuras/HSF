@@ -361,6 +361,9 @@ class App(tk.Tk):
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        self.bind_all("<Control-f>", self._toggle_focus)
+        self.bind_all("<Command-f>",  self._toggle_focus)
+
     def _run_init_checks(self):
         from .dialogs.init_dialog import InitDialog
         dialog = InitDialog(self)
@@ -412,6 +415,7 @@ class App(tk.Tk):
         self.visualizer.register_view("credentials", cred_view)
 
         users_view = UsersView(self.visualizer)
+        users_view._on_user_click = self._open_user_view
         self.visualizer.register_view("users", users_view)
 
         passwords_view = PasswordsView(self.visualizer)
@@ -435,7 +439,7 @@ class App(tk.Tk):
 
     def _register_commands(self):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
-        self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "users", "passwords", "evidence"])
+        self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "evidence"])
         self.console.register_command("use", self._cmd_use, "Use a tool")
         self.console.set_subcommands("use", ["scanner", "bannergrab", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "whatweb", "bruteforce", "hashcat"])
         self.console.register_command("connect", self._cmd_connect, "Connect via FTP/SFTP/SSH/WinRM")
@@ -572,8 +576,8 @@ class App(tk.Tk):
 
     @staticmethod
     def _autocomplete_user_noall(prefix, arg2_value=None):
-        from src.machines.credential_db import load_users
-        return list(load_users())
+        from src.machines.credential_db import load_usernames
+        return list(load_usernames())
 
     @staticmethod
     def _autocomplete_password_noall(prefix, arg2_value=None):
@@ -801,9 +805,9 @@ class App(tk.Tk):
 
     @staticmethod
     def _autocomplete_user(prefix):
-        from src.machines.credential_db import load_users
+        from src.machines.credential_db import load_usernames
         results = ["all"]
-        results.extend(load_users())
+        results.extend(load_usernames())
         return results
 
     @staticmethod
@@ -881,12 +885,17 @@ class App(tk.Tk):
                 self._cmd_view_hash(rest)
             else:
                 self.visualizer.activate_view("hashes")
+        elif sub == "user":
+            if rest:
+                self._cmd_view_user(rest)
+            else:
+                self.visualizer.activate_view("users")
         elif sub == "evidence":
             if rest:
                 self._cmd_view_evidence_name(rest)
             else:
                 self.visualizer.activate_view("evidences")
-        elif sub in ("tools", "users", "passwords", "inventory"):
+        elif sub in ("tools", "passwords", "inventory"):
             self.visualizer.activate_view(sub)
         else:
             self.console.error(f"Unknown view subcommand: {sub}. Use 'view list' to see available views.")
@@ -1151,7 +1160,7 @@ class App(tk.Tk):
             if os.path.isfile(path):
                 userlist = path
         if not userlist:
-            users = load_users()
+            users = load_usernames()
 
         passlist = None
         passwords = None
@@ -1180,12 +1189,17 @@ class App(tk.Tk):
             else:
                 self.console.body(stripped.rstrip())
         def on_found(p, tgt, port, user, pwd):
-            from src.machines.credential_db import save_credential, save_user, load_credentials
+            from src.machines.credential_db import save_credential, save_user, load_credentials, load_users
             for c in load_credentials():
                 if c.get("username") == user and c.get("password") == pwd:
                     return
             machine = store.get(tgt)
             dom = machine.domain if machine else ""
+            if not dom:
+                for u in load_users():
+                    if u["username"] == user:
+                        dom = u.get("domain", "")
+                        break
             save_credential(user, pwd, domain=dom, password_origin=f"{p} bruteforce")
             save_user(user)
 
@@ -1635,6 +1649,12 @@ class App(tk.Tk):
             return
         self.console.warning(f"No hash found matching: {target}")
 
+    def _cmd_view_user(self, args):
+        if not args:
+            self.visualizer.activate_view("users")
+            return
+        self._open_user_view(args[0])
+
     def _cmd_view_evidence_name(self, args):
         if not args:
             self.console.body("Usage: view evidence <name>")
@@ -1665,6 +1685,15 @@ class App(tk.Tk):
             from .views import HashDetailView
             detail_view = HashDetailView(self.visualizer, hash_id)
             detail_view._on_back_click = lambda: self.visualizer.activate_view("hashes")
+            self.visualizer.register_view(view_name, detail_view)
+        self.visualizer.activate_view(view_name)
+
+    def _open_user_view(self, username):
+        view_name = f"user_{username}"
+        if view_name not in self.visualizer.get_view_names():
+            from .views import UserDetailView
+            detail_view = UserDetailView(self.visualizer, username)
+            detail_view._on_back_click = lambda: self.visualizer.activate_view("users")
             self.visualizer.register_view(view_name, detail_view)
         self.visualizer.activate_view(view_name)
 
@@ -3033,28 +3062,46 @@ class App(tk.Tk):
         self.console.success(f"Machine #{machine.id} ({ip}) added")
 
     def _cmd_add_credential(self, args):
-        from src.machines.credential_db import save_credential, save_user
+        from src.machines.credential_db import save_credential, save_user, load_users
+        from .views.user_pass import _ntlm_hash
         if len(args) < 2:
             self.console.body("Usage: add credential <username> <password|hash_nt>")
             return
         username = args[0]
         secret = args[1]
+        domain = ""
+        for u in load_users():
+            if u["username"] == username:
+                domain = u.get("domain", "")
+                break
         nt_pattern = re.compile(r"^[a-fA-F0-9]{32}$")
         if nt_pattern.match(secret):
-            cid = save_credential(username, "", hash_nt=secret, hash_nt_origin="manual")
+            cid = save_credential(username, "", domain=domain, hash_nt=secret, hash_nt_origin="manual")
             self.console.success(f"Credential #{cid}: {username} (NT hash) added")
         else:
-            cid = save_credential(username, secret, password_origin="manual")
+            hnt = _ntlm_hash(secret)
+            cid = save_credential(username, secret, domain=domain, hash_nt=hnt, password_origin="manual", hash_nt_origin="manual")
             self.console.success(f"Credential #{cid}: {username} / {secret} added")
         save_user(username)
 
     def _cmd_add_user(self, args):
         if not args:
-            self.console.body("Usage: add user <username>")
+            self.console.body(
+                "Usage: add user <username> [local|domain] [origin] [machine_or_domain] "
+                "[groups]"
+            )
             return
         from src.machines.credential_db import save_user
-        save_user(args[0])
-        self.console.success(f"User '{args[0]}' added")
+        username = args[0]
+        utype = args[1] if len(args) > 1 else ""
+        origin = args[2] if len(args) > 2 else "manual"
+        extra = args[3] if len(args) > 3 else ""
+        groups = args[4] if len(args) > 4 else ""
+        machine = extra if utype == "local" else ""
+        domain = extra if utype == "domain" else ""
+        save_user(username, origin=origin, utype=utype,
+                  machine=machine, domain=domain, groups=groups)
+        self.console.success(f"User '{username}' added")
 
     def _cmd_add_password(self, args):
         if not args:
@@ -3338,9 +3385,11 @@ class App(tk.Tk):
         from src.machines.credential_db import load_credentials, delete_credential
         username = args[0]
         if username == "all":
-            from src.machines.credential_db import delete_all
-            delete_all()
-            self.console.info("All credentials deleted")
+            count = 0
+            for c in list(load_credentials()):
+                delete_credential(c["id"])
+                count += 1
+            self.console.success(f"{count} credentials deleted")
             return
         for c in load_credentials():
             if c["username"] == username:
@@ -3471,16 +3520,16 @@ class App(tk.Tk):
         if not args:
             self.console.body("Usage: delete user <username|all>")
             return
-        from src.machines.credential_db import delete_user, load_users
+        from src.machines.credential_db import delete_user, load_usernames
         username = args[0]
         if username == "all":
             count = 0
-            for u in list(load_users()):
+            for u in list(load_usernames()):
                 delete_user(u)
                 count += 1
             self.console.success(f"{count} users deleted")
             return
-        if username not in load_users():
+        if username not in load_usernames():
             self.console.warning(f"No user found for: {username}")
             return
         delete_user(username)
@@ -3528,6 +3577,16 @@ class App(tk.Tk):
         stop_machines_autosave()
         start_machines_autosave(store)
         self.console.info("All data cleared (mDNS cache + machine list + database files)")
+
+    def _toggle_focus(self, event=None):
+        focused = self.focus_get()
+        if focused is self.console.input_entry:
+            view = self.visualizer.get_active_view()
+            if view and hasattr(view, "terminal"):
+                view.terminal.focus_set()
+            return "break"
+        self.console.input_entry.focus()
+        return "break"
 
     def _on_close(self):
         if self._passive_scanner:
