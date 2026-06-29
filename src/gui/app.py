@@ -330,6 +330,7 @@ class App(tk.Tk):
         self._recorder = None
         self._bruteforce_dlg = None
         self._bruteforce_engine = None
+        self._consultor_mode = False
         self._fuzz_dlg = None
         self._tcpscan_running = False
         self._tcpscan_process = None
@@ -453,6 +454,8 @@ class App(tk.Tk):
         self.console.register_command("add", self._cmd_add, "Add to inventory")
         self.console.set_subcommands("add", ["machine", "domain", "credential", "user", "password", "hash"])
         self.console.register_command("init", self._cmd_init, "Re-run initialization checks")
+        self.console.register_command("settings", self._cmd_settings, "Open settings dialog")
+        self.console.register_command("consultor", self._cmd_consultor, "Enter LLM consultor mode")
         self.console.register_command("exit", self._cmd_exit, "Close the application")
 
         self.console.set_system_handler(self._run_system)
@@ -2831,6 +2834,80 @@ class App(tk.Tk):
 
     def _cmd_init(self, args):
         self._run_init_checks()
+
+    def _cmd_settings(self, args):
+        from .dialogs.settings import SettingsDialog
+        SettingsDialog(self)
+
+    def _cmd_consultor(self, args):
+        if not args:
+            self._enter_consultor_mode()
+            return
+        prompt = " ".join(args)
+        self._consultor_ask(prompt)
+
+    def _enter_consultor_mode(self):
+        self._consultor_mode = True
+        self._consultor_messages = []
+        self.console.prompt_label.config(text="Consultor> ", fg="#e6b422")
+        self.console.info(
+            "LLM Consultor mode. Type your prompt. "
+            "Press Ctrl+D or type 'exit' to leave."
+        )
+        self.console.set_mode_handler(self._consultor_handler)
+
+    def _consultor_handler(self, text):
+        text = text.strip()
+        if text.lower() == "exit" or not text:
+            self._leave_consultor_mode()
+            return
+        self._consultor_ask(text)
+
+    def _leave_consultor_mode(self):
+        self._consultor_mode = False
+        self._consultor_messages.clear()
+        self.console.prompt_label.config(text="HSF> ", fg="#ffffff")
+        self.console.set_mode_handler(None)
+        self.console.info("Left consultor mode.")
+
+    def _consultor_ask(self, prompt):
+        import threading
+        if not hasattr(self, "_consultor_messages"):
+            self._consultor_messages = []
+        self._consultor_messages.append(
+            {"role": "user", "content": prompt})
+        def _run():
+            try:
+                from src.llm import LLMClient
+                client = LLMClient()
+                self.console.after(0, lambda: self.console.info(
+                    f"> {prompt}"))
+                stream = client.chat_stream(self._consultor_messages)
+                full = ""
+                buf = ""
+                for chunk in stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        full += chunk.choices[0].delta.content
+                        buf += chunk.choices[0].delta.content
+                        if "\n" in buf:
+                            lines = buf.split("\n")
+                            for line in lines[:-1]:
+                                if line.strip():
+                                    self.console.after(
+                                        0,
+                                        lambda l=line: self.console.body(l.rstrip()))
+                            buf = lines[-1]
+                if buf.strip():
+                    self.console.after(
+                        0, lambda b=buf: self.console.body(b.rstrip()))
+                self._consultor_messages.append(
+                    {"role": "assistant", "content": full})
+                self.console.after(0, lambda: self.console.info("---"))
+            except Exception as e:
+                msg = str(e)
+                self.console.after(
+                    0, lambda m=msg: self.console.error(f"LLM error: {m}"))
+        threading.Thread(target=_run, daemon=True).start()
 
     def _cmd_exit(self, args):
         self.destroy()

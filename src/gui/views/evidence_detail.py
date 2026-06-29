@@ -199,6 +199,7 @@ class EvidenceDetailView(BaseView):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=0)
         self.rowconfigure(1, weight=1)
+        self.rowconfigure(2, weight=0)
 
         header = tk.Frame(self, bg="#000000")
         header.grid(row=0, column=0, sticky="ew", pady=(15, 10))
@@ -239,6 +240,32 @@ class EvidenceDetailView(BaseView):
         self.text.tag_configure("success", foreground=SUCCESS)
         self.text.tag_configure("error", foreground="#f44747")
 
+        btn_frame = tk.Frame(self, bg="#000000")
+        btn_frame.grid(row=2, column=0, pady=(0, 15))
+
+        analyze_btn = tk.Label(
+            btn_frame, text="  Model Analysis  ", bg="#222222", fg=BRIGHT,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6,
+        )
+        analyze_btn.pack(side=tk.LEFT, padx=(0, 10))
+        analyze_btn.bind("<Button-1>",
+                         lambda e: self._open_model_analysis())
+        analyze_btn.bind("<Enter>", lambda e: analyze_btn.config(bg="#333333"))
+        analyze_btn.bind("<Leave>", lambda e: analyze_btn.config(bg="#222222"))
+
+        back_btn = tk.Label(
+            btn_frame, text="  \u2190 Back  ", bg="#222222", fg=BRIGHT,
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=15, pady=6,
+        )
+        back_btn.pack(side=tk.LEFT)
+        back_btn.bind("<Button-1>",
+                      lambda e: self._on_back_click
+                      and self._on_back_click())
+        back_btn.bind("<Enter>", lambda e: back_btn.config(bg="#333333"))
+        back_btn.bind("<Leave>", lambda e: back_btn.config(bg="#222222"))
+
     def on_activate(self):
         self._refresh()
 
@@ -250,6 +277,10 @@ class EvidenceDetailView(BaseView):
     def _on_title_click(self, event):
         if self._on_back_click:
             self._on_back_click()
+
+    def _open_model_analysis(self):
+        from src.gui.dialogs.model_analysis import _ModelAnalysisDialog
+        _ModelAnalysisDialog(self, self._ev_name)
 
     def _refresh(self):
         meta = _load_evidence(self._ev_name)
