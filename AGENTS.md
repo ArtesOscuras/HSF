@@ -193,6 +193,22 @@ self.visualizer.winfo_toplevel().update_idletasks()
 
 ---
 
+### Modal Dialogs and Cross-Platform `grab_set()`
+
+When opening a `tk.Toplevel` dialog that uses `grab_set()` (modal behavior), always call `self.wait_visibility()` before `self.grab_set()`. Without this, Linux X11/Wayland window managers may not have finished mapping the window, causing `tkinter.TclError: grab failed: window not viewable`.
+
+**Correct pattern:**
+
+```python
+self.transient(parent)
+self.wait_visibility()   # must precede grab_set on Linux
+self.grab_set()
+```
+
+This pattern is already used in `HashcatDialog`, `InitDialog`, `_AddUserDialog`, and `_CredentialGenerator`. New dialogs must follow it.
+
+---
+
 ### Path Centralization (`src/hsf_paths.py`)
 
 All filesystem paths are defined in a single module. Never use `os.path.dirname(__file__)` to locate resources.

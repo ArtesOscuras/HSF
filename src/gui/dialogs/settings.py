@@ -18,12 +18,12 @@ class SettingsDialog(tk.Toplevel):
         super().__init__(parent)
         self.title("HSF — Settings")
         sh = self.winfo_screenheight()
-        h = min(680, sh - 60)
-        w = 800
+        h = max(660, min(int(sh * 0.78), sh - 60))
+        w = max(800, int(self.winfo_screenwidth() * 0.70))
         x = (self.winfo_screenwidth() - w) // 2
         y = max(0, (sh - h) // 2 - 20)
         self.geometry(f"{w}x{h}+{x}+{y}")
-        self.minsize(700, 560)
+        self.minsize(800, 660)
         self.configure(bg=BG)
         self.transient(parent)
         self.grab_set()

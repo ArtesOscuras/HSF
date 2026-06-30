@@ -27,6 +27,7 @@ class _ModelAnalysisDialog(tk.Toplevel):
         self.minsize(700, 500)
         self.configure(bg=BG)
         self.transient(parent)
+        self.wait_visibility()
         self.grab_set()
 
         self.columnconfigure(0, weight=1)
