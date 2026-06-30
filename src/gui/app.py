@@ -12,7 +12,7 @@ from src.network_iface import interfaces, ifaddresses, AF_INET
 from . import fonts
 from .console import Console
 from .visualizer import Visualizer
-from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UsersView, PasswordsView, HashListView, ShellListView, ToolsView, InventoryView
+from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UsersView, PasswordsView, HashListView, ShellListView, ToolsView, InventoryView, PeopleView
 from .dialogs import ScanDialog
 from src import settings as hsf_settings
 from src.machines import store, start_autosave as start_machines_autosave, stop_autosave as stop_machines_autosave
@@ -331,6 +331,10 @@ class App(tk.Tk):
         self._bruteforce_dlg = None
         self._bruteforce_engine = None
         self._consultor_mode = False
+        self._agent_mode = False
+        self._llm_messages = []
+        self._last_ctx_hash = None
+        self._last_ctx = None
         self._fuzz_dlg = None
         self._tcpscan_running = False
         self._tcpscan_process = None
@@ -419,6 +423,10 @@ class App(tk.Tk):
         users_view._on_user_click = self._open_user_view
         self.visualizer.register_view("users", users_view)
 
+        people_view = PeopleView(self.visualizer)
+        people_view._on_person_click = self._open_people_view
+        self.visualizer.register_view("people", people_view)
+
         passwords_view = PasswordsView(self.visualizer)
         self.visualizer.register_view("passwords", passwords_view)
 
@@ -440,7 +448,7 @@ class App(tk.Tk):
 
     def _register_commands(self):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
-        self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "evidence"])
+        self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "people", "evidence"])
         self.console.register_command("use", self._cmd_use, "Use a tool")
         self.console.set_subcommands("use", ["scanner", "bannergrab", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "whatweb", "bruteforce", "hashcat"])
         self.console.register_command("connect", self._cmd_connect, "Connect via FTP/SFTP/SSH/WinRM")
@@ -450,12 +458,12 @@ class App(tk.Tk):
         self.console.register_command("stop", self._cmd_stop, "Stop listeners")
         self.console.set_subcommands("stop", ["shells-listener", "mdns-listener", "scanner", "bruteforce", "fuzzer", "webrecorder", "tcpscan", "udpscan", "whatweb", "bannergrab", "hashcat"])
         self.console.register_command("delete", self._cmd_delete, "Delete stored data")
-        self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell"])
+        self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell", "people"])
         self.console.register_command("add", self._cmd_add, "Add to inventory")
-        self.console.set_subcommands("add", ["machine", "domain", "credential", "user", "password", "hash"])
-        self.console.register_command("init", self._cmd_init, "Re-run initialization checks")
+        self.console.set_subcommands("add", ["machine", "domain", "credential", "user", "password", "hash", "people"])
         self.console.register_command("settings", self._cmd_settings, "Open settings dialog")
         self.console.register_command("consultor", self._cmd_consultor, "Enter LLM consultor mode")
+        self.console.register_command("agent", self._cmd_agent, "Enter LLM agent mode")
         self.console.register_command("exit", self._cmd_exit, "Close the application")
 
         self.console.set_system_handler(self._run_system)
@@ -469,6 +477,7 @@ class App(tk.Tk):
         self.console.set_arg2_provider("delete", "user", self._autocomplete_user)
         self.console.set_arg2_provider("delete", "password", self._autocomplete_password)
         self.console.set_arg2_provider("delete", "shell", self._autocomplete_shell)
+        self.console.set_arg2_provider("delete", "people", self._autocomplete_people)
 
         self.console.set_arg2_provider("view", "machine", self._autocomplete_store_ip_noall)
         self.console.set_arg2_provider("view", "domain", self._autocomplete_domain_only)
@@ -476,6 +485,7 @@ class App(tk.Tk):
         self.console.set_arg2_provider("view", "credential", self._autocomplete_credential_user_noall)
         self.console.set_arg2_provider("view", "hash", self._autocomplete_hash_noall)
         self.console.set_arg2_provider("view", "evidence", self._autocomplete_evidence_only)
+        self.console.set_arg2_provider("view", "people", self._autocomplete_people_noall)
 
         self.console.set_arg2_provider("connect", "ftp", self._autocomplete_store_ip_noall)
         self.console.set_arg2_provider("connect", "sftp", self._autocomplete_store_ip_noall)
@@ -814,6 +824,26 @@ class App(tk.Tk):
         return results
 
     @staticmethod
+    def _autocomplete_people(prefix):
+        from src.machines.people_db import load_people
+        results = ["all"]
+        for p in load_people():
+            label = f"{p.get('first_name','')} {p.get('last_name','')}".strip()
+            if label:
+                results.append(label)
+        return results
+
+    @staticmethod
+    def _autocomplete_people_noall(prefix):
+        from src.machines.people_db import load_people
+        results = []
+        for p in load_people():
+            label = f"{p.get('first_name','')} {p.get('last_name','')}".strip()
+            if label:
+                results.append(label)
+        return results
+
+    @staticmethod
     def _autocomplete_password(prefix):
         from src.machines.credential_db import load_passwords
         results = ["all"]
@@ -900,6 +930,11 @@ class App(tk.Tk):
                 self.visualizer.activate_view("evidences")
         elif sub in ("tools", "passwords", "inventory"):
             self.visualizer.activate_view(sub)
+        elif sub == "people":
+            if rest:
+                self._cmd_view_people(rest)
+            else:
+                self.visualizer.activate_view("people")
         else:
             self.console.error(f"Unknown view subcommand: {sub}. Use 'view list' to see available views.")
 
@@ -1658,6 +1693,19 @@ class App(tk.Tk):
             return
         self._open_user_view(args[0])
 
+    def _cmd_view_people(self, args):
+        if not args:
+            self.visualizer.activate_view("people")
+            return
+        from src.machines.people_db import load_people
+        target = " ".join(args).strip().lower()
+        for p in load_people():
+            label = f"{p.get('first_name','')} {p.get('last_name','')}".strip().lower()
+            if label == target:
+                self._open_people_view(p["id"])
+                return
+        self.console.warning(f"No person found for: {target}")
+
     def _cmd_view_evidence_name(self, args):
         if not args:
             self.console.body("Usage: view evidence <name>")
@@ -1697,6 +1745,15 @@ class App(tk.Tk):
             from .views import UserDetailView
             detail_view = UserDetailView(self.visualizer, username)
             detail_view._on_back_click = lambda: self.visualizer.activate_view("users")
+            self.visualizer.register_view(view_name, detail_view)
+        self.visualizer.activate_view(view_name)
+
+    def _open_people_view(self, person_id):
+        view_name = f"person_{person_id}"
+        if view_name not in self.visualizer.get_view_names():
+            from .views import PeopleDetailView
+            detail_view = PeopleDetailView(self.visualizer, person_id)
+            detail_view._on_back_click = lambda: self.visualizer.activate_view("people")
             self.visualizer.register_view(view_name, detail_view)
         self.visualizer.activate_view(view_name)
 
@@ -2018,6 +2075,28 @@ class App(tk.Tk):
             self.console.info("Active scan stopped")
         else:
             self.console.warning("No active scan is running.")
+
+    def _scan_interface(self, iface_name):
+        from src.network_iface import ifaddresses, AF_INET
+        addrs = ifaddresses(iface_name).get(AF_INET)
+        if not addrs:
+            return
+        iface_tuple = (iface_name, addrs[0]["addr"], addrs[0]["netmask"])
+        if self._active_scanner and self._active_scanner.is_running:
+            return
+        self._selected_interface = iface_tuple
+        import src.machines
+        src.machines.interface_name = iface_tuple[0]
+        src.machines.interface_ip = iface_tuple[1]
+        from src.tools.scanner.active import ActiveScanner
+        try:
+            self._active_scanner = ActiveScanner(
+                on_host_callback=self._on_host_discovered,
+                interface_name=iface_name,
+            )
+            self._active_scanner.start()
+        except RuntimeError:
+            pass
 
     def _scan_ip(self, ip):
         self.console.info(f"Checking {ip}...")
@@ -2846,15 +2925,20 @@ class App(tk.Tk):
         prompt = " ".join(args)
         self._consultor_ask(prompt)
 
+    def _cmd_agent(self, args):
+        if not args:
+            self._enter_agent_mode()
+            return
+        prompt = " ".join(args)
+        self._agent_ask(prompt)
+
     def _enter_consultor_mode(self):
         self._consultor_mode = True
-        self._consultor_messages = []
-        self.console.prompt_label.config(text="Consultor> ", fg="#e6b422")
         self.console.info(
-            "LLM Consultor mode. Type your prompt. "
-            "Press Ctrl+D or type 'exit' to leave."
+            "Consultor mode. Type your prompt. "
+            "Type 'exit' to leave."
         )
-        self.console.set_mode_handler(self._consultor_handler)
+        self.console.set_mode_handler(self._consultor_handler, "Consultor", "#e6b422")
 
     def _consultor_handler(self, text):
         text = text.strip()
@@ -2865,24 +2949,55 @@ class App(tk.Tk):
 
     def _leave_consultor_mode(self):
         self._consultor_mode = False
-        self._consultor_messages.clear()
-        self.console.prompt_label.config(text="HSF> ", fg="#ffffff")
         self.console.set_mode_handler(None)
+        self.console.prompt_label.config(text="HSF> ", fg="#ffffff")
         self.console.info("Left consultor mode.")
 
-    def _consultor_ask(self, prompt):
+    def _enter_agent_mode(self):
+        self._agent_mode = True
+        self.console.info(
+            "Agent mode. Type your instructions. "
+            "Type 'exit' to leave."
+        )
+        self.console.set_mode_handler(self._agent_handler, "Agent", "#5ba3ec")
+
+    def _agent_handler(self, text):
+        text = text.strip()
+        if text.lower() == "exit" or not text:
+            self._leave_agent_mode()
+            return
+        self._agent_ask(text)
+
+    def _leave_agent_mode(self):
+        self._agent_mode = False
+        self.console.set_mode_handler(None)
+        self.console.prompt_label.config(text="HSF> ", fg="#ffffff")
+        self.console.info("Left agent mode.")
+
+    def _agent_ask(self, prompt):
         import threading
-        if not hasattr(self, "_consultor_messages"):
-            self._consultor_messages = []
-        self._consultor_messages.append(
-            {"role": "user", "content": prompt})
+        self._llm_messages.append({"role": "user", "content": prompt})
+        self._inject_context()
         def _run():
             try:
                 from src.llm import LLMClient
-                client = LLMClient()
-                self.console.after(0, lambda: self.console.info(
-                    f"> {prompt}"))
-                stream = client.chat_stream(self._consultor_messages)
+                client = LLMClient(purpose="agent")
+                self.console.after(0, lambda: self.console.info(f"> {prompt}"))
+                def _on_tool(name, args, result):
+                    display = result
+                    if name == "webfetch":
+                        display = f"fetched {len(result)} chars"
+                    elif name == "websearch":
+                        display = f"searched ({len(result)} chars)"
+                    elif len(result) > 120:
+                        display = result[:117] + "..."
+                    self.console.after(0, lambda d=display: self.console.info(
+                        f"  [tool] {name} {str(args)[:60]} → {d}"))
+                stream = client.chat_with_tools(
+                    self._llm_messages, on_tool=_on_tool, tool_context=self)
+                if stream is None:
+                    self.console.after(0, lambda: self.console.info("  (no response)"))
+                    return
                 full = ""
                 buf = ""
                 for chunk in stream:
@@ -2893,21 +3008,219 @@ class App(tk.Tk):
                             lines = buf.split("\n")
                             for line in lines[:-1]:
                                 if line.strip():
-                                    self.console.after(
-                                        0,
-                                        lambda l=line: self.console.body(l.rstrip()))
+                                    self.console.after(0, lambda l=line: self.console.body(l.rstrip()))
                             buf = lines[-1]
                 if buf.strip():
-                    self.console.after(
-                        0, lambda b=buf: self.console.body(b.rstrip()))
-                self._consultor_messages.append(
-                    {"role": "assistant", "content": full})
+                    self.console.after(0, lambda b=buf: self.console.body(b.rstrip()))
+                self._llm_messages.append({"role": "assistant", "content": full})
                 self.console.after(0, lambda: self.console.info("---"))
             except Exception as e:
-                msg = str(e)
-                self.console.after(
-                    0, lambda m=msg: self.console.error(f"LLM error: {m}"))
+                self.console.after(0, lambda m=str(e): self.console.error(f"Agent error: {m}"))
         threading.Thread(target=_run, daemon=True).start()
+
+    def _consultor_ask(self, prompt):
+        import threading
+        self._llm_messages.append({"role": "user", "content": prompt})
+        self._inject_context()
+        def _run():
+            try:
+                from src.llm import LLMClient
+                client = LLMClient()
+                self.console.after(0, lambda: self.console.info(f"> {prompt}"))
+                stream = client.chat_stream(self._llm_messages)
+                full = ""
+                buf = ""
+                for chunk in stream:
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        full += chunk.choices[0].delta.content
+                        buf += chunk.choices[0].delta.content
+                        if "\n" in buf:
+                            lines = buf.split("\n")
+                            for line in lines[:-1]:
+                                if line.strip():
+                                    self.console.after(0, lambda l=line: self.console.body(l.rstrip()))
+                            buf = lines[-1]
+                if buf.strip():
+                    self.console.after(0, lambda b=buf: self.console.body(b.rstrip()))
+                self._llm_messages.append({"role": "assistant", "content": full})
+                self.console.after(0, lambda: self.console.info("---"))
+            except Exception as e:
+                self.console.after(0, lambda m=str(e): self.console.error(f"Consultor error: {m}"))
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _build_model_context(self):
+        parts = ["Current HSF application state:"]
+        from src.machines import store
+        machines = store.get_all()
+        from src.machines import machine_db
+        if machines:
+            parts.append(f"\nMachines ({len(machines)}):")
+            for m in machines:
+                info = f"  #{m.id} {m.ip}"
+                if getattr(m, "hostname", ""):
+                    info += f" ({m.hostname})"
+                if getattr(m, "domain", ""):
+                    info += f"  domain: {m.domain}"
+                if getattr(m, "device_type", ""):
+                    info += f"  device: {m.device_type}"
+                parts.append(info)
+                try:
+                    tcp = machine_db.load_tcp_ports(m.id)
+                    if tcp:
+                        ports = [str(p["port"]) for p in tcp]
+                        parts.append(f"    TCP: {', '.join(ports)}")
+                except Exception: pass
+                try:
+                    udp = machine_db.load_udp_ports(m.id)
+                    if udp:
+                        ports = [str(p["port"]) for p in udp]
+                        parts.append(f"    UDP: {', '.join(ports)}")
+                except Exception: pass
+                try:
+                    banners = machine_db.load_banners(m.id)
+                    if banners:
+                        parts.append(f"    Banners: {len(banners)} service(s)")
+                except Exception: pass
+                try:
+                    ws = machine_db.load_web_services(m.id)
+                    if ws:
+                        parts.append(f"    Web services: {len(ws)} (ports: "
+                            + ", ".join(str(w["port"]) for w in ws[:5]) + ")")
+                except Exception: pass
+        from src.machines import domain_db
+        domains = domain_db.list_all()
+        if domains:
+            parts.append(f"\nDomains ({len(domains)}):")
+            for d in domains:
+                parts.append(f"  {d}")
+                try:
+                    subs = domain_db.load_subdomains(d)
+                    if subs:
+                        snames = [s[0] for s in subs[:8]]
+                        parts.append(f"    Subdomains: {', '.join(snames)}"
+                            + (f" (+{len(subs)-8} more)" if len(subs)>8 else ""))
+                except Exception: pass
+                try:
+                    ds = domain_db.load_directories(d)
+                    if ds: parts.append(f"    Directories: {len(ds)} found")
+                except Exception: pass
+                try:
+                    ws = domain_db.load_web_services(d)
+                    if ws: parts.append(f"    Web services: {len(ws)} found")
+                except Exception: pass
+                try:
+                    dm = domain_db.load_domain_machines(d)
+                    if dm:
+                        ips = [m.get("machine_ip","") for m in dm[:5] if m.get("machine_ip")]
+                        if ips: parts.append(f"    Machines: {', '.join(ips)}")
+                except Exception: pass
+        from src.machines.credential_db import (
+            load_users, load_passwords, load_credentials, load_hashes)
+        users = load_users()
+        if users:
+            parts.append(f"\nUsers ({len(users)}):")
+            for u in users[:30]:
+                info = f"  #{u.get('id','?')} {u['username']}"
+                if u.get("type"): info += f" ({u['type']})"
+                if u.get("domain"): info += f"  domain: {u['domain']}"
+                if u.get("machine"): info += f"  machine: {u['machine']}"
+                parts.append(info)
+        from src.machines.people_db import load_people as load_ppl
+        people = load_ppl()
+        if people:
+            parts.append(f"\nPeople ({len(people)}):")
+            for p in people[:20]:
+                info = f"  #{p['id']} {p.get('first_name','')} {p.get('last_name','')}".strip()
+                if p.get("company"): info += f"  company: {p['company']}"
+                if p.get("role"): info += f"  role: {p['role']}"
+                if p.get("username"): info += f"  username: {p['username']}"
+                if p.get("domain"): info += f"  domain: {p['domain']}"
+                parts.append(info)
+        pwds = load_passwords()
+        if pwds: parts.append(f"\nPassword inventory: {len(pwds)} entries")
+        creds = load_credentials()
+        if creds:
+            parts.append(f"\nCredentials ({len(creds)}):")
+            for c in creds[:20]:
+                info = f"  #{c['id']} {c['username']}"
+                if c.get("domain"): info += f"  domain: {c['domain']}"
+                parts.append(info)
+        hashes = load_hashes()
+        if hashes:
+            parts.append(f"\nHashes ({len(hashes)}):")
+            for h in hashes[:20]:
+                parts.append(f"  #{h.get('id','?')} [{h.get('type','?')}] {h.get('hash','')[:24]}...")
+        import os
+        from src.hsf_paths import evidence_dir
+        ev_dir = str(evidence_dir())
+        if os.path.isdir(ev_dir):
+            evs = sorted(os.listdir(ev_dir))
+            if evs:
+                parts.append(f"\nEvidence sessions ({len(evs)}):")
+                for e in evs[:10]: parts.append(f"  {e}")
+        from src.shells import shell_db
+        sessions = shell_db.get_all()
+        if sessions:
+            parts.append(f"\nShell sessions ({len(sessions)}):")
+            for s in sessions[:10]:
+                parts.append(f"  {s.get('type','?')} #{s.get('id','?')}")
+        return "\n".join(parts)
+
+    def _inject_context(self):
+        import hashlib
+        ctx = self._build_model_context()
+        ctx_hash = hashlib.md5(ctx.encode()).hexdigest()
+
+        if ctx_hash == self._last_ctx_hash:
+            return
+
+        has_ctx = (self._llm_messages and
+                   self._llm_messages[0].get("_is_context"))
+
+        if not has_ctx:
+            self._llm_messages.insert(0, {
+                "role": "system", "content": ctx, "_is_context": True})
+        elif self._last_ctx:
+            self._llm_messages[0]["content"] = ctx
+            delta = self._build_context_delta(ctx)
+            if delta:
+                self._llm_messages.append({
+                    "role": "system", "content": delta, "_is_delta": True})
+        else:
+            self._llm_messages[0]["content"] = ctx
+
+        self._last_ctx_hash = ctx_hash
+        self._last_ctx = ctx
+        self._last_ctx = ctx
+
+    def _build_context_delta(self, new_ctx):
+        import difflib
+        old_lines = (self._last_ctx or "").splitlines()
+        new_lines = new_ctx.splitlines()
+        added = []
+        removed = []
+        for line in difflib.unified_diff(old_lines, new_lines,
+                                         lineterm="", n=0):
+            if line.startswith("@@") or line.startswith("---") or line.startswith("+++"):
+                continue
+            if line.startswith("+") and not line.startswith("+++"):
+                added.append(line[1:])
+            elif line.startswith("-") and not line.startswith("---"):
+                removed.append(line[1:])
+        if not added and not removed:
+            return ""
+        parts = ["Application state changed:"]
+        if removed:
+            parts.append("Removed:\n" + "\n".join(
+                f"  {r}" for r in removed[:30]))
+        if added:
+            parts.append("Added:\n" + "\n".join(
+                f"  {a}" for a in added[:30]))
+        if len(removed) > 30:
+            parts.append(f"  ... and {len(removed)-30} more removed lines")
+        if len(added) > 30:
+            parts.append(f"  ... and {len(added)-30} more added lines")
+        return "\n".join(parts)
 
     def _cmd_exit(self, args):
         self.destroy()
@@ -3093,6 +3406,8 @@ class App(tk.Tk):
             self._cmd_add_password(rest)
         elif sub == "hash":
             self._cmd_add_hash(rest)
+        elif sub == "people":
+            self._cmd_add_people(rest)
         else:
             self.console.error(f"Unknown add target: {sub}")
 
@@ -3203,6 +3518,28 @@ class App(tk.Tk):
         from src.machines.credential_db import save_hash_entry
         hid = save_hash_entry(hash_type, args[1], origin="manual")
         self.console.success(f"Hash #{hid} added")
+
+    def _cmd_add_people(self, args):
+        if not args:
+            self.console.body(
+                "Usage: add people <first_name> <last_name> "
+                "[company] [domain] [username] [role] [linkedin_url] "
+                "[source] [interests]"
+            )
+            return
+        from src.machines.people_db import save_person
+        pid = save_person(
+            first_name=args[0] if len(args) > 0 else "",
+            last_name=args[1] if len(args) > 1 else "",
+            company=args[2] if len(args) > 2 else "",
+            domain=args[3] if len(args) > 3 else "",
+            username=args[4] if len(args) > 4 else "",
+            role=args[5] if len(args) > 5 else "",
+            linkedin_url=args[6] if len(args) > 6 else "",
+            source=args[7] if len(args) > 7 else "manual",
+            interests=args[8] if len(args) > 8 else "",
+        )
+        self.console.success(f"Person #{pid} added")
 
     @staticmethod
     def _resolve_hash_type(type_str):
@@ -3447,6 +3784,8 @@ class App(tk.Tk):
             self._cmd_delete_password(args[1:])
         elif sub == "shell":
             self._cmd_delete_shell(args[1:])
+        elif sub == "people":
+            self._cmd_delete_people(args[1:])
         else:
             self.console.error(f"Unknown delete target: {sub}. Use: dbs, credential, evidence, hash, machine, domain, user, password, shell")
 
@@ -3611,6 +3950,28 @@ class App(tk.Tk):
             return
         delete_user(username)
         self.console.success(f"User '{username}' deleted")
+
+    def _cmd_delete_people(self, args):
+        if not args:
+            self.console.body("Usage: delete people <name|all>")
+            return
+        from src.machines.people_db import load_people, delete_person
+        target = " ".join(args).strip().lower()
+        if target == "all":
+            count = 0
+            for p in list(load_people()):
+                delete_person(p["id"])
+                count += 1
+            self.console.success(f"{count} people deleted")
+            return
+        for p in load_people():
+            label = f"{p.get('first_name','')} {p.get('last_name','')}".strip().lower()
+            if label == target:
+                delete_person(p["id"])
+                name = f"{p.get('first_name','')} {p.get('last_name','')}".strip()
+                self.console.success(f"Person '{name}' deleted")
+                return
+        self.console.warning(f"No person found for: {target}")
 
     def _cmd_delete_password(self, args):
         if not args:

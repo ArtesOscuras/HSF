@@ -37,6 +37,7 @@ credentials/credentials.dbs
 # External tools
 Villain/
 patator/
+opencode/
 
 # Large files
 src/lst/rockyou.txt

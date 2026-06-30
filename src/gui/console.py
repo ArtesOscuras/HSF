@@ -7,6 +7,7 @@ from tkinter import scrolledtext
 FG = "#ffffff"
 FG_DIM = "#888888"
 FG_CONSULTOR = "#e6b422"
+FG_AGENT = "#5ba3ec"
 BG = "#000000"
 BG_INPUT = "#111111"
 SUCCESS = "#00cc66"
@@ -48,6 +49,8 @@ class Console(tk.Frame):
         self._system_handler = None
         self._system_stop_handler = None
         self._mode_handler = None
+        self._mode_label = ""
+        self._mode_fg = FG
         self._is_system = False
         self._skip_release = False
         self._autocomplete_popup = None
@@ -214,8 +217,12 @@ class Console(tk.Frame):
     def set_system_stop_handler(self, handler):
         self._system_stop_handler = handler
 
-    def set_mode_handler(self, handler):
+    def set_mode_handler(self, handler, label="", fg=FG):
         self._mode_handler = handler
+        self._mode_label = label
+        self._mode_fg = fg
+        if handler:
+            self.prompt_label.config(text=f"{self._mode_label}> ", fg=self._mode_fg)
 
     def add_help_section(self, title, items):
         self.help_sections.append((title, items))
@@ -265,8 +272,9 @@ class Console(tk.Frame):
             if raw == "stop":
                 self._is_system = False
                 self.prompt_label.config(
-                    text="Consultor> " if self._mode_handler else "HSF> ",
-                    fg=FG_CONSULTOR if self._mode_handler else FG)
+                    text=f"{self._mode_label}> "
+                    if self._mode_handler else "HSF> ",
+                    fg=self._mode_fg if self._mode_handler else FG)
                 self.writeln(f"! stop", color=FG)
                 if self._system_stop_handler:
                     self._system_stop_handler()
@@ -406,8 +414,9 @@ class Console(tk.Frame):
         if self._is_system and not self.input_var.get() and event.keysym in ("BackSpace", "Delete"):
             self._is_system = False
             self.prompt_label.config(
-                text="Consultor> " if self._mode_handler else "HSF> ",
-                fg=FG_CONSULTOR if self._mode_handler else FG)
+                text=f"{self._mode_label}> "
+                if self._mode_handler else "HSF> ",
+                fg=self._mode_fg if self._mode_handler else FG)
             return
         if event.keysym in ("BackSpace", "Delete"):
             if self._filter_id:

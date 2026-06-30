@@ -18,3 +18,5 @@ from .ssh_detail import SSHDetailView
 from .reverse_shell_detail import ReverseShellDetailView
 from .tools import ToolsView
 from .inventory import InventoryView
+from .people import PeopleView
+from .people_detail import PeopleDetailView

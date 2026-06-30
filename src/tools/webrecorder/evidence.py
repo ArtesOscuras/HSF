@@ -121,9 +121,8 @@ The session metadata is stored in `session.json`.
 
 ## Purpose of This Recording
 
-This evidence was recorded for **software fingerprinting and vulnerability
-assessment**. Your task is to analyze the captured HTTP traffic and identify
-the following:
+This evidence was recorded for **software fingerprinting**. Your task is to
+analyze the captured HTTP traffic and identify the following:
 
 ### Server Software — Confirmed vs Probable
 
@@ -146,32 +145,20 @@ technology. Examples:
 
 Please structure your findings as follows:
 
-```
-## Software Identification
+  ## Software Identification
 
-### Confirmed
-| Software | Version | Evidence |
-|---|---|---|
-| Apache httpd | 2.4.58 | Server header |
-| Python | 3.8.5 | X-Powered-By / Werkzeug |
+  ### Confirmed
+  - Apache httpd 2.4.58 — Server header
+  - Python 3.8.5 — X-Powered-By / Werkzeug
 
-### Probable
-| Software | Confidence | Evidence |
-|---|---|---|
-| Flask | High | Werkzeug server + Python + session cookie format |
-| Bootstrap 5 | High | CSS class names + CDN URL |
-| SQLite | Medium | Lightweight app, no heavy DB headers |
-```
+  ### Probable
+  - Flask (High) — Werkzeug server + Python + session cookie format
+  - Bootstrap 5 (High) — CSS class names + CDN URL
+  - SQLite (Medium) — Lightweight app, no heavy DB headers
 
-### Vulnerability Assessment
-
-Based on the identified software versions and configurations, identify:
-
-1. Known web vulnerabilities and misconfigurations that are probable
-2. Sensitive data exposure
-3. Insecure cookie settings
-4. Outdated libraries
-5. Any other relevant security-related information
+If you find any obvious security concerns (e.g., a known vulnerable version,
+exposed credentials, missing HTTPS), mention them briefly, but do not perform
+a full vulnerability assessment.
 
 
 ### Evidence Directory Structure
@@ -192,7 +179,7 @@ Based on the identified software versions and configurations, identify:
 
 def save_llm_guide(target_dir):
     _ensure_dir(target_dir)
-    path = os.path.join(target_dir, "For LLM analisis.md")
+    path = os.path.join(target_dir, "For LLM analysis.md")
     with open(path, "w") as f:
         f.write(_LLM_GUIDE)
 

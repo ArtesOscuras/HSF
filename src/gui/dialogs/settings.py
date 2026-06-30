@@ -18,8 +18,8 @@ class SettingsDialog(tk.Toplevel):
         super().__init__(parent)
         self.title("HSF — Settings")
         sh = self.winfo_screenheight()
-        h = max(660, min(int(sh * 0.78), sh - 60))
-        w = max(800, int(self.winfo_screenwidth() * 0.70))
+        h = max(680, min(int(sh * 0.85), sh - 40))
+        w = max(850, int(self.winfo_screenwidth() * 0.75))
         x = (self.winfo_screenwidth() - w) // 2
         y = max(0, (sh - h) // 2 - 20)
         self.geometry(f"{w}x{h}+{x}+{y}")
@@ -403,6 +403,36 @@ class SettingsDialog(tk.Toplevel):
             highlightthickness=1, highlightcolor="#333333",
             highlightbackground="#333333",
         ).grid(row=row, column=1, sticky="ew", padx=15, pady=(5, 3))
+
+        detect_btn = tk.Label(
+            dialog, text=" Detect ", bg="#222222", fg=FG,
+            font=fonts.view_font(9), relief=tk.RAISED, bd=1,
+            padx=8, pady=3,
+        )
+        detect_btn.grid(row=row, column=2, padx=(5, 15), pady=(5, 3))
+        detect_btn.bind("<Enter>", lambda e: detect_btn.config(bg="#333333"))
+        detect_btn.bind("<Leave>", lambda e: detect_btn.config(bg="#222222"))
+
+        def _detect_models():
+            url = url_var.get().strip()
+            key = key_var.get().strip()
+            if not url:
+                feedback.config(text="Set a Base URL first.")
+                dialog.after(1500, lambda: feedback.config(text=""))
+                return
+            try:
+                from openai import OpenAI
+                client = OpenAI(base_url=url, api_key=key or "none")
+                models = client.models.list()
+                ids = [m.id for m in models.data]
+                models_var.set(", ".join(ids))
+                feedback.config(
+                    text=f"Found {len(ids)} model(s).")
+            except Exception as e:
+                feedback.config(text=f"Error: {e}")
+            dialog.after(3000, lambda: feedback.config(text=""))
+
+        detect_btn.bind("<Button-1>", lambda e: _detect_models())
         row += 1
 
         if not is_new:

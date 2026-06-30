@@ -248,8 +248,8 @@ class _ModelAnalysisDialog(tk.Toplevel):
 
     def _run_analysis(self):
         self.after(0, lambda: self._progress_label.config(
-            text="Collecting evidence files..."))
-        self.after(0, lambda: self._progress_var.set(10))
+            text="Scanning evidence directory..."))
+        self.after(0, lambda: self._progress_var.set(5))
 
         base = str(_evidence_dir())
         ev_path = os.path.join(base, self._ev_name)
@@ -257,28 +257,54 @@ class _ModelAnalysisDialog(tk.Toplevel):
             self._log("Evidence directory not found.\n", "muted")
             return
 
-        files = []
+        all_files = []
         for root, _dirs, fnames in os.walk(ev_path):
             for fname in fnames:
-                fpath = os.path.join(root, fname)
-                try:
-                    with open(fpath, "r", encoding="utf-8", errors="replace") as f:
-                        content = f.read()
-                except Exception:
-                    continue
-                rel = os.path.relpath(fpath, ev_path)
-                truncated = content[:20000]
-                if len(content) > 20000:
-                    truncated += "\n... (truncated)"
+                all_files.append((root, fname))
+        total = len(all_files)
+        if not total:
+            self._log("No files found.\n", "muted")
+            return
+
+        analysis_md = None
+        files = []
+        for i, (root, fname) in enumerate(all_files):
+            pct = 5 + int((i + 1) * 25 / max(total, 1))
+            self.after(0, lambda p=pct, n=i+1, t=total, f=fname: (
+                self._progress_var.set(p),
+                self._progress_label.config(
+                    text=f"Reading file {n}/{t}: {f}"),
+            ))
+            fpath = os.path.join(root, fname)
+            try:
+                with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                    content = f.read()
+            except Exception:
+                continue
+            rel = os.path.relpath(fpath, ev_path)
+            truncated = content[:20000]
+            if len(content) > 20000:
+                truncated += "\n... (truncated)"
+            if rel.lower() == "for llm analysis.md":
+                analysis_md = truncated
+            else:
                 files.append((rel, truncated))
 
-        self.after(0, lambda: self._progress_label.config(
-            text=f"Found {len(files)} files. Sending to model..."))
         self.after(0, lambda: self._progress_var.set(30))
+        self.after(0, lambda: self._progress_label.config(
+            text=f"Found {total} files. Building context..."))
 
         prompt = self._prompt_text.get("1.0", "end-1c").strip()
 
-        context = f"Evidence directory: {self._ev_name}\n\nFiles:\n\n"
+        context = f"Evidence directory: {self._ev_name}\n\n"
+        if analysis_md:
+            context += ("=== INSTRUCTIONS: For LLM analysis.md ===\n"
+                        "The following file contains specific analysis "
+                        "instructions. Follow them carefully.\n"
+                        f"{analysis_md}\n\n"
+                        "=== Evidence Files ===\n\n")
+        else:
+            context += "Files:\n\n"
         for rel, content in files:
             context += f"=== {rel} ===\n{content}\n\n"
 

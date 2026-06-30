@@ -396,8 +396,217 @@ HSF integrates with LLMs via an extensible provider system supporting any OpenAI
 
 * All LLM calls run in daemon threads. Output dispatched to main thread via `self.after(0, ...)`.
 * The `openai` library is used for all providers by setting a custom `base_url`.
-* System prompts are configurable per purpose (`consultor`, `evidence_analysis`).
-* Future: agent tool-calling, context injection from inventory (machines, credentials).
+* System prompts are configurable per purpose (`consultor`, `evidence_analysis`, `agent`).
+
+### Agent Tool-Calling (`src/llm/client.py` → `chat_with_tools()`)
+
+The agent mode gives the LLM the ability to call **25 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
+
+**Tool-calling loop** (up to 35 iterations):
+...
+5. If tool-calling exceeds 35 iterations, a `RuntimeError("Too many tool-calling iterations.")` is raised.
+
+The tool-calling phase does **not** stream — only the final assistant response is streamed.
+
+**Method signature:**
+
+```python
+def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None):
+```
+
+- `on_tool(name, args, result)` — callback invoked after each tool execution (used for console logging).
+- `tool_context` — passed through to tool handlers. In agent mode this is the `App` instance.
+
+### Tool Definitions (`src/llm/tools.py`)
+
+Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` variable. Each entry follows the `{"type": "function", "function": {...}}` format with `name`, `description`, and `parameters` (JSON Schema).
+
+**25 tools** in three categories:
+
+**Data tools** (14) — manipulate inventory, no `tool_context` needed:
+
+| Tool | Description |
+|---|---|
+| `add_user` | Add a user to inventory (`username`, `utype`, `machine`, `domain`, `origin`) |
+| `delete_user` | Delete a user by username |
+| `add_machine` | Add a machine (IP) to network inventory |
+| `add_domain` | Add a domain to inventory |
+| `add_credential` | Add credential (username + password or 32-char NT hash). Auto-detects NT hash vs plaintext; computes NTLM hash for plaintext passwords |
+| `add_hash` | Add hash entry to inventory (`hash_type`, `hash_value`, `hascat_mode` optional) |
+| `delete_hash` | Delete hash by ID |
+| `add_password` | Add password to inventory |
+| `delete_credential` | Delete credential by username |
+| `delete_machine` | Delete machine by IP or ID |
+| `delete_domain` | Delete domain by name |
+| `delete_password` | Delete password from inventory |
+| `add_person` | Add a person to the people inventory (`first_name`, `last_name`, `company`, `domain`, `username`, `role`, `linkedin_url`, `source`, `interests`) |
+| `delete_person` | Delete a person by ID |
+
+**Network tools** (9) — trigger operations, require `tool_context` (App instance):
+
+| Tool | Description |
+|---|---|
+| `list_interfaces` | List available network interfaces (skips `lo0`) |
+| `scan_interface` | Scan local network on an interface (`iface`) |
+| `scan_ip` | Scan a specific IP for OS/device identification |
+| `stop_scan` | Stop the active network scan |
+| `tcp_scan` | Scan TCP ports on an IP |
+| `udp_scan` | Scan common UDP ports on an IP |
+| `ping` | Ping an IP address |
+| `nslookup` | DNS lookup on a hostname |
+| `banner_grab` | Grab service banner from a port (default 80) |
+| `whatweb` | Identify web technologies via WhatWeb (default port 80) |
+
+**Web tools** (2) — fetch URLs and search the web, no `tool_context` needed:
+
+| Tool | Description |
+|---|---|
+| `webfetch` | Fetch content from a URL and return as text or markdown (`url`, optional `format`) |
+| `websearch` | Search the web via DuckDuckGo Lite and return results with title, URL, and snippet (`query`, optional `num_results`) |
+
+**Implementation details for web tools** (`src/llm/web.py`):
+
+- `fetch_url()` uses `requests` (already a dependency) with a Chrome 143 User-Agent.
+- On Cloudflare 403 challenges (`cf-mitigated: challenge` header), retries with `"opencode/HSF"` User-Agent.
+- HTML content is converted to markdown via `html2text` or to plain text via `html.parser` (stdlib).
+- Response size is capped at 5MB; timeout defaults to 30 seconds.
+- `web_search()` uses Exa MCP (`mcp.exa.ai`) as primary, with DuckDuckGo Lite as fallback on failure.
+- Exa MCP is called via JSON-RPC 2.0 over HTTP (see `src/llm/mcp.py`), with Server-Sent Events (SSE) response parsing. No API key required — Exa's MCP endpoint has an unauthenticated free tier (same approach as opencode).
+- Both handlers are synchronous (blocking HTTP calls) — they run inside the agent's daemon thread.
+
+**Registration pattern** — decorator-based with a `_HANDLERS` dict:
+
+```python
+_HANDLERS = {}
+
+def register(name):
+    def decorator(fn):
+        _HANDLERS[name] = fn
+        return fn
+    return decorator
+
+def execute(name, args_dict, tool_context=None):
+    handler = _HANDLERS.get(name)
+    if not handler:
+        return f"Unknown tool: {name}"
+    try:
+        return handler(args_dict, tool_context)
+    except Exception as e:
+        return f"Tool error: {e}"
+
+@register("add_user")
+def _add_user(args, ctx=None):
+    from src.machines.credential_db import save_user
+    save_user(..., origin="agent")
+    return f"User '{args.get('username')}' added."
+```
+
+**Rules for adding new tools:**
+
+1. Add the OpenAI function schema to the `TOOLS` list with `name`, `description`, and `parameters` (including `required` fields).
+2. Write a handler using `@register("tool_name")` decorator. Signature: `def _handler(args, ctx=None):`.
+3. Handlers must **always return a string** — this becomes the tool result sent back to the LLM.
+4. Data tools use `origin="agent"` to mark agent-created records.
+5. Network tools check `if not ctx: return "Cannot X: no tool context available."` — this guards against usage outside agent mode.
+6. Network tools call existing App methods (`ctx._scan_interface(iface)`, `ctx._cmd_tcpscan([ip])`, etc.) — do not duplicate scan logic in tool handlers.
+7. Tools that call blocking operations (scan, ping) should trigger async processes and return immediately with a status message. Results arrive later via the event bus and are reflected in the next context injection.
+
+### Agent Mode in `app.py`
+
+The agent mode is a **console mode handler**, similar to `consultor`. The `App` class manages the full lifecycle:
+
+**State variables** (initialized in `App.__init__`):
+
+```python
+self._agent_mode = False
+self._llm_messages = []        # shared conversation history (agent + consultor)
+self._last_ctx_hash = None     # MD5 hash of last injected context
+self._last_ctx = None          # last context string for delta computation
+```
+
+**Console command registration:**
+
+```python
+self.console.register_command("agent", self._cmd_agent, "Enter LLM agent mode")
+```
+
+**Lifecycle:**
+
+```python
+# Entry: `agent` (interactive) or `agent <prompt>` (one-shot)
+def _cmd_agent(self, args):
+    if not args:
+        self._enter_agent_mode()    # sets prompt to blue "Agent>"
+        return
+    prompt = " ".join(args)
+    self._agent_ask(prompt)          # one-shot, stays in HSF> prompt
+
+# Interactive handler — all console input routed here
+def _agent_handler(self, text):
+    if text.strip().lower() == "exit":
+        self._leave_agent_mode()     # restores "HSF> " prompt
+        return
+    self._agent_ask(text)
+
+# Core request — runs in daemon thread, dispatches to main via after()
+def _agent_ask(self, prompt):
+    self._llm_messages.append({"role": "user", "content": prompt})
+    self._inject_context()           # always inject before LLM call
+    def _run():
+        client = LLMClient(purpose="agent")   # uses "agent" system prompt
+        def _on_tool(name, args, result):
+            self.console.after(0, lambda: ...)
+        stream = client.chat_with_tools(
+            self._llm_messages, on_tool=_on_tool, tool_context=self)
+        # ... stream and append assistant response to _llm_messages
+    threading.Thread(target=_run, daemon=True).start()
+```
+
+### Context Injection (`_inject_context`, `_build_model_context`, `_build_context_delta`)
+
+Before every agent or consultor call, the full application state is serialized into a **system message** and injected into the conversation. This gives the LLM complete situational awareness without the user needing to describe the current inventory.
+
+**`_build_model_context()`** serializes:
+
+- **Machines**: IP, hostname, domain, device type, TCP/UDP ports, banners, web services
+- **Domains**: subdomains, directories, web services, associated machines
+- **Users**: username, type (local/domain), domain, machine
+- **Passwords**: count only
+- **Credentials**: username, domain
+- **Hashes**: ID, type, first 24 chars of hash
+- **Evidence sessions**: directory listing
+- **Shell sessions**: type and ID
+
+**Injection strategy:**
+
+1. On first call, the context is inserted at position 0 as `{"role": "system", "content": ctx, "_is_context": True}`.
+2. On subsequent calls, if the context has changed (detected via MD5 hash), the old context at position 0 is replaced.
+3. Additionally, a **delta message** is appended: `{"role": "system", "content": delta, "_is_delta": True}`. The delta is computed via `difflib.unified_diff` between the old and new context, showing only added/removed lines (max 30 each).
+4. If the context has not changed (same MD5 hash), no injection occurs — the previous context is still valid.
+
+This mechanism is **shared** between agent and consultor modes via the shared `self._llm_messages` list.
+
+### Agent vs Consultor Comparison
+
+| Feature | **Agent** mode | **Consultor** mode |
+|---|---|---|
+| Command | `agent` | `consultor` |
+| Purpose | `"agent"` | `"consultor"` |
+| System prompt | Penetration testing agent, concise | Helpful assistant, brief responses |
+| Tool calling | **Yes** — `chat_with_tools()` | **No** — `chat_stream()` |
+| Prompt color | Blue (`#5ba3ec`) | Yellow (`#e6b422`) |
+| Context injection | Yes | Yes |
+| Shared history | Yes (`self._llm_messages`) | Yes (`self._llm_messages`) |
+
+**Rules for agent development:**
+
+- All tool handlers must be in `src/llm/tools.py`. Do not scatter tool logic across the codebase.
+- Tool definitions and handlers are statically registered at import time via the `@register` decorator — no dynamic registration needed.
+- `tool_context` is always the `App` instance. Tool handlers should only call methods that are safe to invoke from a background thread (scanner start methods, CRUD operations on databases).
+- New tools that perform network operations MUST trigger async processes and return immediately — never block the daemon thread.
+- Web tools (`webfetch`, `websearch`) are exceptions: they run synchronously inside the daemon thread because the LLM needs the fetched content to reason about it. HTTP requests complete quickly (timeout ≤ 30s).
+- Tool results are strings returned to the LLM. Keep them concise and factual.
+- The `_llm_messages` list accumulates the full conversation including tool call/result messages. It is reset on each new `agent` or `consultor` session entry (not on each prompt within a session).
 
 ---
 
