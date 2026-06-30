@@ -214,6 +214,11 @@ class SettingsDialog(tk.Toplevel):
             padx=15, pady=6,
         )
         save_btn.pack(side=tk.RIGHT, padx=(5, 0))
+
+        def _main_save():
+            llm.config.save(self._config)
+            self._refresh_providers()
+
         save_btn.bind("<Button-1>", lambda e: _main_save())
         save_btn.bind("<Enter>", lambda e: save_btn.config(bg="#333333"))
         save_btn.bind("<Leave>", lambda e: save_btn.config(bg="#222222"))

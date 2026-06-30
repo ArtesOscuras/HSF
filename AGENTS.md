@@ -356,6 +356,35 @@ Guidelines:
 
 ---
 
+### LLM Integration (`src/llm/`)
+
+HSF integrates with LLMs via an extensible provider system supporting any OpenAI-compatible API (OpenAI, Anthropic, DeepSeek, Ollama, OpenRouter, etc.).
+
+**Architecture:**
+
+* `config.py` — Persists provider configs to `~/.local/share/hsf/llm.json`. Per-provider `base_url`, `api_key`, `models`. Active model is per-provider (`active_models` dict, not global — avoids cross-provider model confusion). System prompts stored in `prompts` dict (deep-merged from defaults on load).
+* `client.py` — `LLMClient` wraps `openai.OpenAI`. `chat()` / `chat_stream()`. Prepends purpose-specific system prompt unless messages already contain a `system` role. Timeout: 300s.
+* `settings.py` — Settings dialog: **Models** tab (provider cards, click to edit/set active) + **Prompts** tab (editable system prompts per purpose).
+
+**Console integration:**
+
+* `consultor` — enters LLM mode (prompt changes to yellow `Consultor>`). All input sent to LLM. Full conversation history maintained. `exit` leaves mode. Responses stream line-by-line.
+* `consultor <prompt>` — one-shot query without entering mode.
+* `settings` — opens LLM configuration dialog.
+
+**Evidence analysis:**
+
+* `_ModelAnalysisDialog` — opens from any evidence detail view. Reads all files from the evidence directory as context. Sends to LLM with the `evidence_analysis` system prompt. Chat input below output for follow-up questions (accumulated conversation history).
+
+**Rules:**
+
+* All LLM calls run in daemon threads. Output dispatched to main thread via `self.after(0, ...)`.
+* The `openai` library is used for all providers by setting a custom `base_url`.
+* System prompts are configurable per purpose (`consultor`, `evidence_analysis`).
+* Future: agent tool-calling, context injection from inventory (machines, credentials).
+
+---
+
 ## Guidelines for AI Agents
 
 When modifying this project:
