@@ -923,8 +923,10 @@ class HashcatDialog(tk.Toplevel):
 
     def _browse_rules(self):
         from tkinter import filedialog
+        from src.hsf_paths import rules_dir
         f = filedialog.askopenfilename(
             title="Select rules file",
+            initialdir=str(rules_dir()),
             filetypes=[("Rule files", "*.rule"), ("All files", "*.*")])
         if f:
             self._rules_var.set(f)

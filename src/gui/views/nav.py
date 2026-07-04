@@ -8,6 +8,7 @@ _ORDER = [
     ("Inventory", "inventory"),
     ("Shells", "shells"),
     ("Evidences", "evidences"),
+    ("Services", "services"),
 ]
 
 _frame = None

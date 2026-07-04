@@ -12,7 +12,7 @@ from src.network_iface import interfaces, ifaddresses, AF_INET
 from . import fonts
 from .console import Console
 from .visualizer import Visualizer
-from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UsersView, PasswordsView, HashListView, ShellListView, ToolsView, InventoryView, PeopleView
+from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UsersView, PasswordsView, HashListView, ShellListView, ToolsView, InventoryView, PeopleView, ServicesView
 from .dialogs import ScanDialog
 from src import settings as hsf_settings
 from src.machines import store, start_autosave as start_machines_autosave, stop_autosave as stop_machines_autosave
@@ -402,6 +402,25 @@ class App(tk.Tk):
         self._shell_listener.start()
         self.console.info(f"Reverse shell listener started on port {port}")
 
+    def _on_service_toggle(self, key, enable):
+        if key == "mdns":
+            if enable:
+                if self._passive_scanner is None or not self._passive_scanner.is_running:
+                    self._start_passive_scanner()
+                    self.console.info("Passive mDNS listener started")
+            else:
+                if self._passive_scanner and self._passive_scanner.is_running:
+                    self._passive_scanner.stop()
+                    self.console.info("Passive mDNS listener stopped")
+        elif key == "revershell":
+            if enable:
+                if self._shell_listener is None or not self._shell_listener.is_running:
+                    self._start_shell_listener()
+            else:
+                if self._shell_listener and self._shell_listener.is_running:
+                    self._shell_listener.stop()
+                    self.console.info("Reverse shell listener stopped")
+
     def _register_views(self):
         net_view = NetworkView(self.visualizer)
         net_view._on_machine_click = self._open_machine_view
@@ -446,11 +465,19 @@ class App(tk.Tk):
         shell_view._on_shell_click = self._open_shell_view
         self.visualizer.register_view("shells", shell_view)
 
+        services_view = ServicesView(self.visualizer)
+        services_view._on_toggle = self._on_service_toggle
+        services_view._check_state = lambda: (
+            self._passive_scanner is not None and self._passive_scanner.is_running,
+            self._shell_listener is not None and self._shell_listener.is_running,
+        )
+        self.visualizer.register_view("services", services_view)
+
     def _register_commands(self):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
-        self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "people", "evidence"])
+        self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "people", "evidence", "services"])
         self.console.register_command("use", self._cmd_use, "Use a tool")
-        self.console.set_subcommands("use", ["scanner", "bannergrab", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "whatweb", "bruteforce", "hashcat"])
+        self.console.set_subcommands("use", ["scanner", "bannergrab", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "whatweb", "bruteforce", "hashcat", "dicma"])
         self.console.register_command("connect", self._cmd_connect, "Connect via FTP/SFTP/SSH/WinRM")
         self.console.set_subcommands("connect", ["ftp", "sftp", "ssh", "winrm"])
         self.console.register_command("start", self._cmd_start, "Start listeners")
@@ -483,6 +510,7 @@ class App(tk.Tk):
         self.console.set_arg2_provider("view", "domain", self._autocomplete_domain_only)
         self.console.set_arg2_provider("view", "shell", self._autocomplete_shell_noall)
         self.console.set_arg2_provider("view", "credential", self._autocomplete_credential_user_noall)
+        self.console.set_arg2_provider("view", "user", self._autocomplete_user_noall)
         self.console.set_arg2_provider("view", "hash", self._autocomplete_hash_noall)
         self.console.set_arg2_provider("view", "evidence", self._autocomplete_evidence_only)
         self.console.set_arg2_provider("view", "people", self._autocomplete_people_noall)
@@ -928,7 +956,7 @@ class App(tk.Tk):
                 self._cmd_view_evidence_name(rest)
             else:
                 self.visualizer.activate_view("evidences")
-        elif sub in ("tools", "passwords", "inventory"):
+        elif sub in ("tools", "passwords", "inventory", "services"):
             self.visualizer.activate_view(sub)
         elif sub == "people":
             if rest:
@@ -979,7 +1007,7 @@ class App(tk.Tk):
 
     def _cmd_use(self, args):
         if not args:
-            self.console.body("Usage: use <scanner|bannergrab|fuzzer|webrecorder|nslookup|ping|tcpscan|udpscan|whatweb|ftp> ...")
+            self.console.body("Usage: use <scanner|bannergrab|fuzzer|webrecorder|nslookup|ping|tcpscan|udpscan|whatweb|ftp|dicma> ...")
             return
         sub = args[0].lower()
         rest = args[1:]
@@ -1005,6 +1033,8 @@ class App(tk.Tk):
             self._cmd_use_bruteforce(rest)
         elif sub == "hashcat":
             self._cmd_use_hashcat(rest)
+        elif sub == "dicma":
+            self._cmd_use_dicma(rest)
         else:
             self.console.error(f"Unknown tool: {sub}")
 
@@ -1362,6 +1392,10 @@ class App(tk.Tk):
         )
         self._hashcat_engine = engine
         engine.start()
+
+    def _cmd_use_dicma(self, args):
+        from .dialogs.dicma import DicmaDialog
+        DicmaDialog(self)
 
     def _cmd_connect(self, args):
         if not args:
@@ -1770,6 +1804,8 @@ class App(tk.Tk):
             self._cmd_use_bruteforce([])
         elif action == "hashcat":
             self._cmd_use_hashcat([])
+        elif action == "dicma":
+            self._cmd_use_dicma([])
 
     def _on_inventory_click(self, action):
         self.visualizer.activate_view(action)

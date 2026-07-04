@@ -52,6 +52,19 @@ def lst_dir() -> Path:
                         _dst.write_bytes(f.read_bytes())
     return p
 
+def rules_dir() -> Path:
+    p = _get_data_home() / "rules"
+    p.mkdir(parents=True, exist_ok=True)
+    if not any(p.iterdir()):
+        src = _PKG / "rules"
+        if src.is_dir():
+            for f in src.iterdir():
+                if f.is_file():
+                    _dst = p / f.name
+                    if not _dst.exists():
+                        _dst.write_bytes(f.read_bytes())
+    return p
+
 def settings_file() -> Path:
     p = _get_data_home() / "settings.json"
     return p

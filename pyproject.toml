@@ -27,4 +27,4 @@ hsf = "src.cli:main"
 include = ["src*"]
 
 [tool.setuptools.package-data]
-src = ["fonts/*", "icons/*", "data/*", "lst/*"]
+src = ["fonts/*", "icons/*", "data/*", "lst/*", "rules/*"]
