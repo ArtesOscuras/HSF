@@ -120,6 +120,12 @@ class InventoryView(BaseView):
             {"name": "Credentials", "action": "credentials",
              "desc": "Valid users and password / hash_nt",
              "icon": "credential.png", "enabled": True},
+            {"name": "Dictionarys", "action": "dictionarys",
+             "desc": "Dictionary wordlists",
+             "icon": "dictionary.png", "enabled": True},
+            {"name": "Rules", "action": "rules_view",
+             "desc": "Hashcat rules",
+             "icon": "rules.png", "enabled": True},
         ]
 
         self._font18 = fonts.view_font(18)

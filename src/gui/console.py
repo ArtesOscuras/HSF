@@ -739,16 +739,22 @@ class Console(tk.Frame):
                         arg2_value = parts3[2] if len(parts3) > 2 else ""
                         raw3 = provider3(arg3_text, arg2_value)
                         normalized3 = []
+                        hint3 = None
                         for it in raw3:
                             if isinstance(it, tuple):
                                 d, i = it
                             else:
                                 d, i = it, it
                             if (cmd_prefix, parts[1]) in self._arg3_contains:
-                                if not arg3_text or arg3_text in d:
-                                    normalized3.append((d, i))
+                                if not arg3_text or arg3_text in d or not i:
+                                    if not i:
+                                        hint3 = (d, i)
+                                    else:
+                                        normalized3.append((d, i))
                             elif i.startswith(arg3_text) or any(self._matches_word(arg3_text, w) for w in d.split()):
                                 normalized3.append((d, i))
+                        if not normalized3 and hint3:
+                            normalized3 = [hint3]
                         if normalized3:
                             self._show_arg3_popup(normalized3)
                         else:
@@ -763,18 +769,28 @@ class Console(tk.Frame):
                     provider4 = self._arg4_providers.get((cmd_prefix, parts[1]))
                     if provider4:
                         arg4_text = parts4[4] if len(parts4) > 4 else ""
-                        raw4 = provider4(arg4_text)
+                        arg2_val = parts3[2] if len(parts3) > 2 else ""
+                        try:
+                            raw4 = provider4(arg4_text, arg2_val) if arg2_val else provider4(arg4_text)
+                        except TypeError:
+                            raw4 = provider4(arg4_text)
                         normalized4 = []
+                        hint4 = None
                         for it in raw4:
                             if isinstance(it, tuple):
                                 d, i = it
                             else:
                                 d, i = it, it
                             if (cmd_prefix, parts[1]) in self._arg4_contains:
-                                if not arg4_text or arg4_text in d:
-                                    normalized4.append((d, i))
+                                if not arg4_text or arg4_text in d or not i:
+                                    if not i:
+                                        hint4 = (d, i)
+                                    else:
+                                        normalized4.append((d, i))
                             elif i.startswith(arg4_text) or any(self._matches_word(arg4_text, w) for w in d.split()):
                                 normalized4.append((d, i))
+                        if not normalized4 and hint4:
+                            normalized4 = [hint4]
                         if normalized4:
                             self._show_arg4_popup(normalized4)
                         else:
@@ -789,18 +805,28 @@ class Console(tk.Frame):
                     provider5 = self._arg5_providers.get((cmd_prefix, parts[1]))
                     if provider5:
                         arg5_text = parts4[5] if len(parts4) > 5 else ""
-                        raw5 = provider5(arg5_text)
+                        arg2_val = parts3[2] if len(parts3) > 2 else ""
+                        try:
+                            raw5 = provider5(arg5_text, arg2_val) if arg2_val else provider5(arg5_text)
+                        except TypeError:
+                            raw5 = provider5(arg5_text)
                         normalized5 = []
+                        hint5 = None
                         for it in raw5:
                             if isinstance(it, tuple):
                                 d, i = it
                             else:
                                 d, i = it, it
                             if (cmd_prefix, parts[1]) in self._arg5_contains:
-                                if not arg5_text or arg5_text in d:
-                                    normalized5.append((d, i))
+                                if not arg5_text or arg5_text in d or not i:
+                                    if not i:
+                                        hint5 = (d, i)
+                                    else:
+                                        normalized5.append((d, i))
                             elif i.startswith(arg5_text) or any(self._matches_word(arg5_text, w) for w in d.split()):
                                 normalized5.append((d, i))
+                        if not normalized5 and hint5:
+                            normalized5 = [hint5]
                         if normalized5:
                             self._show_arg5_popup(normalized5)
                         else:

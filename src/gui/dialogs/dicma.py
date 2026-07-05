@@ -13,7 +13,7 @@ ERR_COLOR = "#f44747"
 
 
 class DicmaDialog(tk.Toplevel):
-    def __init__(self, parent):
+    def __init__(self, parent, active_tab=None):
         super().__init__(parent)
         self.title("DICMA — Dictionary Maker")
         self.geometry("760x720")
@@ -74,6 +74,9 @@ class DicmaDialog(tk.Toplevel):
         self._build_rules_tab()
 
         self._running = False
+
+        if active_tab is not None:
+            self._nb.select(active_tab)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 

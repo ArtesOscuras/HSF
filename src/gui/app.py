@@ -12,7 +12,7 @@ from src.network_iface import interfaces, ifaddresses, AF_INET
 from . import fonts
 from .console import Console
 from .visualizer import Visualizer
-from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UsersView, PasswordsView, HashListView, ShellListView, ToolsView, InventoryView, PeopleView, ServicesView
+from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UsersView, PasswordsView, HashListView, ShellListView, ToolsView, InventoryView, PeopleView, ServicesView, DictionarysView, RulesView
 from .dialogs import ScanDialog
 from src import settings as hsf_settings
 from src.machines import store, start_autosave as start_machines_autosave, stop_autosave as stop_machines_autosave
@@ -473,9 +473,17 @@ class App(tk.Tk):
         )
         self.visualizer.register_view("services", services_view)
 
+        dictionarys_view = DictionarysView(self.visualizer)
+        dictionarys_view._on_item_click = self._open_dictionary_view
+        self.visualizer.register_view("dictionarys", dictionarys_view)
+
+        rules_view = RulesView(self.visualizer)
+        rules_view._on_item_click = self._open_rule_view
+        self.visualizer.register_view("rules_view", rules_view)
+
     def _register_commands(self):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
-        self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "people", "evidence", "services"])
+        self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "people", "evidence", "services", "dictionary", "rule"])
         self.console.register_command("use", self._cmd_use, "Use a tool")
         self.console.set_subcommands("use", ["scanner", "bannergrab", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "whatweb", "bruteforce", "hashcat", "dicma"])
         self.console.register_command("connect", self._cmd_connect, "Connect via FTP/SFTP/SSH/WinRM")
@@ -485,9 +493,9 @@ class App(tk.Tk):
         self.console.register_command("stop", self._cmd_stop, "Stop listeners")
         self.console.set_subcommands("stop", ["shells-listener", "mdns-listener", "scanner", "bruteforce", "fuzzer", "webrecorder", "tcpscan", "udpscan", "whatweb", "bannergrab", "hashcat"])
         self.console.register_command("delete", self._cmd_delete, "Delete stored data")
-        self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell", "people"])
+        self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell", "people", "dictionary", "rule"])
         self.console.register_command("add", self._cmd_add, "Add to inventory")
-        self.console.set_subcommands("add", ["machine", "domain", "credential", "user", "password", "hash", "people"])
+        self.console.set_subcommands("add", ["machine", "domain", "credential", "user", "password", "hash", "people", "dictionary", "rule"])
         self.console.register_command("settings", self._cmd_settings, "Open settings dialog")
         self.console.register_command("consultor", self._cmd_consultor, "Enter LLM consultor mode")
         self.console.register_command("agent", self._cmd_agent, "Enter LLM agent mode")
@@ -505,6 +513,8 @@ class App(tk.Tk):
         self.console.set_arg2_provider("delete", "password", self._autocomplete_password)
         self.console.set_arg2_provider("delete", "shell", self._autocomplete_shell)
         self.console.set_arg2_provider("delete", "people", self._autocomplete_people)
+        self.console.set_arg2_provider("delete", "dictionary", self._autocomplete_delete_dictionary)
+        self.console.set_arg2_provider("delete", "rule", self._autocomplete_delete_rules)
 
         self.console.set_arg2_provider("view", "machine", self._autocomplete_store_ip_noall)
         self.console.set_arg2_provider("view", "domain", self._autocomplete_domain_only)
@@ -514,6 +524,8 @@ class App(tk.Tk):
         self.console.set_arg2_provider("view", "hash", self._autocomplete_hash_noall)
         self.console.set_arg2_provider("view", "evidence", self._autocomplete_evidence_only)
         self.console.set_arg2_provider("view", "people", self._autocomplete_people_noall)
+        self.console.set_arg2_provider("view", "dictionary", self._autocomplete_dictionary_noall)
+        self.console.set_arg2_provider("view", "rule", self._autocomplete_rules_noall)
 
         self.console.set_arg2_provider("connect", "ftp", self._autocomplete_store_ip_noall)
         self.console.set_arg2_provider("connect", "sftp", self._autocomplete_store_ip_noall)
@@ -558,8 +570,161 @@ class App(tk.Tk):
         self.console.set_arg2_provider("use", "hashcat", self._autocomplete_hashcat_hash)
         self.console.set_arg3_provider("use", "hashcat", self._autocomplete_hashcat_wordlist)
 
+        self.console.set_arg2_provider("use", "dicma", self._autocomplete_dicma_mode)
+        self.console.set_arg3_provider("use", "dicma", self._autocomplete_dicma_arg3)
+        self.console.set_arg3_filter_contains("use", "dicma")
+        self.console.set_arg4_provider("use", "dicma", self._autocomplete_dicma_arg4)
+        self.console.set_arg5_provider("use", "dicma", self._autocomplete_dicma_arg5)
+        self.console.set_arg4_filter_contains("use", "dicma")
+        self.console.set_arg5_filter_contains("use", "dicma")
+
         self.console.set_arg3_provider("add", "credential", self._autocomplete_password_noall)
         self.console.set_arg3_provider("add", "hash", self._autocomplete_format_hash)
+
+    @staticmethod
+    def _autocomplete_dicma_mode(prefix):
+        return ["users", "related", "passwords", "rules"]
+
+    @staticmethod
+    def _autocomplete_dicma_arg3(prefix, arg2_value=None):
+        if arg2_value == "users":
+            return App._autocomplete_dicma_users(prefix)
+        elif arg2_value == "related":
+            return App._autocomplete_dicma_related(prefix)
+        elif arg2_value == "passwords":
+            return App._autocomplete_dicma_passwords(prefix)
+        elif arg2_value == "rules":
+            return App._autocomplete_dicma_rules_dict(prefix)
+        return []
+
+    @staticmethod
+    def _autocomplete_dicma_arg4(prefix, arg2_value=None):
+        if arg2_value == "users":
+            return [("<output_name.txt>", "")]
+        if arg2_value == "related":
+            return [("<examp 30,10,2>", "")]
+        if arg2_value in ("passwords", "rules"):
+            return ["light", "normal", "full"]
+        return []
+
+    @staticmethod
+    def _autocomplete_dicma_arg5(prefix, arg2_value=None):
+        if arg2_value == "users":
+            return []
+        if arg2_value == "rules":
+            return [("<output_name.rule>", "")]
+        return [("<output_name.txt>", "")]
+
+    @staticmethod
+    def _autocomplete_dicma_users(prefix):
+        results = ["all"]
+        from src.machines.people_db import load_people
+        for p in load_people():
+            full = f"{p.get('first_name','')} {p.get('last_name','')}".strip()
+            if full:
+                insert = full.replace(" ", "_")
+                results.append((insert, insert))
+        return results
+
+    @staticmethod
+    def _autocomplete_dicma_related(prefix):
+        from src.machines.people_db import load_people
+        results = [("<custom_word>", "")]
+        for p in load_people():
+            full = f"{p.get('first_name','')} {p.get('last_name','')}".strip()
+            if full:
+                insert = full.replace(" ", "_")
+                results.append((insert, insert))
+        return results
+
+    @staticmethod
+    def _autocomplete_dicma_passwords(prefix):
+        from src.machines.credential_db import load_passwords
+        from src.machines.people_db import load_people
+        results = [("<word>", ""),
+                   ("all-passwords", "all-passwords"),
+                   ("all-interests", "all-interests"),
+                   ("all", "all")]
+        for pw in load_passwords():
+            if pw:
+                results.append((pw, pw))
+        for p in load_people():
+            full = f"{p.get('first_name','')} {p.get('last_name','')}".strip()
+            if full:
+                insert = full.replace(" ", "_")
+                results.append((insert, insert))
+        return results
+
+    def _autocomplete_dicma_arg5(self, prefix):
+        try:
+            full = self.console._entry.get() if hasattr(self.console, '_entry') else ""
+            parts = full.split()
+            if len(parts) >= 2 and parts[0] == "use" and parts[1] == "dicma":
+                if len(parts) >= 3 and parts[2] == "rules":
+                    return [("<output_name.rule>", "")]
+        except Exception:
+            pass
+        return [("<output_name.txt>", "")]
+
+    @staticmethod
+    def _autocomplete_dicma_rules_dict(prefix):
+        from src.hsf_paths import lst_dir
+        results = []
+        try:
+            for fname in sorted(os.listdir(str(lst_dir()))):
+                if os.path.isfile(os.path.join(str(lst_dir()), fname)):
+                    results.append((fname, fname))
+        except OSError:
+            pass
+        return results
+
+    @staticmethod
+    def _autocomplete_delete_rules(prefix):
+        from src.hsf_paths import rules_dir
+        results = ["all"]
+        try:
+            for fname in sorted(os.listdir(str(rules_dir()))):
+                if os.path.isfile(os.path.join(str(rules_dir()), fname)):
+                    results.append((fname, fname))
+        except OSError:
+            pass
+        return results
+
+    @staticmethod
+    def _autocomplete_delete_dictionary(prefix):
+        from src.hsf_paths import lst_dir
+        results = ["all"]
+        try:
+            for fname in sorted(os.listdir(str(lst_dir()))):
+                if os.path.isfile(os.path.join(str(lst_dir()), fname)):
+                    results.append((fname, fname))
+        except OSError:
+            pass
+        return results
+
+    @staticmethod
+    def _autocomplete_dictionary_noall(prefix):
+        from src.hsf_paths import lst_dir
+        results = []
+        try:
+            for fname in sorted(os.listdir(str(lst_dir()))):
+                if os.path.isfile(os.path.join(str(lst_dir()), fname)):
+                    results.append((fname, fname))
+        except OSError:
+            pass
+        return results
+
+    @staticmethod
+    def _autocomplete_rules_noall(prefix):
+        from src.hsf_paths import rules_dir
+        results = []
+        try:
+            for fname in sorted(os.listdir(str(rules_dir()))):
+                if os.path.isfile(os.path.join(str(rules_dir()), fname)):
+                    results.append((fname, fname))
+        except OSError:
+            pass
+        return results
 
     @staticmethod
     def _autocomplete_store_ip(prefix):
@@ -958,6 +1123,16 @@ class App(tk.Tk):
                 self.visualizer.activate_view("evidences")
         elif sub in ("tools", "passwords", "inventory", "services"):
             self.visualizer.activate_view(sub)
+        elif sub == "dictionary":
+            if rest:
+                self._cmd_view_file(rest, "dictionary")
+            else:
+                self.visualizer.activate_view("dictionarys")
+        elif sub == "rule":
+            if rest:
+                self._cmd_view_file(rest, "rule")
+            else:
+                self.visualizer.activate_view("rules_view")
         elif sub == "people":
             if rest:
                 self._cmd_view_people(rest)
@@ -965,6 +1140,25 @@ class App(tk.Tk):
                 self.visualizer.activate_view("people")
         else:
             self.console.error(f"Unknown view subcommand: {sub}. Use 'view list' to see available views.")
+
+    def _cmd_view_file(self, args, file_type):
+        if not args:
+            return
+        fname = args[0]
+        if file_type == "dictionary":
+            from src.hsf_paths import lst_dir
+            base = str(lst_dir())
+            title = f"Dictionary \u2014 {fname}"
+        else:
+            from src.hsf_paths import rules_dir
+            base = str(rules_dir())
+            title = f"Rule \u2014 {fname}"
+        path = os.path.join(base, fname)
+        if not os.path.isfile(path):
+            self.console.warning(f"File not found: {fname}")
+            return
+        from .views.file_detail import open_file_search
+        open_file_search(self, path, title)
 
     def _resolve_target(self, target):
         if re.match(r"^\d+\.\d+\.\d+\.\d+$", target):
@@ -1395,7 +1589,223 @@ class App(tk.Tk):
 
     def _cmd_use_dicma(self, args):
         from .dialogs.dicma import DicmaDialog
-        DicmaDialog(self)
+        from src.machines.people_db import load_people
+        import threading
+
+        if not args:
+            DicmaDialog(self)
+            return
+
+        mode = args[0].lower() if args else ""
+        uname = lambda n: n.replace("_", " ") if "_" in n else n
+
+        if mode == "users":
+            if len(args) < 2:
+                DicmaDialog(self, active_tab=0)
+                return
+            target = uname(args[1])
+            out_file = args[2] if len(args) > 2 else "dicma_users.txt"
+            names = []
+            if target == "all":
+                for p in load_people():
+                    full = f"{p['first_name']} {p['last_name']}".strip()
+                    if full:
+                        names.append(full)
+            else:
+                names.append(target)
+            if not names:
+                self.console.warning("No names found.")
+                return
+            self.console.info(f"Dicma users: {len(names)} name(s) → {out_file}")
+            self._run_dicma_users(names, out_file, light=False)
+
+        elif mode == "related":
+            if len(args) < 2:
+                DicmaDialog(self, active_tab=1)
+                return
+            target = uname(args[1])
+            n_str = args[2] if len(args) > 2 else "50"
+            out_file = args[3] if len(args) > 3 else "dicma_related.txt"
+
+            words = []
+            if target == "<custom_word>":
+                self.console.warning("Use the dialog for custom words.")
+                DicmaDialog(self, active_tab=1)
+                return
+            for p in load_people():
+                full = f"{p['first_name']} {p['last_name']}".strip()
+                if full == target:
+                    raw = (p.get("interests") or "").strip()
+                    if raw:
+                        for part in raw.replace(",", " ").replace(";", " ").split():
+                            part = part.strip().lower()
+                            if part and len(part) >= 2:
+                                words.append(part)
+                    break
+            if not words:
+                self.console.warning(f"No interests found for: {target}")
+                return
+            try:
+                parts = [int(x.strip()) for x in n_str.split(",")]
+                n1 = parts[0] if len(parts) > 0 else 50
+                n2 = parts[1] if len(parts) > 1 else 0
+                n3 = parts[2] if len(parts) > 2 else 0
+            except ValueError:
+                self.console.error(f"Invalid n format: {n_str}. Use e.g. 30,10,3")
+                return
+            self.console.info(f"Dicma related: {len(words)} word(s) n1={n1} n2={n2} n3={n3} → {out_file}")
+            self._run_dicma_related(words, out_file, n1, n2, n3)
+
+        elif mode == "passwords":
+            if len(args) < 2:
+                DicmaDialog(self, active_tab=2)
+                return
+            target = args[1]
+            pwd_mode = (args[2] if len(args) > 2 else "normal").lower()
+            out_file = args[3] if len(args) > 3 else "dicma_passwords.txt"
+
+            words = []
+            if target == "all-passwords":
+                from src.machines.credential_db import load_passwords
+                words = [p for p in load_passwords() if p]
+            elif target == "all-interests":
+                for p in load_people():
+                    raw = (p.get("interests") or "").strip()
+                    if raw:
+                        for part in raw.replace(",", " ").replace(";", " ").split():
+                            part = part.strip().lower()
+                            if part and len(part) >= 2:
+                                words.append(part)
+                words = list(set(words))
+            elif target == "all":
+                from src.machines.credential_db import load_passwords
+                words = [p for p in load_passwords() if p]
+                for p in load_people():
+                    raw = (p.get("interests") or "").strip()
+                    if raw:
+                        for part in raw.replace(",", " ").replace(";", " ").split():
+                            part = part.strip().lower()
+                            if part and len(part) >= 2:
+                                words.append(part)
+                words = list(set(words))
+            else:
+                target_uname = uname(target)
+                for p in load_people():
+                    full = f"{p['first_name']} {p['last_name']}".strip()
+                    if full == target_uname:
+                        raw = (p.get("interests") or "").strip()
+                        if raw:
+                            for part in raw.replace(",", " ").replace(";", " ").split():
+                                part = part.strip().lower()
+                                if part and len(part) >= 2:
+                                    words.append(part)
+                        break
+                if not words:
+                    words.append(target)
+            if not words:
+                self.console.warning("No words found.")
+                return
+            light = pwd_mode == "light"
+            full = pwd_mode == "full"
+            mode_label = pwd_mode
+            self.console.info(f"Dicma passwords: {len(words)} word(s) mode={mode_label} → {out_file}")
+            self._run_dicma_passwords(words, out_file, light=light, full=full)
+
+        elif mode == "rules":
+            if len(args) < 2:
+                DicmaDialog(self, active_tab=3)
+                return
+            dict_file = args[1]
+            rules_mode = (args[2] if len(args) > 2 else "normal").lower()
+            out_file = args[3] if len(args) > 3 else "dicma_rules.rule"
+
+            self.console.info(f"Dicma rules: dict={dict_file} mode={rules_mode} → {out_file}")
+            self._run_dicma_rules(dict_file, out_file, light=(rules_mode == "light"), full=(rules_mode == "full"))
+
+        else:
+            self.console.error(f"Unknown dicma mode: {mode}. Use users/related/passwords/rules.")
+
+    def _run_dicma_users(self, names, out_file, light=False):
+        from src.hsf_paths import lst_dir
+        out_path = os.path.join(str(lst_dir()), out_file)
+        self._run_dicma_async(lambda: self._dicma_users_thread(names, out_path, light))
+
+    def _dicma_users_thread(self, names, out_path, light):
+        from src.tools.dicma import engine as dicma
+        dicma.LIGHT_MODE = light
+        dicma.OUTPUT_FILE_BULEAN = True
+        dicma.VERBOSE = False
+        names_str = ", ".join(names)
+        dicma.process_input_user(names_str, out_path)
+        self.console.after(0, lambda: self.console.success(
+            f"Users dictionary saved to: {out_path}"))
+
+    def _run_dicma_related(self, words, out_file, n1, n2, n3):
+        from src.hsf_paths import lst_dir
+        out_path = os.path.join(str(lst_dir()), out_file)
+        self._run_dicma_async(lambda: self._dicma_related_thread(words, out_path, n1, n2, n3))
+
+    def _dicma_related_thread(self, words, out_path, n1, n2, n3):
+        from src.llm.config import load, get_provider, get_active_model
+        from src.tools.dicma import engine as dicma
+        config = load()
+        provider = get_provider(config)
+        model = get_active_model(config)
+        api_key = provider.get("api_key", "")
+        base_url = provider.get("base_url", "")
+        if not api_key or not base_url or not model:
+            self.console.after(0, lambda: self.console.error(
+                "No LLM config found. Configure in Settings → Models."))
+            return
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        expanded = dicma.ml_expand_words(client, model, words, n1, n2, n3)
+        result = [w for w in expanded if w not in set(words)]
+        dicma.save_list_to_file(result, out_path)
+        self.console.after(0, lambda: self.console.success(
+            f"Related words ({len(result)}) saved to: {out_path}"))
+
+    def _run_dicma_passwords(self, words, out_file, light=False, full=False):
+        from src.hsf_paths import lst_dir
+        out_path = os.path.join(str(lst_dir()), out_file)
+        self._run_dicma_async(lambda: self._dicma_passwords_thread(words, out_path, light, full))
+
+    def _dicma_passwords_thread(self, words, out_path, light, full):
+        from src.tools.dicma import engine as dicma
+        dicma.LIGHT_MODE = light
+        dicma.FULL_MODE = full
+        dicma.OUTPUT_FILE_BULEAN = True
+        dicma.VERBOSE = False
+        dicma._NO_MULTIPROC = True
+        dicma.process_passwd(words, out_path)
+        self.console.after(0, lambda: self.console.success(
+            f"Passwords dictionary saved to: {out_path}"))
+
+    def _run_dicma_rules(self, dict_file, out_file, light=False, full=False):
+        from src.hsf_paths import lst_dir, rules_dir
+        out_path = os.path.join(str(rules_dir()), out_file)
+        self._run_dicma_async(lambda: self._dicma_rules_thread(dict_file, out_path, light, full))
+
+    def _dicma_rules_thread(self, dict_file, out_path, light, full):
+        from src.tools.dicma import engine as dicma
+        import os as _os
+        if dict_file and _os.path.isfile(dict_file):
+            suffixes, prefixes, numbers, symbols = dicma.extract_patterns(dict_file)
+            all_suf = list(dict.fromkeys(suffixes + numbers + symbols))
+            all_pre = list(dict.fromkeys(prefixes + numbers + symbols))
+        else:
+            all_suf = list(dict.fromkeys(
+                dicma.BASIC_SUFIXS + dicma.NUMERIC_PATTERNS + dicma.SYMBOLIC_PATTERNS))
+            all_pre = list(dict.fromkeys(
+                dicma.BASIC_PREFIXS + dicma.NUMERIC_PATTERNS + dicma.SYMBOLIC_PATTERNS))
+        rules = dicma.generate_rules(all_suf, all_pre, light=light, full=full)
+        dicma.save_list_to_file(rules, out_path)
+        self.console.after(0, lambda: self.console.success(
+            f"{len(rules)} rules saved to: {out_path}"))
+
+    def _run_dicma_async(self, fn):
+        t = threading.Thread(target=fn, daemon=True)
+        t.start()
 
     def _cmd_connect(self, args):
         if not args:
@@ -1772,6 +2182,22 @@ class App(tk.Tk):
             detail_view._on_back_click = lambda: self.visualizer.activate_view("hashes")
             self.visualizer.register_view(view_name, detail_view)
         self.visualizer.activate_view(view_name)
+
+    def _open_dictionary_view(self, fname):
+        from src.hsf_paths import lst_dir
+        from .views.file_detail import open_file_search
+        path = os.path.join(str(lst_dir()), fname)
+        if not os.path.isfile(path):
+            return
+        open_file_search(self, path, f"Dictionary \u2014 {fname}")
+
+    def _open_rule_view(self, fname):
+        from src.hsf_paths import rules_dir
+        from .views.file_detail import open_file_search
+        path = os.path.join(str(rules_dir()), fname)
+        if not os.path.isfile(path):
+            return
+        open_file_search(self, path, f"Rule \u2014 {fname}")
 
     def _open_user_view(self, username):
         view_name = f"user_{username}"
@@ -3444,8 +3870,36 @@ class App(tk.Tk):
             self._cmd_add_hash(rest)
         elif sub == "people":
             self._cmd_add_people(rest)
+        elif sub == "dictionary":
+            self._cmd_add_file("dictionary", rest)
+        elif sub == "rule":
+            self._cmd_add_file("rule", rest)
         else:
             self.console.error(f"Unknown add target: {sub}")
+
+    def _cmd_add_file(self, file_type, args):
+        from tkinter import filedialog
+        if file_type == "dictionary":
+            from src.hsf_paths import lst_dir
+            dst_dir = str(lst_dir())
+            title = "Select dictionary file"
+        else:
+            from src.hsf_paths import rules_dir
+            dst_dir = str(rules_dir())
+            title = "Select rule file"
+        path = filedialog.askopenfilename(
+            parent=self, title=title,
+            filetypes=[("All files", "*.*")],
+        )
+        if not path:
+            return
+        fname = os.path.basename(path)
+        dst = os.path.join(dst_dir, fname)
+        try:
+            shutil.copy2(path, dst)
+            self.console.success(f"{file_type.capitalize()} '{fname}' added")
+        except OSError as e:
+            self.console.error(f"Failed to copy file: {e}")
 
     def _run_domain(self, domain):
         self.console.after(0, lambda: self.console.info(f"Resolving {domain}..."))
@@ -3822,8 +4276,12 @@ class App(tk.Tk):
             self._cmd_delete_shell(args[1:])
         elif sub == "people":
             self._cmd_delete_people(args[1:])
+        elif sub == "dictionary":
+            self._cmd_delete_dictionary(args[1:])
+        elif sub == "rule":
+            self._cmd_delete_rule(args[1:])
         else:
-            self.console.error(f"Unknown delete target: {sub}. Use: dbs, credential, evidence, hash, machine, domain, user, password, shell")
+            self.console.error(f"Unknown delete target: {sub}.")
 
     def _cmd_delete_creds(self, args):
         from src.machines.credential_db import delete_all
@@ -4008,6 +4466,54 @@ class App(tk.Tk):
                 self.console.success(f"Person '{name}' deleted")
                 return
         self.console.warning(f"No person found for: {target}")
+
+    def _cmd_delete_dictionary(self, args):
+        if not args:
+            self.console.body("Usage: delete dictionary <filename|all>")
+            return
+        from src.hsf_paths import lst_dir
+        import os as _os
+        d = str(lst_dir())
+        target = args[0]
+        if target == "all":
+            count = 0
+            for f in sorted(_os.listdir(d)):
+                fp = _os.path.join(d, f)
+                if _os.path.isfile(fp):
+                    _os.remove(fp)
+                    count += 1
+            self.console.success(f"{count} dictionary files deleted")
+            return
+        path = _os.path.join(d, target)
+        if _os.path.isfile(path):
+            _os.remove(path)
+            self.console.success(f"Dictionary '{target}' deleted")
+        else:
+            self.console.warning(f"Dictionary not found: {target}")
+
+    def _cmd_delete_rule(self, args):
+        if not args:
+            self.console.body("Usage: delete rule <filename|all>")
+            return
+        from src.hsf_paths import rules_dir
+        import os as _os
+        d = str(rules_dir())
+        target = args[0]
+        if target == "all":
+            count = 0
+            for f in sorted(_os.listdir(d)):
+                fp = _os.path.join(d, f)
+                if _os.path.isfile(fp):
+                    _os.remove(fp)
+                    count += 1
+            self.console.success(f"{count} rule files deleted")
+            return
+        path = _os.path.join(d, target)
+        if _os.path.isfile(path):
+            _os.remove(path)
+            self.console.success(f"Rule '{target}' deleted")
+        else:
+            self.console.warning(f"Rule not found: {target}")
 
     def _cmd_delete_password(self, args):
         if not args:
