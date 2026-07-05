@@ -3456,7 +3456,9 @@ class App(tk.Tk):
                     self.console.after(0, lambda d=display: self.console.info(
                         f"  [tool] {name} {str(args)[:60]} → {d}"))
                 stream = client.chat_with_tools(
-                    self._llm_messages, on_tool=_on_tool, tool_context=self)
+                    self._llm_messages, on_tool=_on_tool, tool_context=self,
+                    on_text=lambda text: self.console.after(
+                        0, lambda t=text: self.console.body(t.rstrip())))
                 if stream is None:
                     self.console.after(0, lambda: self.console.info("  (no response)"))
                     return
@@ -3611,7 +3613,7 @@ class App(tk.Tk):
         if hashes:
             parts.append(f"\nHashes ({len(hashes)}):")
             for h in hashes[:20]:
-                parts.append(f"  #{h.get('id','?')} [{h.get('type','?')}] {h.get('hash','')[:24]}...")
+                parts.append(f"  #{h.get('id','?')} [{h.get('type','?')}] {h.get('hash','')}")
         import os
         from src.hsf_paths import evidence_dir
         ev_dir = str(evidence_dir())
@@ -3626,6 +3628,21 @@ class App(tk.Tk):
             parts.append(f"\nShell sessions ({len(sessions)}):")
             for s in sessions[:10]:
                 parts.append(f"  {s.get('type','?')} #{s.get('id','?')}")
+        from src.hsf_paths import lst_dir, rules_dir
+        lst = str(lst_dir())
+        if os.path.isdir(lst):
+            lst_files = sorted(f for f in os.listdir(lst) if os.path.isfile(os.path.join(lst, f)))
+            if lst_files:
+                parts.append(f"\nDictionaries ({len(lst_files)}):")
+                for f in lst_files[:15]:
+                    parts.append(f"  {f}")
+        rules_d = str(rules_dir())
+        if os.path.isdir(rules_d):
+            rule_files = sorted(f for f in os.listdir(rules_d) if os.path.isfile(os.path.join(rules_d, f)))
+            if rule_files:
+                parts.append(f"\nHashcat rules ({len(rule_files)}):")
+                for f in rule_files[:15]:
+                    parts.append(f"  {f}")
         return "\n".join(parts)
 
     def _inject_context(self):

@@ -88,6 +88,9 @@ def append_output(sid, data):
                 data = repr(data)
         data = data.replace("\r\n", "\n").replace("\r", "\n")
         s["buffer"].append(data)
+        ab = s.get("_agent_buffer")
+        if ab is not None:
+            ab.append(data)
         _dbg(f"[shell-db] append_output #{sid}: {len(data)} chars")
 
 
@@ -101,6 +104,39 @@ def drain_output(sid):
     result = "".join(buf)
     s["buffer"] = []
     return result
+
+
+def enable_agent_buffer(sid):
+    s = get_session(sid)
+    if s and "_agent_buffer" not in s:
+        s["_agent_buffer"] = []
+
+
+def drain_agent_output(sid):
+    s = get_session(sid)
+    if not s:
+        return ""
+    buf = s.get("_agent_buffer")
+    if buf is None:
+        return ""
+    if not buf:
+        return ""
+    result = "".join(buf)
+    s["_agent_buffer"] = []
+    return result
+
+
+def touch_agent(sid):
+    s = get_session(sid)
+    if s:
+        s["_agent_touch"] = True
+
+
+def pop_agent_touch(sid):
+    s = get_session(sid)
+    if s and s.pop("_agent_touch", None):
+        return True
+    return False
 
 
 def get_session(sid):

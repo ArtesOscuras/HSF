@@ -1,5 +1,7 @@
 """Agent tool definitions — OpenAI function calling schema + handlers."""
 
+import os
+
 TOOLS = [
     {
         "type": "function",
@@ -380,6 +382,240 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "dicma_generate_users",
+            "description": "Generate username permutations from a person's full name using DICMA. Saves the output to the wordlist directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "full_name": {"type": "string", "description": "Full name of the person, e.g. 'Joan Garcia'"},
+                    "output_name": {"type": "string", "description": "Output filename (e.g. 'users.txt'). Default: dicma_users.txt"},
+                },
+                "required": ["full_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "dicma_find_related",
+            "description": "Find semantically related words using the LLM via DICMA's neighbour expansion. Uses the active LLM config from HSF settings.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "words": {"type": "string", "description": "Comma-separated seed words, e.g. 'football,music,hiking'"},
+                    "n1": {"type": "integer", "description": "Number of level-1 neighbours per word (default: 50)"},
+                    "n2": {"type": "integer", "description": "Optional level-2 neighbours per L1 result (default: 0)"},
+                    "n3": {"type": "integer", "description": "Optional level-3 neighbours per L2 result (default: 0)"},
+                    "output_name": {"type": "string", "description": "Output filename. Default: dicma_related.txt"},
+                },
+                "required": ["words"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "dicma_generate_passwords",
+            "description": "Generate password permutations from seed words using DICMA. Uses built-in suffix/prefix patterns. Saves to wordlist directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "words": {"type": "string", "description": "Comma-separated seed words, e.g. 'megacorp,summer2024'"},
+                    "mode": {"type": "string", "enum": ["light", "normal", "full"], "description": "Generation mode (default: normal). Full mode creates massive output."},
+                    "output_name": {"type": "string", "description": "Output filename. Default: dicma_passwords.txt"},
+                },
+                "required": ["words"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "dicma_generate_rules",
+            "description": "Generate hashcat rules from built-in patterns or a custom dictionary. Saves to the rules directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dictionary": {"type": "string", "description": "Optional dictionary filename from the wordlist directory to extract patterns from. Leave empty to use built-in rockyou-based patterns."},
+                    "mode": {"type": "string", "enum": ["light", "normal", "full"], "description": "Generation mode (default: normal). Full mode creates massive output."},
+                    "output_name": {"type": "string", "description": "Output filename. Default: dicma_rules.rule"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "hashcat_crack",
+            "description": "Crack a hash using hashcat with a wordlist. The hash must already be in the inventory (added via add_hash).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hash_value": {"type": "string", "description": "The hash string to crack (must exist in inventory)"},
+                    "wordlist": {"type": "string", "description": "Wordlist filename from the wordlist directory (e.g. 'rockyou.txt')"},
+                },
+                "required": ["hash_value", "wordlist"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bruteforce_start",
+            "description": "Start a brute force attack against a target service. Uses credential and password inventories.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "protocol": {"type": "string", "enum": ["ftp", "ssh", "smb", "rdp", "ldap", "mssql", "mysql", "pgsql"], "description": "Protocol to attack"},
+                    "target": {"type": "string", "description": "Target IP address"},
+                    "port": {"type": "integer", "description": "Port number (uses default if omitted)"},
+                },
+                "required": ["protocol", "target"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fuzz_start",
+            "description": "Start a directory or vhost fuzzing scan against a target.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "method": {"type": "string", "enum": ["directory", "vhost", "dns"], "description": "Fuzzing method"},
+                    "target": {"type": "string", "description": "Target IP address or domain"},
+                    "wordlist": {"type": "string", "description": "Wordlist filename from the wordlist directory"},
+                },
+                "required": ["method", "target", "wordlist"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_listener",
+            "description": "Start a background service listener (shell listener or mDNS listener).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "service": {"type": "string", "enum": ["shells-listener", "mdns-listener"], "description": "Service to start"},
+                },
+                "required": ["service"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_listener",
+            "description": "Stop a running background service listener.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "service": {"type": "string", "enum": ["shells-listener", "mdns-listener"], "description": "Service to stop"},
+                },
+                "required": ["service"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_dictionaries",
+            "description": "List all dictionary wordlist files available in the wordlist directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_rules",
+            "description": "List all hashcat rule files available in the rules directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_file",
+            "description": "Delete a dictionary or rule file from the wordlist or rules directory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_type": {"type": "string", "enum": ["dictionary", "rule"], "description": "Type of file to delete"},
+                    "filename": {"type": "string", "description": "The filename to delete"},
+                },
+                "required": ["file_type", "filename"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_evidence",
+            "description": "Delete an evidence session by name or all evidence.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Evidence session name to delete, or 'all' to delete all evidence"},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_shell",
+            "description": "Delete a shell session by ID or all shell sessions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "shell_id": {"type": "string", "description": "Shell session ID to delete, or 'all' to delete all"},
+                },
+                "required": ["shell_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "shell_list",
+            "description": "List all active shell sessions with their IDs, types, and statuses.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "shell_exec",
+            "description": "Execute a command in a shell session and return the output. Requires agent access to be enabled (toggle in Shells view).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "shell_id": {"type": "integer", "description": "Shell session ID from shell_list"},
+                    "command": {"type": "string", "description": "Command to execute (e.g. 'whoami', 'ls -la', 'ipconfig')"},
+                },
+                "required": ["shell_id", "command"],
+            },
+        },
+    },
 ]
 
 _HANDLERS = {}
@@ -684,3 +920,371 @@ def _delete_person(args, ctx=None):
     delete_person(int(pid))
     name = f"{p.get('first_name','')} {p.get('last_name','')}".strip()
     return f"Person '{name}' (#{pid}) deleted."
+
+
+@register("dicma_generate_users")
+def _dicma_generate_users(args, ctx=None):
+    from src.tools.dicma import engine as dicma
+    from src.hsf_paths import lst_dir
+    full_name = args.get("full_name", "")
+    if not full_name:
+        return "Missing full_name."
+    out_name = args.get("output_name", "dicma_users.txt")
+    out_path = os.path.join(str(lst_dir()), out_name)
+    dicma.LIGHT_MODE = False
+    dicma.OUTPUT_FILE_BULEAN = True
+    dicma.VERBOSE = False
+    dicma.process_input_user(full_name, out_path)
+    return f"Usernames generated for '{full_name}' → saved to {out_path}"
+
+
+@register("dicma_find_related")
+def _dicma_find_related(args, ctx=None):
+    from src.tools.dicma import engine as dicma
+    from src.hsf_paths import lst_dir
+    from src.llm.config import load as llm_load, get_provider, get_active_model
+    words_str = args.get("words", "")
+    if not words_str:
+        return "Missing words."
+    words = [w.strip() for w in words_str.split(",") if w.strip()]
+    n1 = int(args.get("n1", 50))
+    n2 = int(args.get("n2", 0))
+    n3 = int(args.get("n3", 0))
+    out_name = args.get("output_name", "dicma_related.txt")
+    out_path = os.path.join(str(lst_dir()), out_name)
+    config = llm_load()
+    provider = get_provider(config)
+    model = get_active_model(config)
+    api_key = provider.get("api_key", "")
+    base_url = provider.get("base_url", "")
+    if not api_key or not base_url or not model:
+        return "No active LLM config. Configure in Settings → Models."
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    expanded = dicma.ml_expand_words(client, model, words, n1, n2, n3)
+    result = [w for w in expanded if w not in set(words)]
+    dicma.save_list_to_file(result, out_path)
+    return (f"Found {len(result)} related words from {len(words)} seed(s). "
+            f"Saved to {out_path}")
+
+
+@register("dicma_generate_passwords")
+def _dicma_generate_passwords(args, ctx=None):
+    from src.tools.dicma import engine as dicma
+    from src.hsf_paths import lst_dir
+    words_str = args.get("words", "")
+    if not words_str:
+        return "Missing words."
+    words = [w.strip() for w in words_str.split(",") if w.strip()]
+    mode = args.get("mode", "normal")
+    out_name = args.get("output_name", "dicma_passwords.txt")
+    out_path = os.path.join(str(lst_dir()), out_name)
+    light = mode == "light"
+    full = mode == "full"
+    dicma.LIGHT_MODE = light
+    dicma.FULL_MODE = full
+    dicma.OUTPUT_FILE_BULEAN = True
+    dicma.VERBOSE = False
+    dicma._NO_MULTIPROC = True
+    dicma.process_passwd(words, out_path)
+    return f"Passwords generated ({mode} mode) from {len(words)} word(s) → saved to {out_path}"
+
+
+@register("dicma_generate_rules")
+def _dicma_generate_rules(args, ctx=None):
+    from src.tools.dicma import engine as dicma
+    from src.hsf_paths import lst_dir, rules_dir
+    mode = args.get("mode", "normal")
+    dict_name = args.get("dictionary", "")
+    out_name = args.get("output_name", "dicma_rules.rule")
+    out_path = os.path.join(str(rules_dir()), out_name)
+    light = mode == "light"
+    full = mode == "full"
+    if dict_name:
+        dict_path = os.path.join(str(lst_dir()), dict_name)
+        if not os.path.isfile(dict_path):
+            return f"Dictionary not found: {dict_name}"
+        suffixes, prefixes, numbers, symbols = dicma.extract_patterns(dict_path)
+        all_suf = list(dict.fromkeys(suffixes + numbers + symbols))
+        all_pre = list(dict.fromkeys(prefixes + numbers + symbols))
+    else:
+        all_suf = list(dict.fromkeys(
+            dicma.BASIC_SUFIXS + dicma.NUMERIC_PATTERNS + dicma.SYMBOLIC_PATTERNS))
+        all_pre = list(dict.fromkeys(
+            dicma.BASIC_PREFIXS + dicma.NUMERIC_PATTERNS + dicma.SYMBOLIC_PATTERNS))
+    rules = dicma.generate_rules(all_suf, all_pre, light=light, full=full)
+    dicma.save_list_to_file(rules, out_path)
+    return f"{len(rules)} rules generated ({mode} mode) → saved to {out_path}"
+
+
+@register("hashcat_crack")
+def _hashcat_crack(args, ctx=None):
+    if not ctx:
+        return "Cannot crack: no tool context available."
+    hash_val = args.get("hash_value", "")
+    wordlist_name = args.get("wordlist", "")
+    if not hash_val or not wordlist_name:
+        return "Missing hash_value or wordlist."
+    from src.machines.credential_db import load_hashes
+    from src.hsf_paths import hashcat_db, lst_dir
+    mode = None
+    htype = ""
+    for h in load_hashes():
+        stored_hash = h.get("hash", "")
+        if stored_hash == hash_val or (
+                len(hash_val) >= 16 and stored_hash.startswith(hash_val)):
+            htype = h.get("type", "")
+            mode = h.get("hascat_mode", "")
+            hash_val = stored_hash
+            break
+    if not mode and htype:
+        try:
+            import sqlite3
+            conn = sqlite3.connect(str(hashcat_db()))
+            row = conn.execute(
+                'SELECT "Hash-Mode" FROM DefaultMode WHERE "Hash-Name" = ?',
+                (htype,)).fetchone()
+            conn.close()
+            if row and row[0] and row[0] != -1:
+                mode = str(row[0])
+        except Exception:
+            pass
+    if not mode:
+        return (f"Could not determine hashcat mode for '{hash_val[:30]}...'. "
+                f"Add it via 'add_hash' first.")
+    wl_path = os.path.join(str(lst_dir()), wordlist_name)
+    if not os.path.isfile(wl_path):
+        return f"Wordlist not found: {wordlist_name}"
+    from src.tools.hashcat import HashcatEngine
+    from src.machines.credential_db import save_password as _sp
+    engine = HashcatEngine(
+        mode=mode, hash_value=hash_val, wordlist=wl_path,
+        on_output=lambda text, color=None: None,
+        on_progress=lambda done, total, recovered: None,
+        on_cracked=lambda hv, plain, sp=_sp: (
+            ctx.console.after(0, lambda: ctx.console.success(
+                f"Cracked: {plain}")),
+            sp(plain)
+        ),
+        on_done=lambda cracked: ctx.console.after(0, lambda: ctx.console.info(
+            f"Hashcat done. {len(cracked)} cracked.") if cracked
+            else ctx.console.info("Hashcat done. No passwords found.")),
+    )
+    engine.start()
+    return (f"Hashcat started: mode={mode} wordlist={wordlist_name} "
+            f"hash='{hash_val[:30]}...'. Cracked passwords will be saved "
+            f"to inventory automatically.")
+
+
+@register("bruteforce_start")
+def _bruteforce_start(args, ctx=None):
+    if not ctx:
+        return "Cannot start bruteforce: no tool context available."
+    proto = args.get("protocol", "")
+    target = args.get("target", "")
+    port = args.get("port", 0)
+    if not proto or not target:
+        return "Missing protocol or target."
+    ctx._cmd_use_bruteforce([proto, target, str(port)])
+    return f"Bruteforce ({proto}) started against {target}."
+
+
+@register("fuzz_start")
+def _fuzz_start(args, ctx=None):
+    if not ctx:
+        return "Cannot start fuzzer: no tool context available."
+    method = args.get("method", "")
+    target = args.get("target", "")
+    wordlist = args.get("wordlist", "")
+    if not method or not target or not wordlist:
+        return "Missing method, target, or wordlist."
+    from src.hsf_paths import lst_dir
+    wl_path = os.path.join(str(lst_dir()), wordlist)
+    if not os.path.isfile(wl_path):
+        return f"Wordlist not found: {wordlist}"
+    ctx._cmd_use_fuzzer([method, target, wordlist])
+    return f"Fuzzer ({method}) started against {target} with {wordlist}."
+
+
+@register("start_listener")
+def _start_listener(args, ctx=None):
+    if not ctx:
+        return "Cannot start listener: no tool context available."
+    service = args.get("service", "")
+    if service == "shells-listener":
+        ctx._cmd_start(["shells-listener"])
+    elif service == "mdns-listener":
+        ctx._cmd_start(["mdns-listener"])
+    else:
+        return f"Unknown service: {service}"
+    return f"{service} started."
+
+
+@register("stop_listener")
+def _stop_listener(args, ctx=None):
+    if not ctx:
+        return "Cannot stop listener: no tool context available."
+    service = args.get("service", "")
+    if service in ("shells-listener", "mdns-listener"):
+        ctx._cmd_stop([service])
+    else:
+        return f"Unknown service: {service}"
+    return f"{service} stopped."
+
+
+@register("list_dictionaries")
+def _list_dictionaries(args, ctx=None):
+    from src.hsf_paths import lst_dir
+    try:
+        d = str(lst_dir())
+        files = sorted(f for f in os.listdir(d)
+                      if os.path.isfile(os.path.join(d, f)))
+    except OSError:
+        return "Could not read wordlist directory."
+    if not files:
+        return "No dictionary files found."
+    result = f"Dictionary files in {d}:\n"
+    for f in files:
+        path = os.path.join(d, f)
+        size = os.path.getsize(path)
+        if size >= 1024 * 1024:
+            size_str = f"{size / (1024 * 1024):.1f} MB"
+        elif size >= 1024:
+            size_str = f"{size / 1024:.0f} KB"
+        else:
+            size_str = f"{size} B"
+        result += f"  {f} ({size_str})\n"
+    return result
+
+
+@register("list_rules")
+def _list_rules(args, ctx=None):
+    from src.hsf_paths import rules_dir
+    try:
+        d = str(rules_dir())
+        files = sorted(f for f in os.listdir(d)
+                      if os.path.isfile(os.path.join(d, f)))
+    except OSError:
+        return "Could not read rules directory."
+    if not files:
+        return "No rule files found."
+    result = f"Rule files in {d}:\n"
+    for f in files:
+        path = os.path.join(d, f)
+        size = os.path.getsize(path)
+        if size >= 1024 * 1024:
+            size_str = f"{size / (1024 * 1024):.1f} MB"
+        elif size >= 1024:
+            size_str = f"{size / 1024:.0f} KB"
+        else:
+            size_str = f"{size} B"
+        result += f"  {f} ({size_str})\n"
+    return result
+
+
+@register("delete_file")
+def _delete_file(args, ctx=None):
+    from src.hsf_paths import lst_dir, rules_dir
+    ftype = args.get("file_type", "")
+    fname = args.get("filename", "")
+    if not ftype or not fname:
+        return "Missing file_type or filename."
+    base = str(rules_dir()) if ftype == "rule" else str(lst_dir())
+    path = os.path.join(base, fname)
+    if not os.path.isfile(path):
+        return f"File not found: {fname}"
+    os.remove(path)
+    return f"{ftype.capitalize()} '{fname}' deleted."
+
+
+@register("delete_evidence")
+def _delete_evidence(args, ctx=None):
+    import shutil
+    from src.hsf_paths import evidence_dir
+    name = args.get("name", "")
+    if not name:
+        return "Missing evidence name."
+    base = str(evidence_dir())
+    if name == "all":
+        if os.path.isdir(base):
+            shutil.rmtree(base)
+            os.makedirs(base, exist_ok=True)
+        return "All evidence deleted."
+    path = os.path.join(base, name)
+    if not os.path.isdir(path):
+        return f"Evidence session '{name}' not found."
+    shutil.rmtree(path)
+    return f"Evidence '{name}' deleted."
+
+
+@register("delete_shell")
+def _delete_shell(args, ctx=None):
+    from src.shells import shell_db
+    sid = args.get("shell_id", "")
+    if not sid:
+        return "Missing shell_id."
+    if sid == "all":
+        shells = shell_db.get_all()
+        count = len(shells)
+        for s in shells:
+            shell_db.close_session(s["id"])
+        return f"{count} shell session(s) deleted."
+    try:
+        shell_db.close_session(int(sid))
+        return f"Shell session #{sid} deleted."
+    except Exception:
+        return f"Shell session #{sid} not found."
+
+
+@register("shell_list")
+def _shell_list(args, ctx=None):
+    from src.shells import shell_db
+    sessions = shell_db.get_all()
+    if not sessions:
+        return "No active shell sessions."
+    result = []
+    for s in sessions:
+        stype = s.get("type", "?")
+        status = s.get("status", "disconnected")
+        ip = s.get("ip", "")
+        result.append(f"  #{s['id']} {stype} {ip} ({status})")
+    return "Shell sessions:\n" + "\n".join(result)
+
+
+@register("shell_exec")
+def _shell_exec(args, ctx=None):
+    sid = int(args.get("shell_id", 0))
+    cmd = args.get("command", "")
+    if not sid or not cmd:
+        return "Missing shell_id or command."
+    from src.gui.views.shell_list import is_agent_allowed
+    if not is_agent_allowed(sid):
+        return (f"Agent access is disabled for shell #{sid}. "
+                "Enable the 'Agent' toggle in that shell's view first.")
+    from src.shells import shell_db, send_command
+    s = shell_db.get_session(sid)
+    if not s:
+        return f"Shell session #{sid} not found."
+    if s.get("status") != "connected":
+        return f"Shell #{sid} is not connected (status: {s.get('status', '?')})."
+    shell_db.enable_agent_buffer(sid)
+    shell_db.drain_agent_output(sid)
+    shell_db.touch_agent(sid)
+    if not send_command(sid, cmd):
+        return f"Failed to send command to shell #{sid}."
+    import time, re
+    all_out = []
+    for _ in range(60):
+        time.sleep(0.1)
+        out = shell_db.drain_agent_output(sid)
+        if out:
+            all_out.append(out)
+            combined = "".join(all_out)
+            clean = re.sub(r'\x1b\][^\x07]*\x07', '', combined)
+            clean = re.sub(r'\x1b\[[?0-9;]*[a-zA-Z]', '', clean)
+            if re.search(r'(?:^|\n)[^$\n]*[$#] ', clean.strip()):
+                return f"Shell #{sid} output:\n{combined}"
+        if len(all_out) > 0 and _ > 30:
+            return f"Shell #{sid} output (partial):\n{''.join(all_out)}"
+    return (f"Command '{cmd}' sent to shell #{sid}. "
+            f"No output after 6 seconds. The shell might be busy with a previous command.")

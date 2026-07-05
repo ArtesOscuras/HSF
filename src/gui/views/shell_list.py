@@ -10,6 +10,10 @@ from src.gui.dialogs.remote_access import RemoteAccessDialog
 MUTED = "#888888"
 BRIGHT = "#ffffff"
 INFO = "#5ba3ec"
+SUCCESS = "#00cc66"
+ERR_COLOR = "#f44747"
+
+_agent_allowed = set()
 
 COL_GAP = "   "
 ICON_SIZE = 50
@@ -160,6 +164,7 @@ class ShellListView(BaseView):
 
     def _delete_shell(self, sid):
         shell_db.close_session(sid)
+        _agent_allowed.discard(sid)
 
     def _open_remote_access(self):
         RemoteAccessDialog(self)
@@ -239,3 +244,16 @@ class ShellListView(BaseView):
         self.text.configure(state=tk.DISABLED)
 
         self._poll_id = self.after(2000, self._poll)
+
+
+def is_agent_allowed(sid):
+    return sid in _agent_allowed
+
+
+def toggle_agent_shell(sid):
+    if sid in _agent_allowed:
+        _agent_allowed.discard(sid)
+        return False
+    else:
+        _agent_allowed.add(sid)
+        return True

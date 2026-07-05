@@ -207,6 +207,20 @@ class ShellDetailView(BaseView):
         self._record_btn.bind("<Enter>", lambda e: self._record_btn.config(bg="#333333") if not self._recording else None)
         self._record_btn.bind("<Leave>", lambda e: self._record_btn.config(bg="#222222") if not self._recording else None)
 
+        from .shell_list import is_agent_allowed, toggle_agent_shell
+        agent_on = is_agent_allowed(self._sid)
+        self._agent_toggle = tk.Label(
+            bar, text="Agent: ON" if agent_on else "Agent: OFF",
+            bg="#222222",
+            fg=SUCCESS if agent_on else "#f44747",
+            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
+            padx=12, pady=6, cursor="",
+        )
+        self._agent_toggle.pack(side=tk.RIGHT, padx=(0, 10))
+        self._agent_toggle.bind("<Button-1>", lambda e: self._on_agent_toggle())
+        self._agent_toggle.bind("<Enter>", lambda e: self._agent_toggle.config(bg="#333333"))
+        self._agent_toggle.bind("<Leave>", lambda e: self._agent_toggle.config(bg="#222222"))
+
         self._last_output = ""
         self._poll_id = None
         self._resize_id = None
@@ -340,6 +354,14 @@ class ShellDetailView(BaseView):
             if dialog.result:
                 self._start_recording(dialog.result)
 
+    def _on_agent_toggle(self):
+        from .shell_list import toggle_agent_shell, is_agent_allowed
+        on = toggle_agent_shell(self._sid)
+        self._agent_toggle.config(
+            text="Agent: ON" if on else "Agent: OFF",
+            fg=SUCCESS if on else "#f44747",
+        )
+
     def _start_recording(self, name):
         self._record_name = _sanitize(name)
         base = _evidence_dir_local()
@@ -429,10 +451,19 @@ class ShellDetailView(BaseView):
             self._on_back_click()
 
     def _poll(self):
+        moved = False
+        if shell_db.pop_agent_touch(self._sid):
+            self._freeze_mark = self.terminal.index(tk.END)
+            self._protect("1.0", self._freeze_mark)
+            moved = True
+
         new_data = shell_db.drain_output(self._sid)
         if new_data:
             data = new_data.replace("\r\n", "\n").replace("\r", "\n")
             self._append_output(data, "bright")
+
+        if moved:
+            self._insert_prompt()
 
         s = shell_db.get_session(self._sid)
         if s:

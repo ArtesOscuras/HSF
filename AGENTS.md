@@ -400,7 +400,7 @@ HSF integrates with LLMs via an extensible provider system supporting any OpenAI
 
 ### Agent Tool-Calling (`src/llm/client.py` → `chat_with_tools()`)
 
-The agent mode gives the LLM the ability to call **25 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
+The agent mode gives the LLM the ability to call **40 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
 
 **Tool-calling loop** (up to 35 iterations):
 ...
@@ -421,7 +421,7 @@ def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None)
 
 Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` variable. Each entry follows the `{"type": "function", "function": {...}}` format with `name`, `description`, and `parameters` (JSON Schema).
 
-**25 tools** in three categories:
+**40 tools** in six categories:
 
 **Data tools** (14) — manipulate inventory, no `tool_context` needed:
 
@@ -463,6 +463,35 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 |---|---|
 | `webfetch` | Fetch content from a URL and return as text or markdown (`url`, optional `format`) |
 | `websearch` | Search the web via DuckDuckGo Lite and return results with title, URL, and snippet (`query`, optional `num_results`) |
+
+**DICMA tools** (4) — generate wordlists and rules, no `tool_context` needed:
+
+| Tool | Description |
+|---|---|
+| `dicma_generate_users` | Generate username permutations from a person's full name (`full_name`, optional `output_name`) |
+| `dicma_find_related` | Find semantically related words via LLM expansion (`words`, optional `n1`/`n2`/`n3`, `output_name`). Uses active LLM config from HSF settings |
+| `dicma_generate_passwords` | Generate password permutations from seed words (`words`, optional `mode`, `output_name`) |
+| `dicma_generate_rules` | Generate hashcat rules from built-in patterns or a custom dictionary (`dictionary` optional, `mode`, `output_name`) |
+
+**Attack tools** (3) — trigger attacks, require `tool_context`:
+
+| Tool | Description |
+|---|---|
+| `hashcat_crack` | Crack a hash with hashcat (`hash_value` must be in inventory, `wordlist`) |
+| `bruteforce_start` | Start a brute force attack (`protocol`, `target`, optional `port`) |
+| `fuzz_start` | Start directory/vhost fuzzing (`method`, `target`, `wordlist`) |
+
+**Infrastructure tools** (8) — manage services, files, and evidence:
+
+| Tool | Description |
+|---|---|
+| `start_listener` | Start a background service (`shells-listener` or `mdns-listener`). Requires `tool_context` |
+| `stop_listener` | Stop a running background service. Requires `tool_context` |
+| `list_dictionaries` | List all wordlist files in the wordlist directory |
+| `list_rules` | List all hashcat rule files in the rules directory |
+| `delete_file` | Delete a dictionary or rule file (`file_type`, `filename`) |
+| `delete_evidence` | Delete an evidence session by name, or `"all"` |
+| `delete_shell` | Delete a shell session by ID, or `"all"` |
 
 **Implementation details for web tools** (`src/llm/web.py`):
 
@@ -576,6 +605,8 @@ Before every agent or consultor call, the full application state is serialized i
 - **Hashes**: ID, type, first 24 chars of hash
 - **Evidence sessions**: directory listing
 - **Shell sessions**: type and ID
+- **Dictionaries**: filenames in the wordlist directory
+- **Hashcat rules**: filenames in the rules directory
 
 **Injection strategy:**
 

@@ -62,7 +62,7 @@ class LLMClient:
             stream=True,
         )
 
-    def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None):
+    def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None, on_text=None):
         from src.llm.tools import TOOLS as _TOOLS, execute as _execute
 
         self._ensure_client()
@@ -77,6 +77,8 @@ class LLMClient:
             )
             choice = resp.choices[0]
             if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
+                if choice.message.content and on_text:
+                    on_text(choice.message.content)
                 current.append(choice.message)
                 for tc in choice.message.tool_calls:
                     args = {}
