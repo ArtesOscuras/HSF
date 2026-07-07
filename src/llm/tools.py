@@ -233,21 +233,6 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "banner_grab",
-            "description": "Grab the service banner from a port on an IP.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "ip": {"type": "string", "description": "IPv4 address"},
-                    "port": {"type": "integer", "description": "Port number (default 80)"},
-                },
-                "required": ["ip"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "whatweb",
             "description": "Identify web technologies on an IP using WhatWeb.",
             "parameters": {
@@ -482,13 +467,14 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "fuzz_start",
-            "description": "Start a directory or vhost fuzzing scan against a target.",
+            "description": "Start a directory, vhost or DNS subdomain fuzzing scan against a target. Blocks until scan completes and returns all found results. Directory mode fuzzes HTTP paths (e.g. /admin, /login), vhost mode fuzzes virtual host subdomains (Host header), dns mode fuzzes DNS subdomains. Results are NOT saved to database.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "method": {"type": "string", "enum": ["directory", "vhost", "dns"], "description": "Fuzzing method"},
-                    "target": {"type": "string", "description": "Target IP address or domain"},
-                    "wordlist": {"type": "string", "description": "Wordlist filename from the wordlist directory"},
+                    "method": {"type": "string", "enum": ["directory", "vhost", "dns"], "description": "Fuzzing method: 'directory' for URL paths, 'vhost' for virtual hosts, 'dns' for DNS subdomains"},
+                    "target": {"type": "string", "description": "Target IP address, machine ID, or domain name"},
+                    "wordlist": {"type": "string", "description": "Wordlist filename from the wordlist directory (e.g. 'common.txt', 'subdomains.txt')"},
+                    "port": {"type": "integer", "description": "Port number (default: 80). Only used for 'directory' method."},
                 },
                 "required": ["method", "target", "wordlist"],
             },
@@ -605,14 +591,138 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "shell_exec",
-            "description": "Execute a command in a shell session and return the output. Requires agent access to be enabled (toggle in Shells view).",
+            "description": (
+                "Send a command to a shell session and wait briefly for initial output. "
+                "The command may still be running when this returns. Check the result status: "
+                "'finished' means a shell prompt was detected (command completed). "
+                "'password' means a password prompt appeared (command auto-interrupted). "
+                "'running' means the command is still producing output — use shell_wait to "
+                "get more output, and shell_interrupt to stop it if it seems stuck."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "shell_id": {"type": "integer", "description": "Shell session ID from shell_list"},
-                    "command": {"type": "string", "description": "Command to execute (e.g. 'whoami', 'ls -la', 'ipconfig')"},
+                    "command": {"type": "string", "description": "Command to execute (e.g. 'whoami', 'ls -la', 'find /')"},
                 },
                 "required": ["shell_id", "command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "shell_wait",
+            "description": (
+                "Wait for more output from a running shell command. Call this after "
+                "shell_exec returned status 'running' to get more output. Returns new output "
+                "plus a status: 'finished' (prompt detected), 'running' (still producing), "
+                "'paused' (no new output for 2s, might be waiting for input). "
+                "Do NOT call this unless a command is actually running."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "shell_id": {"type": "integer", "description": "Shell session ID from shell_list"},
+                },
+                "required": ["shell_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "shell_interrupt",
+            "description": (
+                "Interrupt the currently running command in a shell by sending Ctrl+C. "
+                "Use this when a command seems stuck, is taking too long, shows a password "
+                "prompt, or is an infinite command like 'ping' without a count limit. "
+                "Returns any remaining output after the interrupt plus the new shell prompt."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "shell_id": {"type": "integer", "description": "Shell session ID from shell_list"},
+                },
+                "required": ["shell_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "connect_ssh",
+            "description": (
+                "Connect to a remote machine via SSH using stored credentials. "
+                "Use this to open an interactive shell session. The host can be "
+                "a machine ID (from inventory) or an IP address. The username "
+                "must match an existing credential in the inventory."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Machine ID or IP address"},
+                    "username": {"type": "string", "description": "Username for authentication (must exist in credentials)"},
+                    "port": {"type": "integer", "description": "SSH port (default 22)"},
+                },
+                "required": ["host", "username"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "connect_sftp",
+            "description": (
+                "Connect to a remote machine via SFTP using stored credentials. "
+                "Use this for file transfer operations over SSH."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Machine ID or IP address"},
+                    "username": {"type": "string", "description": "Username for authentication"},
+                    "port": {"type": "integer", "description": "SFTP port (default 22)"},
+                },
+                "required": ["host", "username"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "connect_ftp",
+            "description": (
+                "Connect to a remote machine via FTP using stored credentials. "
+                "Use this for file transfer operations over FTP."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Machine ID or IP address"},
+                    "username": {"type": "string", "description": "Username for authentication (use 'anonymous' for anonymous FTP)"},
+                    "port": {"type": "integer", "description": "FTP port (default 21)"},
+                },
+                "required": ["host", "username"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "connect_winrm",
+            "description": (
+                "Connect to a remote Windows machine via WinRM using stored credentials. "
+                "Use this to open an interactive PowerShell session."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {"type": "string", "description": "Machine ID or IP address"},
+                    "username": {"type": "string", "description": "Username for authentication"},
+                    "port": {"type": "integer", "description": "WinRM port (default 5985)"},
+                },
+                "required": ["host", "username"],
             },
         },
     },
@@ -629,6 +739,8 @@ def register(name):
 
 
 def execute(name, args_dict, tool_context=None):
+    if tool_context and getattr(tool_context, "_agent_stop_event", None) and tool_context._agent_stop_event.is_set():
+        return f"Tool '{name}' cancelled (agent stop requested)."
     handler = _HANDLERS.get(name)
     if not handler:
         return f"Unknown tool: {name}"
@@ -815,7 +927,7 @@ def _banner_grab(args, ctx=None):
     port = args.get("port", 80)
     if not ctx:
         return "Cannot grab banner: no tool context available."
-    ctx._cmd_bannergrab([ip])
+    ctx._cmd_bannergrab([ip, str(port)])
     return f"Banner grab started on {ip}:{port}."
 
 
@@ -1096,14 +1208,38 @@ def _fuzz_start(args, ctx=None):
     method = args.get("method", "")
     target = args.get("target", "")
     wordlist = args.get("wordlist", "")
+    port = args.get("port", 80)
     if not method or not target or not wordlist:
         return "Missing method, target, or wordlist."
     from src.hsf_paths import lst_dir
     wl_path = os.path.join(str(lst_dir()), wordlist)
     if not os.path.isfile(wl_path):
         return f"Wordlist not found: {wordlist}"
-    ctx._cmd_use_fuzzer([method, target, wordlist])
-    return f"Fuzzer ({method}) started against {target} with {wordlist}."
+    from src.tools.fuzz.results_db import clear_by_target, save_result
+    clear_by_target(method, target)
+    resolved_ip = None
+    if method == "vhost":
+        resolved_ip = ctx._resolve_to_ip(target)
+    display_target = resolved_ip or target
+    url_template = None
+    if method == "directory":
+        url_template = f"http://{display_target}:{port}/FUZZ"
+    show_codes = {200, 201, 204, 301, 302, 307, 400, 401, 403, 405, 500, 502, 503}
+    def _on_found(word, display):
+        save_result(method, target, word, display)
+    from src.tools.fuzz import FuzzEngine
+    engine = FuzzEngine(
+        target=target,
+        wordlist_path=wl_path,
+        method=method,
+        target_ip=resolved_ip,
+        url_template=url_template,
+        workers=50,
+        show_codes=show_codes,
+        on_found=_on_found,
+    )
+    engine.start()
+    return f"Fuzzing ({method}) started against {target} with {wordlist}. Results will be saved to the experimental fuzz results table (viewable via context)."
 
 
 @register("start_listener")
@@ -1261,7 +1397,7 @@ def _shell_exec(args, ctx=None):
     if not is_agent_allowed(sid):
         return (f"Agent access is disabled for shell #{sid}. "
                 "Enable the 'Agent' toggle in that shell's view first.")
-    from src.shells import shell_db, send_command
+    from src.shells import shell_db, send_command, send_raw
     s = shell_db.get_session(sid)
     if not s:
         return f"Shell session #{sid} not found."
@@ -1269,22 +1405,269 @@ def _shell_exec(args, ctx=None):
         return f"Shell #{sid} is not connected (status: {s.get('status', '?')})."
     shell_db.enable_agent_buffer(sid)
     shell_db.drain_agent_output(sid)
-    shell_db.touch_agent(sid)
+    shell_db.touch_agent(sid, cmd)
     if not send_command(sid, cmd):
         return f"Failed to send command to shell #{sid}."
     import time, re
+    prefix = f"Shell #{sid} [{cmd[:80]}]: "
     all_out = []
-    for _ in range(60):
+    for _ in range(20):
+        if ctx and getattr(ctx, "_agent_stop_event", None) and ctx._agent_stop_event.is_set():
+            send_raw(sid, "\x03")
+            time.sleep(0.3)
+            out = shell_db.drain_agent_output(sid)
+            if out:
+                all_out.append(out)
+            combined = "".join(all_out)
+            return (f"{prefix}stopped by user\n{combined}"
+                    if combined else f"{prefix}stopped by user before output arrived")
         time.sleep(0.1)
         out = shell_db.drain_agent_output(sid)
         if out:
             all_out.append(out)
+    if not all_out:
+        return f"{prefix}no immediate output [running] -- use shell_wait or shell_interrupt"
+    combined = "".join(all_out)
+    clean = re.sub(r'\x1b\][^\x07]*\x07', '', combined)
+    clean = re.sub(r'\x1b\[[?0-9;]*[a-zA-Z]', '', clean)
+    if re.search(r'(?i)(?:password|passphrase).*[:：]', clean):
+        send_raw(sid, "\x03")
+        time.sleep(0.5)
+        out = shell_db.drain_agent_output(sid)
+        if out:
+            all_out.append(out)
+        combined = "".join(all_out)
+        return f"{prefix}password prompt detected, interrupted\n{combined}"
+    if re.search(r'(?:^|\n)[^\n]*[$#>]\s*$', clean):
+        return f"{prefix}[finished]\n{combined}"
+    return f"{prefix}[running] -- use shell_wait for more output, shell_interrupt to stop\n{combined}"
+
+
+@register("shell_wait")
+def _shell_wait(args, ctx=None):
+    sid = int(args.get("shell_id", 0))
+    if not sid:
+        return "Missing shell_id."
+    from src.gui.views.shell_list import is_agent_allowed
+    if not is_agent_allowed(sid):
+        return (f"Agent access is disabled for shell #{sid}. "
+                "Enable the 'Agent' toggle in that shell's view first.")
+    from src.shells import shell_db, send_raw
+    s = shell_db.get_session(sid)
+    if not s:
+        return f"Shell session #{sid} not found."
+    if s.get("status") != "connected":
+        return f"Shell #{sid} is not connected."
+    import time, re
+    prefix = f"Shell #{sid}: "
+    all_out = []
+    stale = 0
+    for _ in range(100):
+        if ctx and getattr(ctx, "_agent_stop_event", None) and ctx._agent_stop_event.is_set():
+            send_raw(sid, "\x03")
+            time.sleep(0.3)
+            out = shell_db.drain_agent_output(sid)
+            if out:
+                all_out.append(out)
+            combined = "".join(all_out)
+            return (f"{prefix}stopped by user\n{combined}"
+                    if combined else f"{prefix}stopped by user, no output")
+        time.sleep(0.1)
+        out = shell_db.drain_agent_output(sid)
+        if out:
+            all_out.append(out)
+            stale = 0
+        else:
+            stale += 1
+        if all_out:
             combined = "".join(all_out)
             clean = re.sub(r'\x1b\][^\x07]*\x07', '', combined)
             clean = re.sub(r'\x1b\[[?0-9;]*[a-zA-Z]', '', clean)
-            if re.search(r'(?:^|\n)[^$\n]*[$#] ', clean.strip()):
-                return f"Shell #{sid} output:\n{combined}"
-        if len(all_out) > 0 and _ > 30:
-            return f"Shell #{sid} output (partial):\n{''.join(all_out)}"
-    return (f"Command '{cmd}' sent to shell #{sid}. "
-            f"No output after 6 seconds. The shell might be busy with a previous command.")
+            if re.search(r'(?:^|\n)[^\n]*[$#>]\s*$', clean):
+                return f"{prefix}[finished]\n{combined}"
+        if stale > 20:
+            if all_out:
+                combined = "".join(all_out)
+                return f"{prefix}[paused] -- output stopped, may be waiting for input or finished\n{combined}"
+            else:
+                return f"{prefix}[idle] -- no output, no command may be running"
+    combined = "".join(all_out)
+    return (f"{prefix}[running]\n{combined}"
+            if combined else f"{prefix}[running] still no output after 10s")
+
+
+@register("shell_interrupt")
+def _shell_interrupt(args, ctx=None):
+    sid = int(args.get("shell_id", 0))
+    if not sid:
+        return "Missing shell_id."
+    from src.gui.views.shell_list import is_agent_allowed
+    if not is_agent_allowed(sid):
+        return (f"Agent access is disabled for shell #{sid}. "
+                "Enable the 'Agent' toggle in that shell's view first.")
+    from src.shells import shell_db, send_raw
+    s = shell_db.get_session(sid)
+    if not s:
+        return f"Shell session #{sid} not found."
+    if s.get("status") != "connected":
+        return f"Shell #{sid} is not connected."
+    import time, re
+    prefix = f"Shell #{sid}: "
+    send_raw(sid, "\x03")
+    all_out = []
+    for _ in range(20):
+        time.sleep(0.1)
+        if ctx and getattr(ctx, "_agent_stop_event", None) and ctx._agent_stop_event.is_set():
+            out = shell_db.drain_agent_output(sid)
+            if out:
+                all_out.append(out)
+            combined = "".join(all_out)
+            return (f"{prefix}interrupted, also stopped by user\n{combined}"
+                    if combined else f"{prefix}interrupted, also stopped by user")
+        out = shell_db.drain_agent_output(sid)
+        if out:
+            all_out.append(out)
+        combined = "".join(all_out)
+        if combined:
+            clean = re.sub(r'\x1b\][^\x07]*\x07', '', combined)
+            clean = re.sub(r'\x1b\[[?0-9;]*[a-zA-Z]', '', clean)
+            if re.search(r'(?:^|\n)[^\n]*[$#>]\s*$', clean):
+                return f"{prefix}[interrupted]\n{combined}"
+    combined = "".join(all_out)
+    return (f"{prefix}[interrupted]\n{combined}"
+            if combined else f"{prefix}[interrupted] no output after Ctrl+C")
+
+
+def _resolve_target(ctx, target):
+    import re
+    if re.match(r"^\d+\.\d+\.\d+\.\d+$", target):
+        return target
+    if re.match(r"^\d+$", target):
+        mid = int(target)
+        from src.machines import store
+        for m in store.get_all():
+            if m.id == mid:
+                return m.ip
+    return None
+
+
+def _find_credential(username):
+    from src.machines import credential_db
+    for c in credential_db.load_credentials():
+        if c.get("username") == username:
+            return c.get("password") or "", c.get("hash_nt") or ""
+    return None, None
+
+
+def _wait_connect(thread, timeout=15):
+    import threading
+    result = {}
+    event = threading.Event()
+
+    orig_on_connected = thread._on_connected
+    orig_on_error = thread._on_error
+
+    def on_connected(sid):
+        result["ok"] = True
+        result["sid"] = sid
+        if orig_on_connected:
+            orig_on_connected(sid)
+        event.set()
+
+    def on_error(msg):
+        result["ok"] = False
+        result["error"] = msg
+        if orig_on_error:
+            orig_on_error(msg)
+        event.set()
+
+    thread._on_connected = on_connected
+    thread._on_error = on_error
+    thread.start()
+    if not event.wait(timeout=timeout):
+        return f"Connection timed out after {timeout}s"
+    if result.get("ok"):
+        return f"Session #{result['sid']} connected successfully"
+    return f"Connection failed: {result.get('error', 'unknown error')}"
+
+
+@register("connect_ssh")
+def _connect_ssh(args, ctx=None):
+    if not ctx:
+        return "Cannot connect: no tool context available."
+    host = args.get("host", "")
+    username = args.get("username", "")
+    port = int(args.get("port", 22))
+    if not host or not username:
+        return "Missing host or username."
+    ip = _resolve_target(ctx, host)
+    if not ip:
+        return f"Could not resolve target: {host}"
+    password, _ = _find_credential(username)
+    if password is None:
+        return f"No credential found for username: {username}"
+    from src.shells.ssh_shell import SSHConnectionThread
+    t = SSHConnectionThread(ip, port, username, password)
+    return f"SSH {ip}:{port} as {username}: {_wait_connect(t)}"
+
+
+@register("connect_sftp")
+def _connect_sftp(args, ctx=None):
+    if not ctx:
+        return "Cannot connect: no tool context available."
+    host = args.get("host", "")
+    username = args.get("username", "")
+    port = int(args.get("port", 22))
+    if not host or not username:
+        return "Missing host or username."
+    ip = _resolve_target(ctx, host)
+    if not ip:
+        return f"Could not resolve target: {host}"
+    password, _ = _find_credential(username)
+    if password is None:
+        return f"No credential found for username: {username}"
+    from src.shells.sftp_shell import SFTPConnectionThread
+    t = SFTPConnectionThread(ip, port, username, password)
+    return f"SFTP {ip}:{port} as {username}: {_wait_connect(t)}"
+
+
+@register("connect_ftp")
+def _connect_ftp(args, ctx=None):
+    if not ctx:
+        return "Cannot connect: no tool context available."
+    host = args.get("host", "")
+    username = args.get("username", "")
+    port = int(args.get("port", 21))
+    if not host or not username:
+        return "Missing host or username."
+    ip = _resolve_target(ctx, host)
+    if not ip:
+        return f"Could not resolve target: {host}"
+    password = ""
+    if username.lower() != "anonymous":
+        password, _ = _find_credential(username)
+        if password is None:
+            return f"No credential found for username: {username}"
+    from src.shells.ftp_shell import FTPConnectionThread
+    t = FTPConnectionThread(ip, port, username, password)
+    return f"FTP {ip}:{port} as {username}: {_wait_connect(t)}"
+
+
+@register("connect_winrm")
+def _connect_winrm(args, ctx=None):
+    if not ctx:
+        return "Cannot connect: no tool context available."
+    host = args.get("host", "")
+    username = args.get("username", "")
+    port = int(args.get("port", 5985))
+    if not host or not username:
+        return "Missing host or username."
+    ip = _resolve_target(ctx, host)
+    if not ip:
+        return f"Could not resolve target: {host}"
+    _, hash_nt = _find_credential(username)
+    if hash_nt is None:
+        hash_nt = ""
+    from src.shells.winrm_shell import WinRMConnectionThread
+    t = WinRMConnectionThread(ip, port, username, "", hash_nt=hash_nt)
+    return f"WinRM {ip}:{port} as {username}: {_wait_connect(t, timeout=15)}"

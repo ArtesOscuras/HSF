@@ -332,9 +332,11 @@ class App(tk.Tk):
         self._bruteforce_engine = None
         self._consultor_mode = False
         self._agent_mode = False
+        self._agent_stop_event = None
         self._llm_messages = []
         self._last_ctx_hash = None
         self._last_ctx = None
+        self._last_token_pct = None
         self._fuzz_dlg = None
         self._tcpscan_running = False
         self._tcpscan_process = None
@@ -559,6 +561,11 @@ class App(tk.Tk):
         self.console.set_arg3_provider("use", "bruteforce", self._autocomplete_webrecorder_target)
         self.console.set_arg4_provider("use", "bruteforce", self._autocomplete_bruteforce_userlist)
         self.console.set_arg5_provider("use", "bruteforce", self._autocomplete_bruteforce_passlist)
+
+        self.console.set_arg2_provider("use", "fuzzer", self._autocomplete_fuzzer_method)
+        self.console.set_arg3_provider("use", "fuzzer", self._autocomplete_webrecorder_target)
+        self.console.set_arg4_provider("use", "fuzzer", self._autocomplete_fuzzer_arg4)
+        self.console.set_arg5_provider("use", "fuzzer", self._autocomplete_fuzzer_arg5)
 
         self.console.set_arg2_provider("use", "bannergrab", self._autocomplete_use_bannergrab)
         self.console.set_arg3_provider("use", "bannergrab", self._autocomplete_bannergrab_ports)
@@ -886,6 +893,53 @@ class App(tk.Tk):
         except OSError:
             pass
         return results
+
+    @staticmethod
+    def _autocomplete_fuzzer_method(prefix):
+        return [("dir", "dir"), ("vhost", "vhost"), ("dns", "dns")]
+
+    def _autocomplete_fuzzer_arg4(self, prefix, arg2_value=None):
+        if arg2_value == "dir":
+            results = [("<port>", "")]
+            raw = self.console.input_var.get().strip()
+            parts = raw.split()
+            if len(parts) >= 4:
+                target = parts[3]
+                from src.machines import machine_db as _mdb
+                machine = store.get(target)
+                if not machine:
+                    if target.startswith("#") and target[1:].isdigit():
+                        machine = store.get_by_id(int(target[1:]))
+                    elif target.isdigit():
+                        machine = store.get_by_id(int(target))
+                if machine:
+                    ports = _mdb.load_tcp_ports(machine.id)
+                    for p in ports:
+                        results.append((str(p), str(p)))
+            return results
+        else:
+            from src.hsf_paths import lst_dir
+            results = []
+            try:
+                for fname in sorted(os.listdir(str(lst_dir()))):
+                    if os.path.isfile(os.path.join(str(lst_dir()), fname)):
+                        results.append((fname, fname))
+            except OSError:
+                pass
+            return results
+
+    def _autocomplete_fuzzer_arg5(self, prefix, arg2_value=None):
+        if arg2_value == "dir":
+            from src.hsf_paths import lst_dir
+            results = []
+            try:
+                for fname in sorted(os.listdir(str(lst_dir()))):
+                    if os.path.isfile(os.path.join(str(lst_dir()), fname)):
+                        results.append((fname, fname))
+            except OSError:
+                pass
+            return results
+        return []
 
     @staticmethod
     def _autocomplete_hashcat_hash(prefix):
@@ -2359,6 +2413,9 @@ class App(tk.Tk):
         elif sub == "fuzzer":
             if self._fuzz_dlg:
                 self._fuzz_dlg._stop()
+            if hasattr(self, '_fuzz_engine') and self._fuzz_engine:
+                self._fuzz_engine.stop()
+                self._fuzz_engine = None
             self.console.info("Fuzzer stopped")
         elif sub == "webrecorder":
             if self._recorder and self._recorder.is_running():
@@ -2542,9 +2599,11 @@ class App(tk.Tk):
         from src.network_iface import ifaddresses, AF_INET
         addrs = ifaddresses(iface_name).get(AF_INET)
         if not addrs:
+            event_bus.submit({"type": "scan_error", "message": f"Interface {iface_name} has no IPv4 address"})
             return
         iface_tuple = (iface_name, addrs[0]["addr"], addrs[0]["netmask"])
         if self._active_scanner and self._active_scanner.is_running:
+            event_bus.submit({"type": "scan_info", "message": "Active scan is already running"})
             return
         self._selected_interface = iface_tuple
         import src.machines
@@ -2557,8 +2616,8 @@ class App(tk.Tk):
                 interface_name=iface_name,
             )
             self._active_scanner.start()
-        except RuntimeError:
-            pass
+        except RuntimeError as e:
+            event_bus.submit({"type": "scan_error", "message": f"Active scan failed: {e}"})
 
     def _scan_ip(self, ip):
         self.console.info(f"Checking {ip}...")
@@ -3348,6 +3407,8 @@ class App(tk.Tk):
                 scan_ip_results.append(ev)
             elif t == "scan_error":
                 scan_errors.append(ev)
+            elif t == "scan_info":
+                self.console.body(ev["message"])
 
         for ev in scan_errors:
             self.console.error(ev["message"])
@@ -3415,37 +3476,145 @@ class App(tk.Tk):
         self.console.prompt_label.config(text="HSF> ", fg="#ffffff")
         self.console.info("Left consultor mode.")
 
+    _MODEL_CONTEXT_LIMITS = {
+        "gpt-4o": 128000, "gpt-4o-mini": 128000, "gpt-4-turbo": 128000,
+        "gpt-4": 8192, "gpt-3.5-turbo": 16385, "o1": 200000,
+        "o1-mini": 128000, "o3-mini": 200000,
+        "claude-3-opus": 200000, "claude-3-sonnet": 200000,
+        "claude-3-haiku": 200000, "claude-3.5-sonnet": 200000,
+        "claude-3.5-haiku": 200000, "claude-3.7-sonnet": 200000,
+        "deepseek-chat": 200000, "deepseek-v3": 200000,
+        "deepseek-r1": 200000, "deepseek-v4": 200000,
+        "gemini-pro": 128000, "gemini-1.5-pro": 2097152,
+        "gemini-1.5-flash": 1048576, "gemini-2.0-flash": 1048576,
+        "llama3": 8192, "llama3.1": 128000, "llama3.2": 128000,
+        "llama3.3": 128000, "llama4": 128000,
+        "mistral": 32768, "mixtral": 32768,
+        "qwen": 128000, "qwen2": 128000, "qwen2.5": 128000,
+    }
+    _DEFAULT_CONTEXT_LIMIT = 128000
+
+    def _get_active_model_name(self):
+        try:
+            from src.llm.config import load
+            config = load()
+            pid = config.get("active_provider", "")
+            am = config.get("active_models", {})
+            return am.get(pid) or (config.get("providers", {}).get(pid, {}).get("models", [None])[0])
+        except Exception:
+            return None
+
+    def _get_model_context_limit(self):
+        name = self._get_active_model_name()
+        if not name:
+            return self._DEFAULT_CONTEXT_LIMIT
+        name_lower = name.lower()
+        for key, limit in self._MODEL_CONTEXT_LIMITS.items():
+            if key in name_lower:
+                return limit
+        return self._DEFAULT_CONTEXT_LIMIT
+
+    def _estimate_tokens(self, messages):
+        try:
+            import json
+            text = json.dumps(messages, default=str)
+        except Exception:
+            text = str(messages)
+        return max(1, len(text) // 4)
+
+    def _get_context_percentage(self):
+        limit = self._get_model_context_limit()
+        if limit <= 0:
+            return None
+        used = getattr(self, '_total_api_tokens', 0) or self._estimate_tokens(self._llm_messages)
+        pct = (used * 100) // limit
+        if used > 0 and pct == 0:
+            pct = 1
+        return min(99, pct)
+
+    def _update_agent_prompt(self):
+        if not self._agent_mode:
+            return
+        try:
+            pct = self._get_context_percentage()
+            self._last_token_pct = pct
+            text = f"Agent ({pct}%)> " if pct is not None else "Agent> "
+            self.console.prompt_label.config(text=text, fg="#5ba3ec")
+        except Exception:
+            pass
+
     def _enter_agent_mode(self):
         self._agent_mode = True
+        import threading
+        self._agent_stop_event = threading.Event()
+        self._last_token_pct = None
         self.console.info(
-            "Agent mode. Type your instructions. "
-            "Type 'exit' to leave."
+            "Agent mode. Commands: exit, stop, reset, menu."
         )
         self.console.set_mode_handler(self._agent_handler, "Agent", "#5ba3ec")
+        self._update_agent_prompt()
 
     def _agent_handler(self, text):
         text = text.strip()
         if text.lower() == "exit" or not text:
             self._leave_agent_mode()
             return
+        if text.lower() == "stop":
+            if self._agent_stop_event:
+                self._agent_stop_event.set()
+            self.console.warning("Interrupting agent execution...")
+            return
+        if text.lower() == "reset":
+            self._llm_messages = []
+            self._last_ctx_hash = None
+            self._last_ctx = None
+            self._last_token_pct = None
+            self.console.success("Context reset. Conversation history cleared.")
+            self._update_agent_prompt()
+            return
+        if text.lower() == "menu":
+            self.console.info(
+                "Agent mode commands:\n"
+                "  exit  - Leave agent mode\n"
+                "  stop  - Interrupt the current agent execution\n"
+                "  reset - Clear conversation history and start fresh\n"
+                "  menu  - Show this help"
+            )
+            return
+        import threading
+        self._agent_stop_event = threading.Event()
         self._agent_ask(text)
 
     def _leave_agent_mode(self):
         self._agent_mode = False
+        if self._agent_stop_event:
+            self._agent_stop_event.set()
         self.console.set_mode_handler(None)
         self.console.prompt_label.config(text="HSF> ", fg="#ffffff")
         self.console.info("Left agent mode.")
 
     def _agent_ask(self, prompt):
-        import threading
+        import threading, re
+        _tool_xml_re = re.compile(
+            r'<function_calls>.*?</function_calls>|'
+            r'<tool_calls>.*?</tool_calls>|'
+            r'<invoke[^>]*>.*?</invoke>|'
+            r'<parameter[^>]*>.*?</parameter>|'
+            r'</?(?:function_calls|tool_calls|invoke|parameter)[^>]*>',
+            re.DOTALL,
+        )
+        def _clean(text):
+            return _tool_xml_re.sub('', text)
         self._llm_messages.append({"role": "user", "content": prompt})
         self._inject_context()
         def _run():
+            stop = self._agent_stop_event
             try:
                 from src.llm import LLMClient
                 client = LLMClient(purpose="agent")
-                self.console.after(0, lambda: self.console.info(f"> {prompt}"))
                 def _on_tool(name, args, result):
+                    if stop.is_set():
+                        return
                     display = result
                     if name == "webfetch":
                         display = f"fetched {len(result)} chars"
@@ -3458,28 +3627,41 @@ class App(tk.Tk):
                 stream = client.chat_with_tools(
                     self._llm_messages, on_tool=_on_tool, tool_context=self,
                     on_text=lambda text: self.console.after(
-                        0, lambda t=text: self.console.body(t.rstrip())))
+                        0, lambda t=text: self.console.agent(_clean(t).rstrip())),
+                    stop_event=stop)
+                if stop.is_set():
+                    self.console.after(0, lambda: self.console.warning("Agent stopped."))
+                    return
+                self.console.after(0, lambda: setattr(self, '_total_api_tokens', client.last_prompt_tokens))
                 if stream is None:
                     self.console.after(0, lambda: self.console.info("  (no response)"))
                     return
                 full = ""
                 buf = ""
                 for chunk in stream:
+                    if stop.is_set():
+                        self.console.after(0, lambda: self.console.warning("Agent stopped."))
+                        return
                     if chunk.choices and chunk.choices[0].delta.content:
                         full += chunk.choices[0].delta.content
                         buf += chunk.choices[0].delta.content
                         if "\n" in buf:
                             lines = buf.split("\n")
                             for line in lines[:-1]:
-                                if line.strip():
-                                    self.console.after(0, lambda l=line: self.console.body(l.rstrip()))
+                                clean = _clean(line)
+                                if clean.strip():
+                                    self.console.after(0, lambda l=clean: self.console.agent(l.rstrip()))
                             buf = lines[-1]
-                if buf.strip():
-                    self.console.after(0, lambda b=buf: self.console.body(b.rstrip()))
-                self._llm_messages.append({"role": "assistant", "content": full})
+                clean = _clean(buf)
+                if clean.strip():
+                    self.console.after(0, lambda c=clean: self.console.agent(c.rstrip()))
+                self._llm_messages.append({"role": "assistant", "content": _clean(full)})
                 self.console.after(0, lambda: self.console.info("---"))
+                self.console.after(0, self._update_agent_prompt)
             except Exception as e:
-                self.console.after(0, lambda m=str(e): self.console.error(f"Agent error: {m}"))
+                if not stop.is_set():
+                    self.console.after(0, lambda m=str(e): self.console.error(f"Agent error: {m}"))
+                self.console.after(0, self._update_agent_prompt)
         threading.Thread(target=_run, daemon=True).start()
 
     def _consultor_ask(self, prompt):
@@ -3490,7 +3672,6 @@ class App(tk.Tk):
             try:
                 from src.llm import LLMClient
                 client = LLMClient()
-                self.console.after(0, lambda: self.console.info(f"> {prompt}"))
                 stream = client.chat_stream(self._llm_messages)
                 full = ""
                 buf = ""
@@ -3502,10 +3683,10 @@ class App(tk.Tk):
                             lines = buf.split("\n")
                             for line in lines[:-1]:
                                 if line.strip():
-                                    self.console.after(0, lambda l=line: self.console.body(l.rstrip()))
+                                    self.console.after(0, lambda l=line: self.console.consultor(l.rstrip()))
                             buf = lines[-1]
                 if buf.strip():
-                    self.console.after(0, lambda b=buf: self.console.body(b.rstrip()))
+                    self.console.after(0, lambda b=buf: self.console.consultor(b.rstrip()))
                 self._llm_messages.append({"role": "assistant", "content": full})
                 self.console.after(0, lambda: self.console.info("---"))
             except Exception as e:
@@ -3643,6 +3824,18 @@ class App(tk.Tk):
                 parts.append(f"\nHashcat rules ({len(rule_files)}):")
                 for f in rule_files[:15]:
                     parts.append(f"  {f}")
+        from src.tools.fuzz.results_db import get_results as _get_fuzz_results
+        try:
+            fuzz_rows = _get_fuzz_results(limit=100)
+        except Exception:
+            fuzz_rows = []
+        if fuzz_rows:
+            parts.append(f"\nFuzz results ({len(fuzz_rows)} entries, experimental):")
+            for method, tgt, word, display in fuzz_rows:
+                if method == "directory":
+                    parts.append(f"  {method}: /{word}")
+                else:
+                    parts.append(f"  {method}: {word}.{tgt}")
         return "\n".join(parts)
 
     def _inject_context(self):
@@ -3728,6 +3921,8 @@ class App(tk.Tk):
             )
             self._system_process = proc
             for line in proc.stdout:
+                if not self.console.winfo_exists():
+                    break
                 stripped = line.rstrip()
                 if stripped:
                     self.console.after(0, lambda l=stripped: self.console.body(l))
@@ -3749,10 +3944,11 @@ class App(tk.Tk):
             proc.wait()
             if self._system_process is proc:
                 self._system_process = None
-            if proc.returncode != 0:
+            if proc.returncode != 0 and self.console.winfo_exists():
                 self.console.after(0, lambda: self.console.warning(f"exit code: {proc.returncode}"))
         except Exception as e:
-            self.console.after(0, lambda: self.console.error(f"System command failed: {e}"))
+            if self.console.winfo_exists():
+                self.console.after(0, lambda: self.console.error(f"System command failed: {e}"))
 
     def _stop_system(self):
         if self._system_process:
@@ -4071,9 +4267,130 @@ class App(tk.Tk):
         if args and args[0].lower() == "stop":
             if self._fuzz_dlg:
                 self._fuzz_dlg._stop()
+            if hasattr(self, '_fuzz_engine') and self._fuzz_engine:
+                self._fuzz_engine.stop()
+                self._fuzz_engine = None
             self.console.info("Fuzzer stopped")
             return
-        self._fuzz_dlg = FuzzDialog(self)
+        if not args:
+            self._fuzz_dlg = FuzzDialog(self)
+            return
+
+        method = args[0].lower()
+        if method not in ("dir", "vhost", "dns"):
+            self.console.body("Usage: use fuzzer <dir|vhost|dns> <target> ...")
+            return
+
+        if len(args) < 2:
+            self.console.body(f"Usage: use fuzzer {method} <target> ...")
+            return
+        target = args[1]
+
+        if method == "dir":
+            port = 80
+            wordlist = None
+            if len(args) >= 4:
+                if args[2].isdigit():
+                    port = int(args[2])
+                    wordlist = args[3]
+                else:
+                    wordlist = args[2]
+            elif len(args) == 3:
+                wordlist = args[2]
+            else:
+                self.console.body("Usage: use fuzzer dir <target> <wordlist> [port]")
+                return
+            if not wordlist:
+                self.console.body("Usage: use fuzzer dir <target> <wordlist> [port]")
+                return
+            from src.hsf_paths import lst_dir
+            wl_path = os.path.join(str(lst_dir()), wordlist)
+            if not os.path.isfile(wl_path):
+                self.console.error(f"Wordlist not found: {wordlist}")
+                return
+            ip = self._resolve_to_ip(target)
+            display_target = ip or target
+            url_template = f"http://{display_target}:{port}/FUZZ"
+            show_codes = {200, 201, 204, 301, 302, 307, 400, 401, 403, 405, 500, 502, 503}
+            def _emit_dir(text, color=None):
+                stripped = text.rstrip("\n")
+                c = {"success": "success", "error": "error", "info": "info"}.get(color)
+                if c:
+                    getattr(self.console, c)(stripped)
+                else:
+                    self.console.body(stripped)
+            self.console.after(0, lambda: self.console.info(
+                f"Directory fuzzing {url_template.replace('FUZZ', '')} with {wordlist} ({port}/tcp)"))
+            from src.tools.fuzz import FuzzEngine
+            engine = FuzzEngine(
+                target=display_target, wordlist_path=wl_path,
+                method="directory", url_template=url_template,
+                workers=50, show_codes=show_codes,
+                on_result=lambda t, c=None: self.console.after(0, _emit_dir, t, c),
+            )
+            self._fuzz_engine = engine
+            engine.start()
+
+        elif method == "vhost":
+            if len(args) < 3:
+                self.console.body("Usage: use fuzzer vhost <target> <wordlist>")
+                return
+            wordlist = args[2]
+            from src.hsf_paths import lst_dir
+            wl_path = os.path.join(str(lst_dir()), wordlist)
+            if not os.path.isfile(wl_path):
+                self.console.error(f"Wordlist not found: {wordlist}")
+                return
+            ip = self._resolve_to_ip(target)
+            show_codes = {200, 201, 204, 301, 302, 307, 400, 401, 403, 405, 500, 502, 503}
+            def _emit_vhost(text, color=None):
+                stripped = text.rstrip("\n")
+                c = {"success": "success", "error": "error", "info": "info"}.get(color)
+                if c:
+                    getattr(self.console, c)(stripped)
+                else:
+                    self.console.body(stripped)
+            self.console.after(0, lambda: self.console.info(
+                f"Vhost fuzzing {target} with {wordlist}"))
+            from src.tools.fuzz import FuzzEngine
+            engine = FuzzEngine(
+                target=target, wordlist_path=wl_path,
+                method="vhost", target_ip=ip,
+                workers=50, show_codes=show_codes,
+                on_result=lambda t, c=None: self.console.after(0, _emit_vhost, t, c),
+            )
+            self._fuzz_engine = engine
+            engine.start()
+
+        elif method == "dns":
+            if len(args) < 3:
+                self.console.body("Usage: use fuzzer dns <target> <wordlist>")
+                return
+            wordlist = args[2]
+            from src.hsf_paths import lst_dir
+            wl_path = os.path.join(str(lst_dir()), wordlist)
+            if not os.path.isfile(wl_path):
+                self.console.error(f"Wordlist not found: {wordlist}")
+                return
+            show_codes = {200, 201, 204, 301, 302, 307, 400, 401, 403, 405, 500, 502, 503}
+            def _emit_dns(text, color=None):
+                stripped = text.rstrip("\n")
+                c = {"success": "success", "error": "error", "info": "info"}.get(color)
+                if c:
+                    getattr(self.console, c)(stripped)
+                else:
+                    self.console.body(stripped)
+            self.console.after(0, lambda: self.console.info(
+                f"DNS fuzzing {target} with {wordlist}"))
+            from src.tools.fuzz import FuzzEngine
+            engine = FuzzEngine(
+                target=target, wordlist_path=wl_path,
+                method="dns",
+                workers=50, show_codes=show_codes,
+                on_result=lambda t, c=None: self.console.after(0, _emit_dns, t, c),
+            )
+            self._fuzz_engine = engine
+            engine.start()
 
     def _cmd_ftp(self, args):
         if not args:

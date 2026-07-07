@@ -44,10 +44,20 @@ class PassiveMDNSScanner:
                 )
             except PermissionError:
                 self._running = False
+                self._emit_error("mDNS passive: permission denied. Run as root or install CAP_NET_RAW.")
                 break
-            except OSError:
-                self._running = False
-                break
+            except OSError as e:
+                self._emit_error(f"mDNS passive error: {e}")
+            except Exception as e:
+                self._emit_error(f"mDNS passive transient error: {e}")
+
+    @staticmethod
+    def _emit_error(msg):
+        try:
+            from src import event_bus
+            event_bus.submit({"type": "scan_error", "message": msg})
+        except Exception:
+            pass
 
     def _process_packet(self, pkt):
         try:

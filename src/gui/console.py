@@ -12,9 +12,10 @@ BG = "#000000"
 BG_INPUT = "#111111"
 SUCCESS = "#00cc66"
 TITLE_COLOR = "#ffffff"
-INFO_COLOR = "#5ba3ec"
+INFO_COLOR = "#888888"
 WARN_COLOR = "#ce9178"
 ERR_COLOR = "#f44747"
+AGENT_COLOR = "#5ba3ec"
 
 
 class Console(tk.Frame):
@@ -258,6 +259,12 @@ class Console(tk.Frame):
     def body(self, text):
         self.writeln(text, FG_DIM)
 
+    def agent(self, text):
+        self.writeln(text, AGENT_COLOR)
+
+    def consultor(self, text):
+        self.writeln(text, FG_CONSULTOR)
+
     def warning(self, text):
         self.writeln(f"[!] {text}", WARN_COLOR)
 
@@ -361,6 +368,8 @@ class Console(tk.Frame):
             return
 
         if self._mode_handler:
+            self.write(f"{self._mode_label}> ", color=self._mode_fg)
+            self.writeln(raw, color=FG)
             self._mode_handler(raw)
             return
 

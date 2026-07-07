@@ -1,5 +1,4 @@
 import os
-import platform
 import time
 import socket
 import threading
@@ -11,12 +10,6 @@ from scapy.all import ARP, Ether, srp
 from scapy.config import conf
 from zeroconf import Zeroconf, ServiceBrowser, BadTypeInNameException
 from .mdns_cache import add_service, decode_properties
-
-if platform.system() == "Darwin":
-    try:
-        conf.use_pcap = True
-    except Exception:
-        pass
 
 conf.verb = 0
 
@@ -94,6 +87,15 @@ class ActiveScanner:
         cidr_len = sum(bin(int(o)).count("1") for o in netmask.split("."))
         self._network = ipaddress.ip_network(f"{ip}/{cidr_len}", strict=False)
 
+        try:
+            from src import event_bus
+            event_bus.submit({
+                "type": "scan_info",
+                "message": f"Active scanner started on {iface_name} ({ip}/{cidr_len}) — {self._network.num_addresses - 2} hosts",
+            })
+        except Exception:
+            pass
+
         self.on_host(ip=ip, hostname=socket.gethostname(), mac="", method="local")
         self.on_host(ip="127.0.0.1", hostname="localhost", mac="", method="local")
 
@@ -131,27 +133,51 @@ class ActiveScanner:
     def _run_arp(self):
         network_str = str(self._network)
         while self._running:
-            pkt = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=network_str)
             try:
-                ans, _ = srp(pkt, iface=self._interface[0], timeout=3, verbose=0)
-                for _, r in ans:
-                    self.on_host(ip=r.psrc, hostname="", mac=r.hwsrc, method="ARP")
-            except PermissionError:
-                self.on_host(ip="ERROR", hostname="ARP requires root privileges", mac="", method="error")
-                return
-            except (RecursionError, OSError) as e:
-                pass
+                pkt = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(pdst=network_str)
+                try:
+                    ans, _ = srp(pkt, iface=self._interface[0], timeout=3, verbose=0)
+                    arp_count = len(ans)
+                    if arp_count > 0:
+                        try:
+                            from src import event_bus
+                            event_bus.submit({
+                                "type": "scan_info",
+                                "message": f"ARP scan found {arp_count} host(s)",
+                            })
+                        except Exception:
+                            pass
+                    for _, r in ans:
+                        self.on_host(ip=r.psrc, hostname="", mac=r.hwsrc, method="ARP")
+                except PermissionError:
+                    self.on_host(ip="ERROR", hostname="ARP requires root privileges", mac="", method="error")
+                    return
+                except (RecursionError, OSError) as e:
+                    pass
+            except Exception as e:
+                try:
+                    from src import event_bus
+                    event_bus.submit({"type": "scan_error", "message": f"ARP scan error: {e}"})
+                except Exception:
+                    pass
             time.sleep(ACTIVE_INTERVAL)
 
     def _run_mdns_active(self):
         while self._running:
-            tl = _ServiceTypeListener()
-            ServiceBrowser(self._zc, "_services._dns-sd._udp.local.", tl)
-            time.sleep(SERVICE_ENUM_TIME)
-            for t in tl.types:
-                if not self._running:
-                    return
-                ServiceBrowser(self._zc, t, _ActiveServiceListener(self.on_host))
+            try:
+                tl = _ServiceTypeListener()
+                ServiceBrowser(self._zc, "_services._dns-sd._udp.local.", tl)
+                time.sleep(SERVICE_ENUM_TIME)
+                for t in tl.types:
+                    if not self._running:
+                        return
+                    ServiceBrowser(self._zc, t, _ActiveServiceListener(self.on_host))
+            except Exception as e:
+                try:
+                    from src import event_bus
+                    event_bus.submit({"type": "scan_error", "message": f"mDNS active error: {e}"})
+                except Exception:
+                    pass
             time.sleep(ACTIVE_INTERVAL)
 
     def _run_nmap(self):
@@ -159,15 +185,23 @@ class ActiveScanner:
             return
         targets = [str(ip) for ip in self._network.hosts()]
         while self._running:
-            with ThreadPoolExecutor(max_workers=THREADS) as exe:
-                for ip in targets:
-                    if not self._running:
-                        return
-                    exe.submit(self._nmap_scan, ip)
+            try:
+                with ThreadPoolExecutor(max_workers=THREADS) as exe:
+                    for ip in targets:
+                        if not self._running:
+                            return
+                        exe.submit(self._nmap_scan, ip)
+            except Exception as e:
+                try:
+                    from src import event_bus
+                    event_bus.submit({"type": "scan_error", "message": f"Nmap scan error: {e}"})
+                except Exception:
+                    pass
             time.sleep(ACTIVE_INTERVAL)
 
     def _nmap_scan(self, ip):
         try:
+            import nmap
             nm = nmap.PortScanner()
             nm.scan(hosts=ip, arguments="-sU -Pn -p 5353 --open")
             if ip not in nm.all_hosts():

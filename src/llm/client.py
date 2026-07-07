@@ -15,6 +15,7 @@ class LLMClient:
         self._model = _cfg.get_active_model(config)
         self._system_prompt = config.get("prompts", {}).get(purpose, "")
         self._client = None
+        self.last_prompt_tokens = 0
 
         if not pid or not provider:
             raise RuntimeError(
@@ -62,19 +63,23 @@ class LLMClient:
             stream=True,
         )
 
-    def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None, on_text=None):
+    def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None, on_text=None, stop_event=None):
         from src.llm.tools import TOOLS as _TOOLS, execute as _execute
 
         self._ensure_client()
         m = model or self._model
         current = list(messages)
 
-        for _ in range(35):
+        while True:
+            if stop_event and stop_event.is_set():
+                return None
             resp = self._client.chat.completions.create(
                 model=m,
                 messages=self._messages(current),
                 tools=_TOOLS,
             )
+            if hasattr(resp, 'usage') and resp.usage:
+                self.last_prompt_tokens = resp.usage.prompt_tokens
             choice = resp.choices[0]
             if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
                 if choice.message.content and on_text:
@@ -104,8 +109,6 @@ class LLMClient:
                 )
                 return stream
             return None
-
-        raise RuntimeError("Too many tool-calling iterations.")
 
     @property
     def model(self):

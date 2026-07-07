@@ -113,6 +113,8 @@ class NetworkView(BaseView):
             return icons.icon("question.png", size=50)
         if dt == "gateway":
             return icons.icon("router.png", size=50) or icons.icon("question.png", size=50)
+        if "android probable" in dt:
+            return icons.icon("android2.png", size=50)
         for name in ["linux device", "windows", "mac", "android", "ios device",
                       "iphone", "ipad",
                       "ubuntu", "debian", "fedora", "centos", "arch", "kali",

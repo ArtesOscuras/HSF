@@ -17,7 +17,7 @@ _ssl_context.verify_mode = ssl.CERT_NONE
 
 
 class FuzzEngine:
-    def __init__(self, target, wordlist_path, method, target_ip=None, on_result=None, workers=None, on_progress=None, on_found=None, url_template=None, show_codes=None, hide_size_range=None):
+    def __init__(self, target, wordlist_path, method, target_ip=None, on_result=None, workers=None, on_progress=None, on_found=None, on_done=None, url_template=None, show_codes=None, hide_size_range=None):
         self._target = target
         self._wordlist_path = wordlist_path
         self._method = method
@@ -28,6 +28,7 @@ class FuzzEngine:
         self._on_result = on_result
         self._on_progress = on_progress
         self._on_found = on_found
+        self._on_done = on_done
         self._stop_flag = threading.Event()
         self._executor = None
         self._workers = workers or MAX_WORKERS
@@ -93,6 +94,8 @@ class FuzzEngine:
         if self._on_progress:
             self._on_progress(total, total, found)
         self._emit(f"\n[+] Done. {found} results from {total} requests.\n", "success")
+        if self._on_done:
+            self._on_done(found)
 
     def _do_request(self, word):
         req = self._build_request(word)

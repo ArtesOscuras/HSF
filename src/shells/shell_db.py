@@ -126,16 +126,19 @@ def drain_agent_output(sid):
     return result
 
 
-def touch_agent(sid):
+def touch_agent(sid, cmd=None):
     s = get_session(sid)
     if s:
         s["_agent_touch"] = True
+        if cmd:
+            s["_agent_cmd"] = cmd
 
 
 def pop_agent_touch(sid):
     s = get_session(sid)
     if s and s.pop("_agent_touch", None):
-        return True
+        cmd = s.pop("_agent_cmd", None)
+        return cmd if cmd else True
     return False
 
 

@@ -226,6 +226,15 @@ def send_raw(sid, data):
         data_bytes = data.encode()
     else:
         data_bytes = data
+    ch = session.get("ssh_channel")
+    if ch:
+        try:
+            ch.send(data_bytes)
+            _dbg(f"[shell #{sid}] sent raw via ssh_channel ({len(data_bytes)} bytes)")
+            return True
+        except Exception as e:
+            _dbg(f"[shell #{sid}] send_raw (ssh_channel) error: {e}")
+            return False
     pty_fd = session.get("pty_fd")
     if pty_fd:
         try:

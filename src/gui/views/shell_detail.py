@@ -131,6 +131,7 @@ class ShellDetailView(BaseView):
         self._partial_input = ""
         self._use_ansi = False
         self._ansi_tags = {}
+        self._strip_echo_cmd = None
         super().__init__(parent, **kwargs)
 
     def _build_ui(self):
@@ -176,6 +177,7 @@ class ShellDetailView(BaseView):
 
         self.terminal.tag_configure("muted", foreground=MUTED)
         self.terminal.tag_configure("bright", foreground=BRIGHT)
+        self.terminal.tag_configure("protected", foreground=BRIGHT)
         self.terminal.tag_configure("info", foreground=INFO)
         self.terminal.tag_configure("error", foreground="#f44747")
         self.terminal.tag_configure("prompt", foreground=SUCCESS)
@@ -234,9 +236,7 @@ class ShellDetailView(BaseView):
         self.terminal.see(tk.END)
 
     def _protect(self, start=None, end=None):
-        tag = "protected"
-        self.terminal.tag_configure(tag, foreground=BRIGHT)
-        self.terminal.tag_add(tag, start or "1.0", end or self._freeze_mark)
+        self.terminal.tag_add("protected", start or "1.0", end or self._freeze_mark)
 
     def _jump_to_prompt(self, event=None):
         self.terminal.mark_set("insert", self.terminal.index("prompt"))
@@ -452,15 +452,35 @@ class ShellDetailView(BaseView):
 
     def _poll(self):
         moved = False
-        if shell_db.pop_agent_touch(self._sid):
+        agent_cmd = None
+        touch = shell_db.pop_agent_touch(self._sid)
+        if touch:
             self._freeze_mark = self.terminal.index(tk.END)
             self._protect("1.0", self._freeze_mark)
+            if isinstance(touch, str):
+                agent_cmd = touch
             moved = True
+
+        if agent_cmd:
+            self.terminal.delete("prompt", tk.END)
+            self.terminal.insert(tk.END, agent_cmd + "\n", "info")
+            self._freeze_mark = self.terminal.index("insert")
+            self._protect("1.0", self._freeze_mark)
+            self._strip_echo_cmd = agent_cmd
+            self._insert_prompt()
+            moved = False
 
         new_data = shell_db.drain_output(self._sid)
         if new_data:
             data = new_data.replace("\r\n", "\n").replace("\r", "\n")
-            self._append_output(data, "bright")
+            if self._strip_echo_cmd:
+                cmd = self._strip_echo_cmd
+                self._strip_echo_cmd = None
+                prefix = cmd + "\n"
+                if data.startswith(prefix):
+                    data = data[len(prefix):]
+            if data:
+                self._append_output(data, "bright")
 
         if moved:
             self._insert_prompt()

@@ -62,6 +62,7 @@ SERVICE_RAOP = "_raop._tcp.local."
 SERVICE_GOOGLECAST = "_googlecast._tcp.local."
 SERVICE_ONVIF = "_onvif._tcp.local."
 SERVICE_RTSP = "_rtsp._tcp.local."
+SERVICE_SPOTIFY = "_spotify-connect._tcp.local."
 
 MAC_HOSTNAME_KEYWORDS = (
     "macbook", "imac", "macmini", "macpro", "mac studio", "mac",
@@ -426,6 +427,7 @@ class ProbeContext:
             SERVICE_RDLINK, SERVICE_APPLE_MOBDEV2, SERVICE_COMPANION_LINK,
             SERVICE_APPLETV, SERVICE_HOMEKIT, SERVICE_GOOGLECAST,
             SERVICE_ONVIF, SERVICE_RTSP, SERVICE_AIRPLAY, SERVICE_RAOP,
+            SERVICE_SPOTIFY,
         )
         ports = (PORT_445, PORT_9100, PORT_631, PORT_RTSP, PORT_SSH)
         udp_ports = (PORT_ONVIF_DISCOVERY,)
@@ -544,10 +546,16 @@ class AndroidIdentifier(BaseIdentifier):
     name = "android"
 
     def identify(self, ip, context, gateway_ip=None, hostname=""):
-        if context.mdns_service(SERVICE_GOOGLECAST):
-            hostname_lower = hostname.lower()
-            if any(kw in hostname_lower for kw in ANDROID_KEYWORDS):
-                return "Android device"
+        h = hostname.lower()
+        has_android_hostname = "android" in h
+        has_services = (
+            context.mdns_service(SERVICE_GOOGLECAST)
+            or context.mdns_service(SERVICE_SPOTIFY)
+        )
+        if has_android_hostname and has_services:
+            return "Android device"
+        if has_android_hostname or has_services:
+            return "Android probable"
         return None
 
 
