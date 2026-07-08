@@ -400,11 +400,10 @@ HSF integrates with LLMs via an extensible provider system supporting any OpenAI
 
 ### Agent Tool-Calling (`src/llm/client.py` → `chat_with_tools()`)
 
-The agent mode gives the LLM the ability to call **40 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
+The agent mode gives the LLM the ability to call **53 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
 
-**Tool-calling loop** (up to 35 iterations):
+**Tool-calling loop**:
 ...
-5. If tool-calling exceeds 35 iterations, a `RuntimeError("Too many tool-calling iterations.")` is raised.
 
 The tool-calling phase does **not** stream — only the final assistant response is streamed.
 
@@ -421,9 +420,21 @@ def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None)
 
 Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` variable. Each entry follows the `{"type": "function", "function": {...}}` format with `name`, `description`, and `parameters` (JSON Schema).
 
-**40 tools** in six categories:
+**53 tools** in six categories:
 
-**Data tools** (14) — manipulate inventory, no `tool_context` needed:
+**Data tools** (19) — query and manipulate inventory, no `tool_context` needed:
+
+**Query tools:**
+
+| Tool | Description |
+|---|---|
+| `check_machine` | Get all known info about a machine (IP, hostname, ports, banners, web services, users) |
+| `check_domain` | Get all known info about a domain (subdomains, directories, web services, machines) |
+| `check_inventory` | Get full inventory: users, credentials, passwords, hashes, people, tickets, dictionaries, rules |
+| `check_shells` | List all shell sessions with ID, type, status, IP, port, timestamps |
+| `check_evidences` | List evidence sessions with metadata, filenames, request directories (no file contents) |
+
+**Mutation tools:**
 
 | Tool | Description |
 |---|---|
@@ -442,7 +453,7 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 | `add_person` | Add a person to the people inventory (`first_name`, `last_name`, `company`, `domain`, `username`, `role`, `linkedin_url`, `source`, `interests`) |
 | `delete_person` | Delete a person by ID |
 
-**Network tools** (9) — trigger operations, require `tool_context` (App instance):
+**Network tools** (10) — trigger operations, require `tool_context` (App instance):
 
 | Tool | Description |
 |---|---|
@@ -456,6 +467,7 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 | `nslookup` | DNS lookup on a hostname |
 | `banner_grab` | Grab service banner from a port (default 80) |
 | `whatweb` | Identify web technologies via WhatWeb (default port 80) |
+| `nmap` | Run custom nmap scan with arbitrary arguments against a target. Returns raw output and auto-saves open ports to machine inventory. |
 
 **Web tools** (2) — fetch URLs and search the web, no `tool_context` needed:
 

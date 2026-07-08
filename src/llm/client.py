@@ -13,6 +13,7 @@ class LLMClient:
         self._base_url = provider.get("base_url", "")
         self._api_key = provider.get("api_key", "")
         self._model = _cfg.get_active_model(config)
+        self._purpose = purpose
         self._system_prompt = config.get("prompts", {}).get(purpose, "")
         self._client = None
         self.last_prompt_tokens = 0
@@ -41,6 +42,10 @@ class LLMClient:
         if self._system_prompt:
             result.append(
                 {"role": "system", "content": self._system_prompt})
+        if self._purpose == "agent":
+            result.append({"role": "system", "content": "[MODE: AGENT] You may use tools."})
+        else:
+            result.append({"role": "system", "content": "[MODE: CONSULTOR] Do NOT use tools. Provide analysis and advice only."})
         result.extend(messages)
         return result
 

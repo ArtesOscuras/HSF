@@ -66,6 +66,94 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "check_machine",
+            "description": (
+                "Get all known information about a machine in the inventory. "
+                "Returns IP, hostname, MAC, device type, OS, domain, discovery methods, "
+                "open TCP/UDP ports, service banners, web services, associated domains, "
+                "directories, and local users."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Machine IP address or ID number (e.g. '192.168.1.100' or '5')",
+                    },
+                },
+                "required": ["target"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_domain",
+            "description": (
+                "Get all known information about a domain in the inventory. "
+                "Returns first/last seen timestamps, subdomains, directories, "
+                "web services (port + output), and associated machines with IPs."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "domain": {
+                        "type": "string",
+                        "description": "Domain name (e.g. 'example.com')",
+                    },
+                },
+                "required": ["domain"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_inventory",
+            "description": (
+                "Get all inventory data: users, credentials, passwords, hashes, "
+                "people, tickets, dictionaries (filenames only), and hashcat rules "
+                "(filenames only). Does NOT include machine or domain details — use "
+                "check_machine or check_domain for those."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_shells",
+            "description": (
+                "List all shell sessions (reverse shells, SSH, SFTP, FTP, WinRM). "
+                "Returns ID, type, status, IP, port, connected time, and last activity."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_evidences",
+            "description": (
+                "List all evidence sessions with metadata. Returns session names, "
+                "target URL, browser, start/end timestamps, request counts, and "
+                "filenames in each session directory. Does NOT return file contents."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "add_credential",
             "description": "Add a credential (username + password or NT hash).",
             "parameters": {
@@ -242,6 +330,40 @@ TOOLS = [
                     "port": {"type": "integer", "description": "Port number (default 80)"},
                 },
                 "required": ["ip"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nmap",
+            "description": (
+                "Run an nmap scan against a target with custom arguments. "
+                "Use this for port scanning, service detection, OS fingerprinting, "
+                "or any nmap-based reconnaissance. Provide nmap flags and options "
+                "as arguments (do NOT include the target in arguments). "
+                "Open ports found in the output are automatically saved to the "
+                "machine inventory if the target matches a known machine."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Target IP address or hostname to scan.",
+                    },
+                    "arguments": {
+                        "type": "string",
+                        "description": (
+                            "Nmap arguments (flags and options) WITHOUT the target. "
+                            "Examples: '-sV -sC -p 80,443' for service/script scan, "
+                            "'-sS -p-' for SYN scan of all ports, "
+                            "'-O -sV' for OS and service detection, "
+                            "'-sU --top-ports 100' for top 100 UDP ports."
+                        ),
+                    },
+                },
+                "required": ["target", "arguments"],
             },
         },
     },
@@ -796,6 +918,404 @@ def _add_domain(args, ctx=None):
     return f"Domain '{domain}' added."
 
 
+@register("check_machine")
+def _check_machine(args, ctx=None):
+    from src.machines import store, machine_db
+    from src.machines.credential_db import load_users
+
+    target = args.get("target", "").strip()
+    if not target:
+        return "Error: no target specified."
+
+    machine = store.get(target)
+    if not machine:
+        for m in store.get_all():
+            if str(m.id) == target:
+                machine = m
+                break
+
+    if not machine:
+        return f"Machine '{target}' not found in inventory."
+
+    m = machine
+    lines = [f"Machine #{m.id}: {m.ip}"]
+    if getattr(m, "hostname", ""):
+        lines.append(f"  Hostname: {m.hostname}")
+    if getattr(m, "ipv6", ""):
+        lines.append(f"  IPv6: {m.ipv6}")
+    if getattr(m, "mac", ""):
+        lines.append(f"  MAC: {m.mac}")
+    if getattr(m, "device_type", ""):
+        lines.append(f"  Device type: {m.device_type}")
+    if getattr(m, "model", ""):
+        lines.append(f"  Model: {m.model}")
+    if getattr(m, "os", ""):
+        lines.append(f"  OS: {m.os}")
+    if getattr(m, "domain", ""):
+        lines.append(f"  Domain: {m.domain}")
+    methods = getattr(m, "methods", set())
+    if methods:
+        lines.append(f"  Methods: {', '.join(sorted(methods))}")
+    if getattr(m, "first_seen", None):
+        lines.append(f"  First seen: {m.first_seen.isoformat()}")
+    if getattr(m, "last_seen", None):
+        lines.append(f"  Last seen: {m.last_seen.isoformat()}")
+
+    try:
+        tcp = machine_db.load_tcp_ports(m.id)
+        if tcp:
+            lines.append(f"  TCP ports ({len(tcp)}): {', '.join(str(p) for p in tcp)}")
+    except Exception:
+        pass
+
+    try:
+        udp = machine_db.load_udp_ports(m.id)
+        if udp:
+            lines.append(f"  UDP ports ({len(udp)}): {', '.join(str(p) for p in udp)}")
+    except Exception:
+        pass
+
+    try:
+        banners = machine_db.load_banners(m.id)
+        if banners:
+            lines.append(f"  Banners ({len(banners)}):")
+            for port, output, probe in banners:
+                truncated = output[:500] + "..." if len(output) > 500 else output
+                lines.append(f"    Port {port}: {truncated}")
+    except Exception:
+        pass
+
+    try:
+        ws = machine_db.load_web_services(m.id)
+        if ws:
+            lines.append(f"  Web services ({len(ws)}):")
+            for port, output in ws:
+                truncated = output[:500] + "..." if len(output) > 500 else output
+                lines.append(f"    Port {port}: {truncated}")
+    except Exception:
+        pass
+
+    try:
+        domains = machine_db.load_domains(m.id)
+        if domains:
+            parts = [f"{d} ({s})" if s else d for d, s in domains]
+            lines.append(f"  Associated domains ({len(domains)}): {', '.join(parts)}")
+    except Exception:
+        pass
+
+    try:
+        dirs = machine_db.load_directories(m.id)
+        if dirs:
+            paths = [d for d, _ in dirs[:30]]
+            suffix = f" (+{len(dirs) - 30} more)" if len(dirs) > 30 else ""
+            lines.append(f"  Directories ({len(dirs)}): {', '.join(paths)}{suffix}")
+    except Exception:
+        pass
+
+    try:
+        all_users = load_users()
+        machine_users = [u for u in all_users if u.get("machine") == m.ip]
+        if machine_users:
+            user_strs = [f"{u['username']} ({u.get('type', '?')})" for u in machine_users[:20]]
+            lines.append(f"  Users ({len(machine_users)}): {', '.join(user_strs)}")
+            if len(machine_users) > 20:
+                lines.append(f"    ... and {len(machine_users) - 20} more")
+    except Exception:
+        pass
+
+    return "\n".join(lines)
+
+
+@register("check_domain")
+def _check_domain(args, ctx=None):
+    from src.machines import domain_db
+
+    domain = args.get("domain", "").strip()
+    if not domain:
+        return "Error: no domain specified."
+
+    if not domain_db.exists(domain):
+        return f"Domain '{domain}' not found in inventory."
+
+    lines = [f"Domain: {domain}"]
+
+    info = domain_db.load_domain_info(domain)
+    if info:
+        if info.get("first_seen"):
+            lines.append(f"  First seen: {info['first_seen']}")
+        if info.get("last_seen"):
+            lines.append(f"  Last seen: {info['last_seen']}")
+
+    try:
+        subs = domain_db.load_subdomains(domain)
+        if subs:
+            lines.append(f"  Subdomains ({len(subs)}):")
+            for sub, ts, method in subs[:30]:
+                meta = f" ({method})" if method else ""
+                lines.append(f"    {sub}{meta}")
+            if len(subs) > 30:
+                lines.append(f"    ... and {len(subs) - 30} more")
+    except Exception:
+        pass
+
+    try:
+        dirs = domain_db.load_directories(domain)
+        if dirs:
+            paths = [d for d, _ in dirs[:30]]
+            suffix = f" (+{len(dirs) - 30} more)" if len(dirs) > 30 else ""
+            lines.append(f"  Directories ({len(dirs)}): {', '.join(paths)}{suffix}")
+    except Exception:
+        pass
+
+    try:
+        ws = domain_db.load_web_services(domain)
+        if ws:
+            lines.append(f"  Web services ({len(ws)}):")
+            for port, output in ws[:10]:
+                truncated = output[:500] + "..." if len(output) > 500 else output
+                lines.append(f"    Port {port}: {truncated}")
+            if len(ws) > 10:
+                lines.append(f"    ... and {len(ws) - 10} more")
+    except Exception:
+        pass
+
+    try:
+        machines = domain_db.load_domain_machines(domain)
+        valid = [m for m in machines if m.get("machine_id") and m["machine_id"] != 0]
+        if valid:
+            lines.append(f"  Machines ({len(valid)}):")
+            for m in valid[:15]:
+                src = f" ({m['source']})" if m.get("source") else ""
+                lines.append(f"    #{m['machine_id']} {m['machine_ip']}{src}")
+            if len(valid) > 15:
+                lines.append(f"    ... and {len(valid) - 15} more")
+    except Exception:
+        pass
+
+    return "\n".join(lines)
+
+
+@register("check_inventory")
+def _check_inventory(args, ctx=None):
+    import os
+    from src.machines.credential_db import load_users, load_passwords, load_hashes, load_credentials, load_tickets
+    from src.machines.people_db import load_people
+    from src.hsf_paths import lst_dir, rules_dir
+
+    lines = ["Current HSF inventory:"]
+
+    users = load_users()
+    if users:
+        lines.append(f"\nUsers ({len(users)}):")
+        for u in users[:50]:
+            info = f"  #{u['id']} {u['username']} ({u.get('type', '?')})"
+            if u.get("domain"):
+                info += f" domain: {u['domain']}"
+            if u.get("machine"):
+                info += f" machine: {u['machine']}"
+            if u.get("origin"):
+                info += f" origin: {u['origin']}"
+            lines.append(info)
+        if len(users) > 50:
+            lines.append(f"  ... and {len(users) - 50} more")
+
+    creds = load_credentials()
+    if creds:
+        lines.append(f"\nCredentials ({len(creds)}):")
+        for c in creds[:50]:
+            info = f"  #{c['id']} {c['username']}"
+            if c.get("domain"):
+                info += f" domain: {c['domain']}"
+            flags = []
+            if c.get("password"):
+                flags.append("password")
+            if c.get("hash_nt"):
+                flags.append("NT")
+            if flags:
+                info += f" ({', '.join(flags)})"
+            lines.append(info)
+        if len(creds) > 50:
+            lines.append(f"  ... and {len(creds) - 50} more")
+
+    pwds = load_passwords()
+    if pwds:
+        lines.append(f"\nPasswords ({len(pwds)}):")
+        for p in pwds[:50]:
+            lines.append(f"  {p}")
+        if len(pwds) > 50:
+            lines.append(f"  ... and {len(pwds) - 50} more")
+
+    hashes = load_hashes()
+    if hashes:
+        lines.append(f"\nHashes ({len(hashes)}):")
+        for h in hashes[:30]:
+            hval = h["hash"]
+            truncated = hval[:60] + "..." if len(hval) > 60 else hval
+            info = f"  #{h['id']} [{h.get('type', '?')}] {truncated}"
+            if h.get("hascat_mode"):
+                info += f" mode: {h['hascat_mode']}"
+            lines.append(info)
+        if len(hashes) > 30:
+            lines.append(f"  ... and {len(hashes) - 30} more")
+
+    people = load_people()
+    if people:
+        lines.append(f"\nPeople ({len(people)}):")
+        for p in people[:30]:
+            name = f"{p.get('first_name', '')} {p.get('last_name', '')}".strip() or f"#{p['id']}"
+            info = f"  #{p['id']} {name}"
+            if p.get("company"):
+                info += f" company: {p['company']}"
+            if p.get("domain"):
+                info += f" domain: {p['domain']}"
+            if p.get("username"):
+                info += f" username: {p['username']}"
+            if p.get("role"):
+                info += f" role: {p['role']}"
+            lines.append(info)
+        if len(people) > 30:
+            lines.append(f"  ... and {len(people) - 30} more")
+
+    tickets = load_tickets()
+    if tickets:
+        lines.append(f"\nTickets ({len(tickets)}):")
+        for t in tickets[:20]:
+            lines.append(
+                f"  #{t['id']} {t.get('principal', '?')}@{t.get('realm', '?')} "
+                f"svc: {t.get('service', '?')} [{t.get('ticket_type', '?')}]"
+            )
+        if len(tickets) > 20:
+            lines.append(f"  ... and {len(tickets) - 20} more")
+
+    lst = str(lst_dir())
+    if os.path.isdir(lst):
+        lst_files = sorted(
+            f for f in os.listdir(lst) if os.path.isfile(os.path.join(lst, f))
+        )
+        if lst_files:
+            lines.append(f"\nDictionaries ({len(lst_files)}):")
+            for f in lst_files[:30]:
+                lines.append(f"  {f}")
+            if len(lst_files) > 30:
+                lines.append(f"  ... and {len(lst_files) - 30} more")
+
+    rules_d = str(rules_dir())
+    if os.path.isdir(rules_d):
+        rule_files = sorted(
+            f for f in os.listdir(rules_d) if os.path.isfile(os.path.join(rules_d, f))
+        )
+        if rule_files:
+            lines.append(f"\nHashcat rules ({len(rule_files)}):")
+            for f in rule_files[:30]:
+                lines.append(f"  {f}")
+            if len(rule_files) > 30:
+                lines.append(f"  ... and {len(rule_files) - 30} more")
+
+    return "\n".join(lines)
+
+
+@register("check_shells")
+def _check_shells(args, ctx=None):
+    from src.shells.shell_db import get_all
+
+    sessions = get_all()
+    if not sessions:
+        return "No active shell sessions."
+
+    lines = [f"Shell sessions ({len(sessions)}):"]
+    for s in sessions:
+        sid = s["id"]
+        stype = s.get("type", "?")
+        status = s.get("status", "?")
+        active = s.get("active", False)
+        ip = s.get("ip", "?")
+        port = s.get("source_port", "?")
+        lport = s.get("listener_port", 0)
+        conn = s.get("connected_at", None)
+        last = s.get("last_active", None)
+        shell_os = s.get("os", "")
+
+        flags = []
+        if active:
+            flags.append("active")
+        if shell_os:
+            flags.append(shell_os)
+
+        line = f"  #{sid} [{stype}] {status}"
+        line += f" {ip}:{port}"
+        if lport and lport != 0:
+            line += f" (listener: {lport})"
+        if flags:
+            line += f" ({', '.join(flags)})"
+        if conn:
+            line += f" connected: {conn.isoformat()}"
+        if last:
+            line += f" last: {last.isoformat()}"
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
+@register("check_evidences")
+def _check_evidences(args, ctx=None):
+    import json
+    import os
+    from src.hsf_paths import evidence_dir
+
+    base = str(evidence_dir())
+    if not os.path.isdir(base):
+        return "No evidence directory found."
+
+    names = sorted(
+        n for n in os.listdir(base)
+        if os.path.isdir(os.path.join(base, n))
+    )
+    if not names:
+        return "No evidence sessions found."
+
+    lines = [f"Evidence sessions ({len(names)}):"]
+    for name in names[:20]:
+        session_dir = os.path.join(base, name)
+        lines.append(f"\n  {name}/")
+
+        meta_path = os.path.join(session_dir, "session.json")
+        if os.path.isfile(meta_path):
+            try:
+                with open(meta_path) as f:
+                    meta = json.load(f)
+                if meta.get("target"):
+                    lines.append(f"    target: {meta['target']}")
+                if meta.get("browser"):
+                    lines.append(f"    browser: {meta['browser']}")
+                if meta.get("started_at"):
+                    lines.append(f"    started: {meta['started_at']}")
+                if meta.get("ended_at"):
+                    lines.append(f"    ended: {meta['ended_at']}")
+                if meta.get("request_count", 0):
+                    lines.append(f"    requests: {meta['request_count']}")
+            except (json.JSONDecodeError, PermissionError, OSError):
+                pass
+
+        try:
+            entries = sorted(os.listdir(session_dir))
+        except (PermissionError, OSError):
+            entries = []
+        files = [e for e in entries if os.path.isfile(os.path.join(session_dir, e))]
+        dirs = [e for e in entries if os.path.isdir(os.path.join(session_dir, e))]
+
+        if files:
+            lines.append(f"    files ({len(files)}): {', '.join(files)}")
+        if dirs:
+            dirs_shown = dirs[:10]
+            suffix = f" (+{len(dirs) - 10} more)" if len(dirs) > 10 else ""
+            lines.append(f"    request dirs ({len(dirs)}): {', '.join(dirs_shown)}{suffix}")
+
+    if len(names) > 20:
+        lines.append(f"\n  ... and {len(names) - 20} more sessions")
+
+    return "\n".join(lines)
+
+
 @register("add_credential")
 def _add_credential(args, ctx=None):
     from src.machines.credential_db import save_credential, save_user
@@ -939,6 +1459,74 @@ def _whatweb(args, ctx=None):
         return "Cannot scan: no tool context available."
     ctx._cmd_whatweb([ip])
     return f"WhatWeb scan started on {ip}:{port}."
+
+
+@register("nmap")
+def _nmap(args, ctx=None):
+    import os
+    import re
+    import shlex
+    import shutil
+    import subprocess
+    from src.info import get as info_get
+    from src.machines import store, machine_db
+
+    target = args.get("target", "").strip()
+    arguments = args.get("arguments", "").strip()
+
+    if not target:
+        return "Error: no target specified."
+
+    nmap_bin = info_get("nmap_path", "") or shutil.which("nmap")
+    if not nmap_bin:
+        return "Error: nmap is not available on this system."
+
+    try:
+        arg_list = shlex.split(arguments)
+    except ValueError as e:
+        return f"Error parsing nmap arguments: {e}"
+
+    cmd = [nmap_bin] + arg_list + [target]
+    env = os.environ.copy()
+    env["LANG"] = "C"
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        return "Error: nmap scan timed out."
+    except FileNotFoundError:
+        return f"Error: nmap binary not found at '{nmap_bin}'."
+    except Exception as e:
+        return f"Error running nmap: {e}"
+
+    output = (proc.stdout + proc.stderr).strip()
+    if not output:
+        return "(nmap produced no output)"
+
+    machine = store.get(target)
+    if machine:
+        saved = []
+        for line in output.splitlines():
+            m = re.match(r"(\d+)/(tcp|udp)\s+open", line)
+            if m:
+                port = int(m.group(1))
+                proto = m.group(2)
+                if proto == "udp":
+                    if machine_db.save_udp_port(machine.id, port):
+                        saved.append(f"{port}/udp")
+                else:
+                    if machine_db.save_tcp_port(machine.id, port):
+                        saved.append(f"{port}/tcp")
+        if saved:
+            output += f"\n\n[automatically saved to machine #{machine.id}: {', '.join(saved)}]"
+
+    return output
 
 
 @register("delete_credential")

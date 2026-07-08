@@ -334,6 +334,7 @@ class App(tk.Tk):
         self._agent_mode = False
         self._agent_stop_event = None
         self._llm_messages = []
+        self._silent_mode_cycle = False
         self._last_ctx_hash = None
         self._last_ctx = None
         self._last_token_pct = None
@@ -484,6 +485,7 @@ class App(tk.Tk):
         self.visualizer.register_view("rules_view", rules_view)
 
     def _register_commands(self):
+        self.console.set_mode_cycle_callback(self._cycle_mode)
         self.console.register_command("view", self._cmd_view, "Switch or list views")
         self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "people", "evidence", "services", "dictionary", "rule"])
         self.console.register_command("use", self._cmd_use, "Use a tool")
@@ -3455,18 +3457,29 @@ class App(tk.Tk):
         prompt = " ".join(args)
         self._agent_ask(prompt)
 
+    def _cycle_mode(self):
+        self._silent_mode_cycle = True
+        try:
+            if getattr(self, "_agent_mode", False):
+                self._leave_agent_mode()
+            elif getattr(self, "_consultor_mode", False):
+                self._leave_consultor_mode()
+                self._enter_agent_mode()
+            else:
+                self._enter_consultor_mode()
+        finally:
+            self._silent_mode_cycle = False
+
     def _enter_consultor_mode(self):
         self._consultor_mode = True
-        self.console.info(
-            "Consultor mode. Type your prompt. "
-            "Type 'exit' to leave."
-        )
+        if not self._silent_mode_cycle:
+            self.console.info("Consultor mode. Type your prompt. Type 'exit' to quit.")
         self.console.set_mode_handler(self._consultor_handler, "Consultor", "#e6b422")
 
     def _consultor_handler(self, text):
         text = text.strip()
         if text.lower() == "exit" or not text:
-            self._leave_consultor_mode()
+            self.destroy()
             return
         self._consultor_ask(text)
 
@@ -3474,7 +3487,8 @@ class App(tk.Tk):
         self._consultor_mode = False
         self.console.set_mode_handler(None)
         self.console.prompt_label.config(text="HSF> ", fg="#ffffff")
-        self.console.info("Left consultor mode.")
+        if not self._silent_mode_cycle:
+            self.console.info("Left consultor mode.")
 
     _MODEL_CONTEXT_LIMITS = {
         "gpt-4o": 128000, "gpt-4o-mini": 128000, "gpt-4-turbo": 128000,
@@ -3548,16 +3562,17 @@ class App(tk.Tk):
         import threading
         self._agent_stop_event = threading.Event()
         self._last_token_pct = None
-        self.console.info(
-            "Agent mode. Commands: exit, stop, reset, menu."
-        )
+        if not self._silent_mode_cycle:
+            self.console.info(
+                "Agent mode. Commands: exit, stop, reset, menu."
+            )
         self.console.set_mode_handler(self._agent_handler, "Agent", "#5ba3ec")
         self._update_agent_prompt()
 
     def _agent_handler(self, text):
         text = text.strip()
         if text.lower() == "exit" or not text:
-            self._leave_agent_mode()
+            self.destroy()
             return
         if text.lower() == "stop":
             if self._agent_stop_event:
@@ -3575,7 +3590,7 @@ class App(tk.Tk):
         if text.lower() == "menu":
             self.console.info(
                 "Agent mode commands:\n"
-                "  exit  - Leave agent mode\n"
+                "  exit  - Quit HSF\n"
                 "  stop  - Interrupt the current agent execution\n"
                 "  reset - Clear conversation history and start fresh\n"
                 "  menu  - Show this help"
@@ -3591,7 +3606,8 @@ class App(tk.Tk):
             self._agent_stop_event.set()
         self.console.set_mode_handler(None)
         self.console.prompt_label.config(text="HSF> ", fg="#ffffff")
-        self.console.info("Left agent mode.")
+        if not self._silent_mode_cycle:
+            self.console.info("Left agent mode.")
 
     def _agent_ask(self, prompt):
         import threading, re
@@ -3605,10 +3621,12 @@ class App(tk.Tk):
         )
         def _clean(text):
             return _tool_xml_re.sub('', text)
-        self._llm_messages.append({"role": "user", "content": prompt})
         self._inject_context()
         def _run():
             stop = self._agent_stop_event
+            self._llm_messages.append({"role": "user", "content": prompt})
+            self._llm_messages.append({"role": "user", "content": prompt})
+            succeeded = False
             try:
                 from src.llm import LLMClient
                 client = LLMClient(purpose="agent")
@@ -3658,17 +3676,25 @@ class App(tk.Tk):
                 self._llm_messages.append({"role": "assistant", "content": _clean(full)})
                 self.console.after(0, lambda: self.console.info("---"))
                 self.console.after(0, self._update_agent_prompt)
+                succeeded = True
             except Exception as e:
                 if not stop.is_set():
                     self.console.after(0, lambda m=str(e): self.console.error(f"Agent error: {m}"))
                 self.console.after(0, self._update_agent_prompt)
+            finally:
+                if not succeeded:
+                    try:
+                        self._llm_messages.pop()
+                    except (IndexError, AttributeError):
+                        pass
         threading.Thread(target=_run, daemon=True).start()
 
     def _consultor_ask(self, prompt):
         import threading
-        self._llm_messages.append({"role": "user", "content": prompt})
         self._inject_context()
         def _run():
+            self._llm_messages.append({"role": "user", "content": prompt})
+            succeeded = False
             try:
                 from src.llm import LLMClient
                 client = LLMClient()
@@ -3689,8 +3715,15 @@ class App(tk.Tk):
                     self.console.after(0, lambda b=buf: self.console.consultor(b.rstrip()))
                 self._llm_messages.append({"role": "assistant", "content": full})
                 self.console.after(0, lambda: self.console.info("---"))
+                succeeded = True
             except Exception as e:
                 self.console.after(0, lambda m=str(e): self.console.error(f"Consultor error: {m}"))
+            finally:
+                if not succeeded:
+                    try:
+                        self._llm_messages.pop()
+                    except (IndexError, AttributeError):
+                        pass
         threading.Thread(target=_run, daemon=True).start()
 
     def _build_model_context(self):
@@ -3712,13 +3745,13 @@ class App(tk.Tk):
                 try:
                     tcp = machine_db.load_tcp_ports(m.id)
                     if tcp:
-                        ports = [str(p["port"]) for p in tcp]
+                        ports = [str(p) for p in tcp]
                         parts.append(f"    TCP: {', '.join(ports)}")
                 except Exception: pass
                 try:
                     udp = machine_db.load_udp_ports(m.id)
                     if udp:
-                        ports = [str(p["port"]) for p in udp]
+                        ports = [str(p) for p in udp]
                         parts.append(f"    UDP: {', '.join(ports)}")
                 except Exception: pass
                 try:
@@ -3730,7 +3763,7 @@ class App(tk.Tk):
                     ws = machine_db.load_web_services(m.id)
                     if ws:
                         parts.append(f"    Web services: {len(ws)} (ports: "
-                            + ", ".join(str(w["port"]) for w in ws[:5]) + ")")
+                            + ", ".join(str(w[0]) for w in ws[:5]) + ")")
                 except Exception: pass
         from src.machines import domain_db
         domains = domain_db.list_all()

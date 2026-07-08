@@ -52,6 +52,7 @@ class Console(tk.Frame):
         self._mode_handler = None
         self._mode_label = ""
         self._mode_fg = FG
+        self._mode_cycle_cb = None
         self._is_system = False
         self._skip_release = False
         self._autocomplete_popup = None
@@ -224,6 +225,9 @@ class Console(tk.Frame):
         self._mode_fg = fg
         if handler:
             self.prompt_label.config(text=f"{self._mode_label}> ", fg=self._mode_fg)
+
+    def set_mode_cycle_callback(self, callback):
+        self._mode_cycle_cb = callback
 
     def add_help_section(self, title, items):
         self.help_sections.append((title, items))
@@ -438,6 +442,8 @@ class Console(tk.Frame):
         raw = self.input_var.get()
         prefix = raw.strip()
         if not prefix:
+            if self._mode_cycle_cb:
+                self._mode_cycle_cb()
             return "break"
 
         parts = prefix.split(None, 1)

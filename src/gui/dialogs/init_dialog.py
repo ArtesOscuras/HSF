@@ -96,6 +96,9 @@ def _has_module(name):
 def _resolve_binary(name):
     from src.resolve_binary import resolve
     found = resolve(name)
+    if found:
+        from src.info import set as info_set
+        info_set(f"{name}_path", found)
     return (True, found) if found else (False, "")
 
 
