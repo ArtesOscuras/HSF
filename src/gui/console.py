@@ -54,6 +54,9 @@ class Console(tk.Frame):
         self._mode_fg = FG
         self._mode_cycle_cb = None
         self._is_system = False
+        self._thinking = False
+        self._spinner_timer = None
+        self._spinner_idx = 0
         self._skip_release = False
         self._autocomplete_popup = None
         self._autocomplete_listbox = None
@@ -228,6 +231,38 @@ class Console(tk.Frame):
 
     def set_mode_cycle_callback(self, callback):
         self._mode_cycle_cb = callback
+
+    _SPINNER_CHARS = ["\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"]
+
+    def start_thinking(self):
+        self.after(0, self._start_thinking_ui)
+
+    def _start_thinking_ui(self):
+        self._spinner_idx = 0
+        self._thinking = True
+        self._tick_spinner()
+
+    def _tick_spinner(self):
+        if not self._thinking:
+            return
+        current = self.prompt_label.cget("text")
+        base = current.rstrip("\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f ")
+        ch = self._SPINNER_CHARS[self._spinner_idx % len(self._SPINNER_CHARS)]
+        self.prompt_label.config(text=base + " " + ch)
+        self._spinner_idx += 1
+        self._spinner_timer = self.after(150, self._tick_spinner)
+
+    def stop_thinking(self):
+        self._thinking = False
+        self.after(0, self._stop_thinking_ui)
+
+    def _stop_thinking_ui(self):
+        if getattr(self, '_spinner_timer', None):
+            self.after_cancel(self._spinner_timer)
+            self._spinner_timer = None
+        current = self.prompt_label.cget("text")
+        base = current.rstrip("\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f ")
+        self.prompt_label.config(text=base)
 
     def add_help_section(self, title, items):
         self.help_sections.append((title, items))

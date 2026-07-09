@@ -3606,8 +3606,6 @@ class App(tk.Tk):
 
     def _leave_agent_mode(self):
         self._agent_mode = False
-        if self._agent_stop_event:
-            self._agent_stop_event.set()
         self.console.set_mode_handler(None)
         self.console.prompt_label.config(text="HSF> ", fg="#ffffff")
         if not self._silent_mode_cycle:
@@ -3620,6 +3618,7 @@ class App(tk.Tk):
             return _tool_xml_re.sub('', text)
         self._inject_context()
         def _run():
+            self.console.start_thinking()
             stop = self._agent_stop_event
             self._llm_messages.append({"role": "user", "content": prompt})
             self._llm_messages.append({"role": "user", "content": prompt})
@@ -3707,6 +3706,7 @@ class App(tk.Tk):
                     self.console.after(0, lambda m=str(e): self.console.error(f"Agent error: {m}"))
                 self.console.after(0, self._update_mode_prompt)
             finally:
+                self.console.stop_thinking()
                 if not succeeded:
                     try:
                         self._llm_messages.pop()
@@ -3718,6 +3718,7 @@ class App(tk.Tk):
         import threading
         self._inject_context()
         def _run():
+            self.console.start_thinking()
             self._llm_messages.append({"role": "user", "content": prompt})
             succeeded = False
             try:
@@ -3745,6 +3746,7 @@ class App(tk.Tk):
             except Exception as e:
                 self.console.after(0, lambda m=str(e): self.console.error(f"Consultor error: {m}"))
             finally:
+                self.console.stop_thinking()
                 if not succeeded:
                     try:
                         self._llm_messages.pop()
