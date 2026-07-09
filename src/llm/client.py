@@ -1,4 +1,7 @@
+import re as _re
 from openai import OpenAI
+
+_XML_TOOL_PATTERN = _re.compile(r'<[^>]*DSML', _re.IGNORECASE)
 
 
 class LLMClient:
@@ -68,12 +71,13 @@ class LLMClient:
             stream=True,
         )
 
-    def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None, on_text=None, stop_event=None):
+    def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None, on_text=None, stop_event=None, on_warning=None):
         from src.llm.tools import TOOLS as _TOOLS, execute as _execute
 
         self._ensure_client()
         m = model or self._model
         current = list(messages)
+        consecutive_xml_errors = 0
 
         while True:
             if stop_event and stop_event.is_set():
@@ -87,6 +91,7 @@ class LLMClient:
                 self.last_prompt_tokens = resp.usage.prompt_tokens
             choice = resp.choices[0]
             if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
+                consecutive_xml_errors = 0
                 if choice.message.content and on_text:
                     on_text(choice.message.content)
                 current.append(choice.message)
@@ -107,6 +112,29 @@ class LLMClient:
                     })
                 continue
             if choice.message.content:
+                if _XML_TOOL_PATTERN.search(choice.message.content):
+                    consecutive_xml_errors += 1
+                    if on_warning:
+                        on_warning("Tool calling error")
+                    if consecutive_xml_errors >= 5:
+                        stream = self._client.chat.completions.create(
+                            model=m,
+                            messages=self._messages(current),
+                            stream=True,
+                        )
+                        return stream
+                    current.append(choice.message)
+                    current.append({
+                        "role": "system",
+                        "content": (
+                            "INVALID TOOL CALL FORMAT. You used XML tags like "
+                            "<invoke> which is not supported. You MUST use the "
+                            "proper function calling mechanism to invoke tools. "
+                            "Do NOT emit raw XML. Retry your tool calls correctly."
+                        ),
+                    })
+                    continue
+                consecutive_xml_errors = 0
                 stream = self._client.chat.completions.create(
                     model=m,
                     messages=self._messages(current),

@@ -333,6 +333,7 @@ class App(tk.Tk):
         self._consultor_mode = False
         self._agent_mode = False
         self._agent_stop_event = None
+        self._agent_consecutive_xml_errors = 0
         self._llm_messages = []
         self._silent_mode_cycle = False
         self._last_ctx_hash = None
@@ -3475,6 +3476,7 @@ class App(tk.Tk):
         if not self._silent_mode_cycle:
             self.console.info("Consultor mode. Type your prompt. Type 'exit' to quit.")
         self.console.set_mode_handler(self._consultor_handler, "Consultor", "#e6b422")
+        self._update_mode_prompt()
 
     def _consultor_handler(self, text):
         text = text.strip()
@@ -3546,14 +3548,16 @@ class App(tk.Tk):
             pct = 1
         return min(99, pct)
 
-    def _update_agent_prompt(self):
-        if not self._agent_mode:
-            return
+    def _update_mode_prompt(self):
         try:
             pct = self._get_context_percentage()
             self._last_token_pct = pct
-            text = f"Agent ({pct}%)> " if pct is not None else "Agent> "
-            self.console.prompt_label.config(text=text, fg="#5ba3ec")
+            if self._agent_mode:
+                text = f"Agent ({pct}%)> " if pct is not None else "Agent> "
+                self.console.prompt_label.config(text=text, fg="#5ba3ec")
+            elif self._consultor_mode:
+                text = f"Consultor ({pct}%)> " if pct is not None else "Consultor> "
+                self.console.prompt_label.config(text=text, fg="#e6b422")
         except Exception:
             pass
 
@@ -3567,7 +3571,7 @@ class App(tk.Tk):
                 "Agent mode. Commands: exit, stop, reset, menu."
             )
         self.console.set_mode_handler(self._agent_handler, "Agent", "#5ba3ec")
-        self._update_agent_prompt()
+        self._update_mode_prompt()
 
     def _agent_handler(self, text):
         text = text.strip()
@@ -3585,7 +3589,7 @@ class App(tk.Tk):
             self._last_ctx = None
             self._last_token_pct = None
             self.console.success("Context reset. Conversation history cleared.")
-            self._update_agent_prompt()
+            self._update_mode_prompt()
             return
         if text.lower() == "menu":
             self.console.info(
@@ -3611,14 +3615,7 @@ class App(tk.Tk):
 
     def _agent_ask(self, prompt):
         import threading, re
-        _tool_xml_re = re.compile(
-            r'<function_calls>.*?</function_calls>|'
-            r'<tool_calls>.*?</tool_calls>|'
-            r'<invoke[^>]*>.*?</invoke>|'
-            r'<parameter[^>]*>.*?</parameter>|'
-            r'</?(?:function_calls|tool_calls|invoke|parameter)[^>]*>',
-            re.DOTALL,
-        )
+        _tool_xml_re = re.compile(r'<[^>]*DSML', re.IGNORECASE)
         def _clean(text):
             return _tool_xml_re.sub('', text)
         self._inject_context()
@@ -3631,6 +3628,7 @@ class App(tk.Tk):
                 from src.llm import LLMClient
                 client = LLMClient(purpose="agent")
                 def _on_tool(name, args, result):
+                    self._agent_consecutive_xml_errors = 0
                     if stop.is_set():
                         return
                     display = result
@@ -3646,6 +3644,8 @@ class App(tk.Tk):
                     self._llm_messages, on_tool=_on_tool, tool_context=self,
                     on_text=lambda text: self.console.after(
                         0, lambda t=text: self.console.agent(_clean(t).rstrip())),
+                    on_warning=lambda msg: self.console.after(
+                        0, lambda m=msg: self.console.warning(m)),
                     stop_event=stop)
                 if stop.is_set():
                     self.console.after(0, lambda: self.console.warning("Agent stopped."))
@@ -3673,14 +3673,39 @@ class App(tk.Tk):
                 clean = _clean(buf)
                 if clean.strip():
                     self.console.after(0, lambda c=clean: self.console.agent(c.rstrip()))
-                self._llm_messages.append({"role": "assistant", "content": _clean(full)})
-                self.console.after(0, lambda: self.console.info("---"))
-                self.console.after(0, self._update_agent_prompt)
-                succeeded = True
+                if _tool_xml_re.search(full):
+                    self._agent_consecutive_xml_errors += 1
+                    self.console.after(0, lambda: self.console.warning("Tool calling error"))
+                    if self._agent_consecutive_xml_errors >= 5:
+                        self._llm_messages.append({"role": "assistant", "content": _clean(full)})
+                        self.console.after(0, lambda: self.console.info("---"))
+                        self.console.after(0, self._update_mode_prompt)
+                        succeeded = True
+                    else:
+                        self._llm_messages.pop()
+                        self._llm_messages.pop()
+                        self._llm_messages.append({"role": "assistant", "content": full})
+                        self._llm_messages.append({
+                            "role": "system",
+                            "content": (
+                                "INVALID TOOL CALL FORMAT. You used XML tags like "
+                                "<invoke> which is not supported. You MUST use the "
+                                "proper function calling mechanism to invoke tools. "
+                                "Do NOT emit raw XML. Retry your tool calls correctly."
+                            ),
+                        })
+                        succeeded = True
+                        self.console.after(0, lambda p=prompt: self._agent_ask(p))
+                else:
+                    self._agent_consecutive_xml_errors = 0
+                    self._llm_messages.append({"role": "assistant", "content": _clean(full)})
+                    self.console.after(0, lambda: self.console.info("---"))
+                    self.console.after(0, self._update_mode_prompt)
+                    succeeded = True
             except Exception as e:
                 if not stop.is_set():
                     self.console.after(0, lambda m=str(e): self.console.error(f"Agent error: {m}"))
-                self.console.after(0, self._update_agent_prompt)
+                self.console.after(0, self._update_mode_prompt)
             finally:
                 if not succeeded:
                     try:
@@ -3715,6 +3740,7 @@ class App(tk.Tk):
                     self.console.after(0, lambda b=buf: self.console.consultor(b.rstrip()))
                 self._llm_messages.append({"role": "assistant", "content": full})
                 self.console.after(0, lambda: self.console.info("---"))
+                self.console.after(0, self._update_mode_prompt)
                 succeeded = True
             except Exception as e:
                 self.console.after(0, lambda m=str(e): self.console.error(f"Consultor error: {m}"))
