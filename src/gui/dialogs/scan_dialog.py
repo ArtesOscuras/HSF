@@ -41,7 +41,7 @@ class ScanDialog(tk.Toplevel):
         self._notebook.add(self._scan_frame, text="  Scan  ")
         self._notebook.add(self._tcp_frame, text="  TCP Scan  ")
         self._notebook.add(self._udp_frame, text="  UDP Scan  ")
-        self._notebook.add(self._banner_frame, text="  Banner  ")
+        self._notebook.add(self._banner_frame, text="  Port-inspector  ")
 
         self._build_scan_tab()
         self._build_port_tab(self._tcp_frame, "tcpscan")
@@ -294,7 +294,7 @@ class ScanDialog(tk.Toplevel):
                     port = int(port_var.get().strip())
                 except ValueError:
                     port = 80
-                self.result = {"action": "bannergrab", "ip": machine_list[idx].ip, "port": port}
+                self.result = {"action": "port-inspector", "ip": machine_list[idx].ip, "port": port}
                 self.destroy()
 
     def _select_port(self, action, machine_list, lb):

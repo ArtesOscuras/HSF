@@ -400,7 +400,7 @@ HSF integrates with LLMs via an extensible provider system supporting any OpenAI
 
 ### Agent Tool-Calling (`src/llm/client.py` → `chat_with_tools()`)
 
-The agent mode gives the LLM the ability to call **53 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
+The agent mode gives the LLM the ability to call **56 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
 
 **Tool-calling loop**:
 ...
@@ -410,29 +410,33 @@ The tool-calling phase does **not** stream — only the final assistant response
 **Method signature:**
 
 ```python
-def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None):
+def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None, on_text=None, stop_event=None, on_warning=None):
 ```
 
 - `on_tool(name, args, result)` — callback invoked after each tool execution (used for console logging).
+- `on_text(text)` — callback invoked when the model emits text alongside tool calls.
+- `stop_event` — `threading.Event` to cancel tool-calling loop cleanly.
+- `on_warning(msg)` — callback invoked when the model outputs invalid XML tool call syntax (corrected via system message injection).
 - `tool_context` — passed through to tool handlers. In agent mode this is the `App` instance.
 
 ### Tool Definitions (`src/llm/tools.py`)
 
 Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` variable. Each entry follows the `{"type": "function", "function": {...}}` format with `name`, `description`, and `parameters` (JSON Schema).
 
-**53 tools** in six categories:
+**56 tools** in six categories:
 
-**Data tools** (19) — query and manipulate inventory, no `tool_context` needed:
+**Data tools** (20) — query and manipulate inventory, no `tool_context` needed:
 
 **Query tools:**
 
 | Tool | Description |
 |---|---|
-| `check_machine` | Get all known info about a machine (IP, hostname, ports, banners, web services, users) |
+| `check_machine` | Get all known info about a machine (IP, hostname, IPv6, MAC, model, device type, OS, domain, timestamps, ports, banners, web services, users) |
 | `check_domain` | Get all known info about a domain (subdomains, directories, web services, machines) |
 | `check_inventory` | Get full inventory: users, credentials, passwords, hashes, people, tickets, dictionaries, rules |
-| `check_shells` | List all shell sessions with ID, type, status, IP, port, timestamps |
+| `check_shells` | List all shell sessions with ID, type, status, active flag, IP, ports, OS, timestamps |
 | `check_evidences` | List evidence sessions with metadata, filenames, request directories (no file contents) |
+| `check_fuzz_results` | Retrieve fuzz results (agent_fuzzing table, max 50) and user-saved directories (all) for a machine |
 
 **Mutation tools:**
 
@@ -453,28 +457,28 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 | `add_person` | Add a person to the people inventory (`first_name`, `last_name`, `company`, `domain`, `username`, `role`, `linkedin_url`, `source`, `interests`) |
 | `delete_person` | Delete a person by ID |
 
-**Network tools** (10) — trigger operations, require `tool_context` (App instance):
+**Network tools** (11) — trigger operations, require `tool_context` (App instance):
 
 | Tool | Description |
 |---|---|
 | `list_interfaces` | List available network interfaces (skips `lo0`) |
-| `scan_interface` | Scan local network on an interface (`iface`) |
-| `scan_ip` | Scan a specific IP for OS/device identification |
+| `scan_interface` | Scan local network on an interface (`iface`). Long-running async — results arrive via event bus |
+| `scan_ip` | Scan a specific IP for OS/device identification. Synchronous — returns result directly |
 | `stop_scan` | Stop the active network scan |
-| `tcp_scan` | Scan TCP ports on an IP |
-| `udp_scan` | Scan common UDP ports on an IP |
-| `ping` | Ping an IP address |
-| `nslookup` | DNS lookup on a hostname |
-| `banner_grab` | Grab service banner from a port (default 80) |
-| `whatweb` | Identify web technologies via WhatWeb (default port 80) |
+| `tcp_scan` | Scan TCP ports on an IP. Returns common ports immediately; full 65535 scan continues in background (results via `check_machine`) |
+| `udp_scan` | Scan UDP ports on an IP. Returns common ports immediately; full 65535 scan continues in background (results via `check_machine`) |
+| `ping` | Ping an IP address. Synchronous — returns time + TTL directly |
+| `nslookup` | DNS lookup on a hostname. Synchronous — returns resolved addresses directly |
+| `port_inspector` | Inspect a TCP port by sending service-specific probes. Synchronous — returns identified service banners directly |
+| `bannergrab` | Open a raw TCP connection to an IP:port and wait up to 2s for a banner/response. Synchronous — returns received data directly |
 | `nmap` | Run custom nmap scan with arbitrary arguments against a target. Returns raw output and auto-saves open ports to machine inventory. |
 
 **Web tools** (2) — fetch URLs and search the web, no `tool_context` needed:
 
 | Tool | Description |
 |---|---|
-| `webfetch` | Fetch content from a URL and return as text or markdown (`url`, optional `format`) |
-| `websearch` | Search the web via DuckDuckGo Lite and return results with title, URL, and snippet (`query`, optional `num_results`) |
+| `webfetch` | Fetch content from a URL and return as text or markdown (`url`, optional `format`). Ignores self-signed TLS certificates. Auto-saves the URL path to `directories` table if the host matches a known machine or domain. |
+| `websearch` | Search the web via Exa MCP (primary) or DuckDuckGo Lite (fallback) and return results with title, URL, and snippet (`query`, optional `num_results`) |
 
 **DICMA tools** (4) — generate wordlists and rules, no `tool_context` needed:
 
@@ -491,9 +495,9 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 |---|---|
 | `hashcat_crack` | Crack a hash with hashcat (`hash_value` must be in inventory, `wordlist`) |
 | `bruteforce_start` | Start a brute force attack (`protocol`, `target`, optional `port`) |
-| `fuzz_start` | Start directory/vhost fuzzing (`method`, `target`, `wordlist`) |
+| `fuzz_start` | Start directory/vhost/DNS fuzzing (`method`, `target`, `wordlist`). Runs asynchronously — results are saved to the machine's `agent_fuzzing` table. Use `check_fuzz_results` to retrieve them. |
 
-**Infrastructure tools** (8) — manage services, files, and evidence:
+**Infrastructure tools** (14) — manage services, files, evidence, and shell sessions:
 
 | Tool | Description |
 |---|---|
@@ -504,16 +508,26 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 | `delete_file` | Delete a dictionary or rule file (`file_type`, `filename`) |
 | `delete_evidence` | Delete an evidence session by name, or `"all"` |
 | `delete_shell` | Delete a shell session by ID, or `"all"` |
+| `shell_list` | List all active shell sessions with IDs, types, and statuses |
+| `shell_exec` | Send a command to a shell session and wait for output |
+| `shell_wait` | Wait for more output from a running shell command |
+| `shell_interrupt` | Interrupt a running shell command (sends Ctrl+C) |
+| `connect_ssh` | Connect to a remote machine via SSH using stored credentials |
+| `connect_sftp` | Connect to a remote machine via SFTP using stored credentials |
+| `connect_ftp` | Connect to a remote machine via FTP using stored credentials |
+| `connect_winrm` | Connect to a remote Windows machine via WinRM using stored credentials |
 
 **Implementation details for web tools** (`src/llm/web.py`):
 
 - `fetch_url()` uses `requests` (already a dependency) with a Chrome 143 User-Agent.
 - On Cloudflare 403 challenges (`cf-mitigated: challenge` header), retries with `"opencode/HSF"` User-Agent.
+- TLS certificate verification is disabled (`verify=False`) to support self-signed certificates on internal targets. `urllib3.disable_warnings()` suppresses insecure request warnings.
 - HTML content is converted to markdown via `html2text` or to plain text via `html.parser` (stdlib).
 - Response size is capped at 5MB; timeout defaults to 30 seconds.
 - `web_search()` uses Exa MCP (`mcp.exa.ai`) as primary, with DuckDuckGo Lite as fallback on failure.
 - Exa MCP is called via JSON-RPC 2.0 over HTTP (see `src/llm/mcp.py`), with Server-Sent Events (SSE) response parsing. No API key required — Exa's MCP endpoint has an unauthenticated free tier (same approach as opencode).
 - Both handlers are synchronous (blocking HTTP calls) — they run inside the agent's daemon thread.
+- `webfetch` automatically saves the URL path to the `directories` table when the host matches a known machine or domain in the inventory.
 
 **Registration pattern** — decorator-based with a `_HANDLERS` dict:
 
@@ -550,7 +564,7 @@ def _add_user(args, ctx=None):
 4. Data tools use `origin="agent"` to mark agent-created records.
 5. Network tools check `if not ctx: return "Cannot X: no tool context available."` — this guards against usage outside agent mode.
 6. Network tools call existing App methods (`ctx._scan_interface(iface)`, `ctx._cmd_tcpscan([ip])`, etc.) — do not duplicate scan logic in tool handlers.
-7. Tools that call blocking operations (scan, ping) should trigger async processes and return immediately with a status message. Results arrive later via the event bus and are reflected in the next context injection.
+7. Tools that are inherently slow (full port scan, network scanning, fuzzing) should run asynchronously and store results in the database for later retrieval via query tools. Tools that complete quickly (<5s) may run synchronously and return results directly to the LLM (e.g., `ping`, `nslookup`, `port_inspector`, `scan_ip`). Mixed-mode tools (e.g., `tcp_scan`, `udp_scan`) return common-port results immediately and continue full scan in background.
 
 ### Agent Mode in `app.py`
 
@@ -560,6 +574,8 @@ The agent mode is a **console mode handler**, similar to `consultor`. The `App` 
 
 ```python
 self._agent_mode = False
+self._agent_stop_event = None
+self._agent_consecutive_xml_errors = 0
 self._llm_messages = []        # shared conversation history (agent + consultor)
 self._last_ctx_hash = None     # MD5 hash of last injected context
 self._last_ctx = None          # last context string for delta computation
@@ -598,7 +614,9 @@ def _agent_ask(self, prompt):
         def _on_tool(name, args, result):
             self.console.after(0, lambda: ...)
         stream = client.chat_with_tools(
-            self._llm_messages, on_tool=_on_tool, tool_context=self)
+            self._llm_messages, on_tool=_on_tool, tool_context=self,
+            on_warning=lambda msg: self.console.warning(msg),
+            stop_event=stop)
         # ... stream and append assistant response to _llm_messages
     threading.Thread(target=_run, daemon=True).start()
 ```
@@ -620,6 +638,8 @@ Before every agent or consultor call, the full application state is serialized i
 - **Dictionaries**: filenames in the wordlist directory
 - **Hashcat rules**: filenames in the rules directory
 
+Note: fuzz results are NOT injected into context — use `check_fuzz_results` tool to query them instead.
+
 **Injection strategy:**
 
 1. On first call, the context is inserted at position 0 as `{"role": "system", "content": ctx, "_is_context": True}`.
@@ -640,6 +660,10 @@ This mechanism is **shared** between agent and consultor modes via the shared `s
 | Prompt color | Blue (`#5ba3ec`) | Yellow (`#e6b422`) |
 | Context injection | Yes | Yes |
 | Shared history | Yes (`self._llm_messages`) | Yes (`self._llm_messages`) |
+| Context % display | Yes (`Agent (45%)>`) | Yes (`Consultor (45%)>`) |
+| Spinner while processing | Yes | Yes |
+| Commands | `exit`, `stop`, `reset`, `menu` | `exit`, `reset`, `menu` |
+| Tab mode cycle | Cycles without interrupting agent | Cycles without interrupting consultor |
 
 **Rules for agent development:**
 
@@ -650,6 +674,9 @@ This mechanism is **shared** between agent and consultor modes via the shared `s
 - Web tools (`webfetch`, `websearch`) are exceptions: they run synchronously inside the daemon thread because the LLM needs the fetched content to reason about it. HTTP requests complete quickly (timeout ≤ 30s).
 - Tool results are strings returned to the LLM. Keep them concise and factual.
 - The `_llm_messages` list accumulates the full conversation including tool call/result messages. It is reset on each new `agent` or `consultor` session entry (not on each prompt within a session).
+- When the LLM outputs invalid XML tool call syntax (e.g. `<invoke>`, `<function_calls>`) instead of proper function calling, the system detects it via regex (`<[^>]*DSML`), warns the model, and retries. A consecutive error counter (`_agent_consecutive_xml_errors`, max 5 followed by abort) prevents infinite loops.
+- Pressing Tab with empty input cycles through Normal → Consultor → Agent without interrupting the currently running agent thread. A braille spinner (⠋⠙⠹...) appears next to the prompt while the LLM is processing, visible in all modes.
+- The prompt shows context usage percentage for both agent and consultor (e.g. `Agent (45%)>`, `Consultor (45%)>`), updated via `_update_mode_prompt()`.
 
 ---
 

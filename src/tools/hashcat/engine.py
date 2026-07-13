@@ -124,7 +124,7 @@ class HashcatEngine:
             self._emit(f"  {line}\n")
             self._parse_progress(line)
             if _is_cracked_line(line, self._hash_value):
-                plain = line.split(":", 1)[1]
+                plain = line.rsplit(":", 1)[1]
                 if plain and len(plain) < 200:
                     cracked.append(line)
 
@@ -159,13 +159,13 @@ class HashcatEngine:
         if cracked:
             for c in cracked:
                 if self._on_cracked:
-                    plain = c.split(":", 1)[-1] if ":" in c else c
+                    plain = c.rsplit(":", 1)[1] if ":" in c else c
                     self._on_cracked(self._hash_value, plain)
         if self._on_done:
             self._on_done(cracked or [])
 
 
-_STATUS_RE = re.compile(r"\.{3,}:")  # status lines have "..........:" before value
+_STATUS_RE = re.compile(r"\.\s*:")  # status lines have "..........:" before value
 
 
 def _is_cracked_line(line, hash_val):
@@ -173,8 +173,4 @@ def _is_cracked_line(line, hash_val):
         return False
     if _STATUS_RE.search(line):
         return False
-    if line.startswith(hash_val + ":"):
-        return True
-    if re.match(r"^[a-fA-F0-9]{16,}:", line):
-        return True
-    return False
+    return ':' in line

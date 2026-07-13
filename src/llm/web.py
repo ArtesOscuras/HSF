@@ -1,9 +1,12 @@
 import re
 import html2text
 import requests
+import urllib3
 from html.parser import HTMLParser
 
 from src.llm.mcp import call as _mcp_call
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 MAX_RESPONSE_SIZE = 5 * 1024 * 1024
@@ -61,11 +64,11 @@ def _html_to_markdown(html):
 
 def _fetch_raw(url, timeout):
     headers = {"User-Agent": _CHROME_UA}
-    resp = requests.get(url, headers=headers, timeout=timeout, stream=True)
+    resp = requests.get(url, headers=headers, timeout=timeout, stream=True, verify=False)
     if resp.status_code == 403 and resp.headers.get("cf-mitigated") == "challenge":
         resp.close()
         headers = {"User-Agent": _HSF_UA}
-        resp = requests.get(url, headers=headers, timeout=timeout, stream=True)
+        resp = requests.get(url, headers=headers, timeout=timeout, stream=True, verify=False)
 
     content_type = resp.headers.get("content-type", "")
     chunks = []

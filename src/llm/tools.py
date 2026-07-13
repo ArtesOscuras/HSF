@@ -69,7 +69,8 @@ TOOLS = [
             "name": "check_machine",
             "description": (
                 "Get all known information about a machine in the inventory. "
-                "Returns IP, hostname, MAC, device type, OS, domain, discovery methods, "
+                "Returns IP, hostname, IPv6, MAC, model, device type, OS, domain, "
+                "first/last seen timestamps, discovery methods, "
                 "open TCP/UDP ports, service banners, web services, associated domains, "
                 "directories, and local users."
             ),
@@ -128,7 +129,8 @@ TOOLS = [
             "name": "check_shells",
             "description": (
                 "List all shell sessions (reverse shells, SSH, SFTP, FTP, WinRM). "
-                "Returns ID, type, status, IP, port, connected time, and last activity."
+                "Returns ID, type, status, active flag, IP, source port, "
+                "listener port, OS, connected time, and last activity."
             ),
             "parameters": {
                 "type": "object",
@@ -154,8 +156,36 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "check_fuzz_results",
+            "description": (
+                "Retrieve fuzzing results for a specific machine (by IP or ID). "
+                "Returns both agent fuzz results from fuzz_start (agent_fuzzing table, "
+                "truncated to 50 entries) and user-saved directory results "
+                "(directories table, all results). Use this after fuzz_start completes "
+                "or to see directories discovered by the user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "Machine IP address or ID number (e.g. '192.168.1.100' or '5')",
+                    },
+                },
+                "required": ["target"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "add_credential",
-            "description": "Add a credential (username + password or NT hash).",
+            "description": (
+                "Add a credential (username + password or NT hash). "
+                "Auto-detects 32-character NT hashes vs plaintext passwords. "
+                "For plaintext passwords, the NTLM hash is computed and stored automatically. "
+                "Also adds the username to the user inventory."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -266,7 +296,11 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "tcp_scan",
-            "description": "Scan TCP ports on a specific IP.",
+            "description": (
+                "Scan TCP ports on an IP. Common ports (~97) are scanned and returned "
+                "immediately. A full scan of all 65535 ports then continues in the "
+                "background — remaining results will later appear via check_machine inventory."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -280,7 +314,11 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "udp_scan",
-            "description": "Scan common UDP ports on a specific IP.",
+            "description": (
+                "Scan UDP ports on an IP. Common ports (~30) are scanned and returned "
+                "immediately. A full scan of all 65535 ports then continues in the "
+                "background — remaining results will later appear via check_machine inventory."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -321,8 +359,8 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "whatweb",
-            "description": "Identify web technologies on an IP using WhatWeb.",
+            "name": "port_inspector",
+            "description": "Inspect a TCP port on an IP by sending service-specific probes and returning any responses. Use this tool only if needed to identify what service is running on a port.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -330,6 +368,25 @@ TOOLS = [
                     "port": {"type": "integer", "description": "Port number (default 80)"},
                 },
                 "required": ["ip"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bannergrab",
+            "description": (
+                "Open a raw TCP connection to an IP and port, wait up to 2 seconds "
+                "for a banner or response, and return whatever data is received. "
+                "Use this to grab service banners without sending any probes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ip": {"type": "string", "description": "IPv4 address"},
+                    "port": {"type": "integer", "description": "Port number"},
+                },
+                "required": ["ip", "port"],
             },
         },
     },
@@ -589,7 +646,13 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "fuzz_start",
-            "description": "Start a directory, vhost or DNS subdomain fuzzing scan against a target. Blocks until scan completes and returns all found results. Directory mode fuzzes HTTP paths (e.g. /admin, /login), vhost mode fuzzes virtual host subdomains (Host header), dns mode fuzzes DNS subdomains. Results are NOT saved to database.",
+            "description": (
+                "Start a directory, vhost or DNS subdomain fuzzing scan against a target. "
+                "Runs asynchronously — returns immediately. Results are saved to the machine's "
+                "agent_fuzzing table. Use check_fuzz_results to retrieve them once the scan finishes. "
+                "Directory mode fuzzes HTTP paths (e.g. /admin, /login), vhost mode fuzzes virtual "
+                "host subdomains (Host header), dns mode fuzzes DNS subdomains."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1316,6 +1379,48 @@ def _check_evidences(args, ctx=None):
     return "\n".join(lines)
 
 
+@register("check_fuzz_results")
+def _check_fuzz_results(args, ctx=None):
+    from src.machines import store, machine_db
+
+    target = args.get("target", "").strip()
+    if not target:
+        return "Error: no target specified."
+
+    machine = store.get(target)
+    if not machine:
+        for m in store.get_all():
+            if str(m.id) == target:
+                machine = m
+                break
+
+    if not machine:
+        return f"Machine '{target}' not found in inventory."
+
+    fuzz_rows = machine_db.load_agent_fuzz(machine.id, limit=50)
+    dir_rows = machine_db.load_directories(machine.id)
+
+    if not fuzz_rows and not dir_rows:
+        return f"No fuzz or directory results for machine #{machine.id} ({machine.ip})."
+
+    lines = [f"Fuzz & directory results for #{machine.id} ({machine.ip}):"]
+
+    if fuzz_rows:
+        lines.append(f"\nAgent fuzz results ({len(fuzz_rows)}):")
+        for method, word, display in fuzz_rows:
+            if method == "directory":
+                lines.append(f"  /{word}")
+            else:
+                lines.append(f"  [{method}] {display}")
+
+    if dir_rows:
+        lines.append(f"\nSaved directories ({len(dir_rows)}):")
+        for path, _ in dir_rows:
+            lines.append(f"  {path}")
+
+    return "\n".join(lines)
+
+
 @register("add_credential")
 def _add_credential(args, ctx=None):
     from src.machines.credential_db import save_credential, save_user
@@ -1393,8 +1498,28 @@ def _scan_ip(args, ctx=None):
     ip = args.get("ip", "")
     if not ctx:
         return "Cannot scan: no tool context available."
-    ctx._scan_ip(ip)
-    return f"IP scan started on {ip}. Results will appear in inventory."
+    from src.gui.app import _do_scan_ip
+    info = _do_scan_ip(ip)
+    if info is None:
+        return f"No device detected at {ip}"
+    from src import event_bus
+    from src.machines import store as _store
+    machine = _store.get(ip)
+    if machine:
+        event_bus.submit({"type": "scan_ip_result", "machine": machine})
+    lines = [f"Scan result for {ip}:"]
+    lines.append(f"  Device type: {info['device_type']}")
+    if info.get("os"):
+        lines.append(f"  OS: {info['os']}")
+    if info.get("hostname"):
+        lines.append(f"  Hostname: {info['hostname']}")
+    if info.get("domain"):
+        lines.append(f"  Domain: {info['domain']}")
+    if info.get("model"):
+        lines.append(f"  Model: {info['model']}")
+    if info.get("ttl"):
+        lines.append(f"  TTL: {info['ttl']}")
+    return "\n".join(lines)
 
 
 @register("stop_scan")
@@ -1410,8 +1535,19 @@ def _tcp_scan(args, ctx=None):
     ip = args.get("ip", "")
     if not ctx:
         return "Cannot scan: no tool context available."
-    ctx._cmd_tcpscan([ip])
-    return f"TCP scan started on {ip}. Results will appear in inventory."
+    from src.gui.app import _do_tcp_scan_common, _TCP_SCAN_PORTS
+    from src.machines import store, machine_db
+    import threading
+    open_ports = _do_tcp_scan_common(ip)
+    machine = store.get(ip)
+    if machine and open_ports:
+        for p in open_ports:
+            machine_db.save_tcp_port(machine.id, p)
+    threading.Thread(target=ctx._run_tcpscan, args=(ip, "connect", True), daemon=True).start()
+    if not open_ports:
+        return f"No common ports open on {ip} (scanned {len(_TCP_SCAN_PORTS)} ports). Full scan running in background."
+    ports_str = ', '.join(str(p) for p in open_ports)
+    return f"TCP ports open on {ip}: {ports_str}\nFull scan of remaining 65535 ports running in background."
 
 
 @register("udp_scan")
@@ -1419,8 +1555,19 @@ def _udp_scan(args, ctx=None):
     ip = args.get("ip", "")
     if not ctx:
         return "Cannot scan: no tool context available."
-    ctx._cmd_udpscan([ip])
-    return f"UDP scan started on {ip}. Results will appear in inventory."
+    from src.gui.app import _do_udp_scan_common, _UDP_SCAN_PORTS
+    from src.machines import store, machine_db
+    import threading
+    open_ports = _do_udp_scan_common(ip)
+    machine = store.get(ip)
+    if machine and open_ports:
+        for p in open_ports:
+            machine_db.save_udp_port(machine.id, p)
+    threading.Thread(target=ctx._run_udpscan, args=(ip, True), daemon=True).start()
+    if not open_ports:
+        return f"No common UDP ports open on {ip} (scanned {len(_UDP_SCAN_PORTS)} ports). Full scan running in background."
+    ports_str = ', '.join(str(p) for p in open_ports)
+    return f"UDP ports open on {ip}: {ports_str}\nFull scan of remaining 65535 ports running in background."
 
 
 @register("ping")
@@ -1428,8 +1575,13 @@ def _ping(args, ctx=None):
     ip = args.get("ip", "")
     if not ctx:
         return "Cannot ping: no tool context available."
-    ctx._cmd_ping([ip])
-    return f"Ping sent to {ip}. Check console output."
+    from src.gui.app import _do_ping
+    result = _do_ping(ip)
+    if result is None:
+        return f"{ip}: no response"
+    rtt_ms, ttl = result
+    ttl_part = f"  ttl={ttl}" if ttl is not None else ""
+    return f"{ip}: time={rtt_ms:.1f}ms{ttl_part}"
 
 
 @register("nslookup")
@@ -1437,28 +1589,45 @@ def _nslookup(args, ctx=None):
     host = args.get("host", "")
     if not ctx:
         return "Cannot lookup: no tool context available."
-    ctx._cmd_nslookup([host])
-    return f"DNS lookup started for {host}."
+    from src.gui.app import _do_nslookup
+    return _do_nslookup(host)
 
 
-@register("banner_grab")
-def _banner_grab(args, ctx=None):
+@register("port_inspector")
+def _port_inspector(args, ctx=None):
     ip = args.get("ip", "")
-    port = args.get("port", 80)
+    port = int(args.get("port", 80))
     if not ctx:
-        return "Cannot grab banner: no tool context available."
-    ctx._cmd_bannergrab([ip, str(port)])
-    return f"Banner grab started on {ip}:{port}."
+        return "Cannot inspect port: no tool context available."
+    from src.gui.app import _do_port_inspection
+    from src.machines import store, machine_db
+    results = _do_port_inspection(ip, port)
+    machine = store.get(ip)
+    if machine:
+        for label, text in results:
+            machine_db.save_banner(machine.id, port, text, label)
+    if not results:
+        return f"No responses on {ip}:{port}"
+    lines = [f"Port inspector results for {ip}:{port}:"]
+    for label, text in results:
+        truncated = text[:200] + "..." if len(text) > 200 else text
+        lines.append(f"  [{label}]: {truncated}")
+    return "\n".join(lines)
 
 
-@register("whatweb")
-def _whatweb(args, ctx=None):
+@register("bannergrab")
+def _bannergrab(args, ctx=None):
     ip = args.get("ip", "")
-    port = args.get("port", 80)
-    if not ctx:
-        return "Cannot scan: no tool context available."
-    ctx._cmd_whatweb([ip])
-    return f"WhatWeb scan started on {ip}:{port}."
+    port = int(args.get("port", 0))
+    if not ip or not port:
+        return "Missing ip or port."
+    from src.gui.app import _do_bannergrab
+    text = _do_bannergrab(ip, port)
+    if text is None:
+        return f"Bannergrab {ip}:{port} failed (connection error or timeout)"
+    if not text:
+        return f"No response on {ip}:{port}"
+    return text[:500]
 
 
 @register("nmap")
@@ -1575,10 +1744,23 @@ def _delete_password(args, ctx=None):
 @register("webfetch")
 def _webfetch(args, ctx=None):
     from src.llm.web import fetch_url
-    return fetch_url(
-        args.get("url", ""),
-        format=args.get("format", "markdown"),
-    )
+    from urllib.parse import urlparse
+    url = args.get("url", "")
+    result = fetch_url(url, format=args.get("format", "markdown"))
+    if not result.startswith("Error"):
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname
+            path = parsed.path or "/"
+            from src.machines import store, machine_db, domain_db
+            machine = store.get(host)
+            if machine:
+                machine_db.save_directory(machine.id, path)
+            elif domain_db.exists(host):
+                domain_db.save_directory(host, path)
+        except Exception:
+            pass
+    return result
 
 
 @register("websearch")
@@ -1803,18 +1985,23 @@ def _fuzz_start(args, ctx=None):
     wl_path = os.path.join(str(lst_dir()), wordlist)
     if not os.path.isfile(wl_path):
         return f"Wordlist not found: {wordlist}"
-    from src.tools.fuzz.results_db import clear_by_target, save_result
-    clear_by_target(method, target)
     resolved_ip = None
     if method == "vhost":
         resolved_ip = ctx._resolve_to_ip(target)
+    else:
+        resolved_ip = ctx._resolve_to_ip(target)
+    from src.machines import store, machine_db
+    machine = store.get(resolved_ip or target)
+    if machine:
+        machine_db.clear_agent_fuzz(machine.id)
     display_target = resolved_ip or target
     url_template = None
     if method == "directory":
         url_template = f"http://{display_target}:{port}/FUZZ"
     show_codes = {200, 201, 204, 301, 302, 307, 400, 401, 403, 405, 500, 502, 503}
     def _on_found(word, display):
-        save_result(method, target, word, display)
+        if machine:
+            machine_db.save_agent_fuzz(machine.id, method, word, display)
     from src.tools.fuzz import FuzzEngine
     engine = FuzzEngine(
         target=target,
@@ -1827,7 +2014,7 @@ def _fuzz_start(args, ctx=None):
         on_found=_on_found,
     )
     engine.start()
-    return f"Fuzzing ({method}) started against {target} with {wordlist}. Results will be saved to the experimental fuzz results table (viewable via context)."
+    return f"Fuzzing ({method}) started against {target} with {wordlist}. Results saved to agent_fuzzing. Use check_fuzz_results to retrieve them."
 
 
 @register("start_listener")

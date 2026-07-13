@@ -166,7 +166,7 @@ class MachineDetailView(BaseView):
                         out_short = out.split("\n")[0][:100]
                         tag = f"banner_{p}"
                         self.text.tag_configure(tag, underline=False)
-                        self.text.insert(tk.END, f"\nBanner port {p} ({probe}):\n", ("info", tag))
+                        self.text.insert(tk.END, f"\nPort-inspector port {p} ({probe}):\n", ("info", tag))
                         self.text.tag_bind(tag, "<Button-1>", lambda e, pid=p: self._show_banner(pid))
                         self.text.tag_bind(tag, "<Enter>", lambda e, t=tag: self.text.tag_configure(t, underline=True))
                         self.text.tag_bind(tag, "<Leave>", lambda e, t=tag: self.text.tag_configure(t, underline=False))
@@ -219,8 +219,8 @@ class MachineDetailView(BaseView):
             return
 
         dlg = tk.Toplevel(self)
-        dlg.title(f"Banner port {port}")
-        dlg.geometry("700x500")
+        dlg.title(f"Port-inspector — Port {port}")
+        dlg.geometry("750x550")
         dlg.configure(bg="#111111")
         dlg.transient(self)
 
@@ -242,10 +242,13 @@ class MachineDetailView(BaseView):
         text.tag_configure("bright", foreground=BRIGHT)
         text.tag_configure("info", foreground=INFO)
 
-        text.insert(tk.END, f"Banner for port {port}\n", "info")
+        text.insert(tk.END, f"Port-inspector results for port {port}\n", "info")
         text.insert(tk.END, f"{'─' * 50}\n", "muted")
         for p, out, probe in texts:
             text.insert(tk.END, f"\nProbe: {probe}\n", "info")
+            payload = _PROBE_PAYLOADS.get(probe)
+            if payload:
+                text.insert(tk.END, f"Sent: {payload}\n", "muted")
             text.insert(tk.END, f"{out}\n", "bright")
 
         text.configure(state=tk.DISABLED)
@@ -261,6 +264,38 @@ class MachineDetailView(BaseView):
         close_btn.bind("<Enter>", lambda e: close_btn.config(bg="#333333"))
         close_btn.bind("<Leave>", lambda e: close_btn.config(bg="#222222"))
         dlg.focus_set()
+
+
+_PROBE_PAYLOADS = {
+    "hello": "b'hello\\r\\n'",
+    "HTTP GET": "b'GET / HTTP/1.0\\r\\nHost: {ip}\\r\\n\\r\\n'",
+    "TLS ClientHello": "b'\\x16\\x03\\x01\\x00\\x01\\x01\\x00\\x03\\x03' + b'\\x00'*36",
+    "SSH hello": "b'SSH-2.0-OpenSSH_client\\r\\n'",
+    "SMTP EHLO": "b'EHLO test\\r\\n'",
+    "FTP USER": "b'USER anonymous\\r\\n'",
+    "Redis PING": "b'PING\\r\\n'",
+    "POP3 CAPA": "b'CAPA\\r\\n'",
+    "IMAP CAPABILITY": "b'a001 CAPABILITY\\r\\n'",
+    "Redis INFO": "b'INFO\\r\\n'",
+    "Memcached stats": "b'stats\\r\\n'",
+    "QUIT": "b'QUIT\\r\\n'",
+    "RDP connect": "b'\\x01\\x00\\x00\\x01\\x01'",
+    "PostgreSQL startup": "b'\\x00\\x00\\x00\\xa4\\x00\\x00\\x00\\x04\\x00\\x00...'",
+    "SMB negotiate": "b'\\x00\\x00\\x00\\x85\\xffSMBr\\x00\\x00\\x00\\x00\\x18'",
+    "VNC RFB": "b'RFB 003.008\\n'",
+    "MySQL handshake": "b'\\x00'*36",
+    "MongoDB isMaster": "b'{\"isMaster\": 1}'",
+    "MongoDB buildInfo": "b'{\"buildinfo\": 1}'",
+    "Docker API": "b'GET /version HTTP/1.0\\r\\nHost: {ip}\\r\\n\\r\\n'",
+    "Elasticsearch": "b'GET /_cluster/health HTTP/1.0\\r\\nHost: {ip}\\r\\n\\r\\n'",
+    "generic HELP": "b'HELP\\r\\n'",
+    "generic STATUS": "b'STATUS\\r\\n'",
+    "HTTP OPTIONS": "b'OPTIONS / HTTP/1.0\\r\\nHost: {ip}\\r\\n\\r\\n'",
+    "RTSP OPTIONS": "b'OPTIONS * RTSP/1.0\\r\\nCSeq: 1\\r\\n\\r\\n'",
+    "SIP OPTIONS": "b'OPTIONS sip:test@{ip} SIP/2.0\\r\\n...'",
+    "Telnet options": "b'\\xff\\xfb\\x01\\xff\\xfb\\x03\\xff\\xfd\\x18'",
+    "MySQL login": "b'\\x00\\x00\\x00\\x01'",
+}
 
 
 _SERVICES = {

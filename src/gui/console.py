@@ -126,7 +126,8 @@ class Console(tk.Frame):
 
         input_frame = tk.Frame(self, bg=BG_INPUT)
         input_frame.columnconfigure(0, weight=0)
-        input_frame.columnconfigure(1, weight=1)
+        input_frame.columnconfigure(1, weight=0)
+        input_frame.columnconfigure(2, weight=1)
         input_frame.grid(row=1, column=0, sticky="ew", pady=(2, 0))
 
         self.prompt_label = tk.Label(
@@ -137,6 +138,12 @@ class Console(tk.Frame):
             font=(fonts.family(), 11),
         )
         self.prompt_label.grid(row=0, column=0, sticky="w")
+
+        self._spinner_label = tk.Label(
+            input_frame, text="\u2800", bg=BG_INPUT, fg="#5ba3ec",
+            font=(fonts.family(), 11),
+        )
+        self._spinner_label.grid(row=0, column=1, sticky="w")
 
         self.input_var = tk.StringVar()
         self.input_entry = tk.Entry(
@@ -152,7 +159,7 @@ class Console(tk.Frame):
             highlightcolor="#222222",
             highlightbackground="#222222",
         )
-        self.input_entry.grid(row=0, column=1, sticky="ew")
+        self.input_entry.grid(row=0, column=2, sticky="ew")
         self.input_entry.bind("<Return>", self._on_enter)
         self.input_entry.bind("<Up>", self._on_up)
         self.input_entry.bind("<Down>", self._on_down)
@@ -185,6 +192,7 @@ class Console(tk.Frame):
         self.output_area.configure(font=new_font)
         self.input_entry.configure(font=new_font)
         self.prompt_label.configure(font=new_font)
+        self._spinner_label.configure(font=new_font)
 
     def register_command(self, name, handler, help_text=""):
         self.commands[name] = {"handler": handler, "help": help_text}
@@ -245,10 +253,8 @@ class Console(tk.Frame):
     def _tick_spinner(self):
         if not self._thinking:
             return
-        current = self.prompt_label.cget("text")
-        base = current.rstrip("\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f ")
         ch = self._SPINNER_CHARS[self._spinner_idx % len(self._SPINNER_CHARS)]
-        self.prompt_label.config(text=base + " " + ch)
+        self._spinner_label.config(text=ch)
         self._spinner_idx += 1
         self._spinner_timer = self.after(150, self._tick_spinner)
 
@@ -260,9 +266,7 @@ class Console(tk.Frame):
         if getattr(self, '_spinner_timer', None):
             self.after_cancel(self._spinner_timer)
             self._spinner_timer = None
-        current = self.prompt_label.cget("text")
-        base = current.rstrip("\u280b\u2819\u2839\u2838\u283c\u2834\u2826\u2827\u2807\u280f ")
-        self.prompt_label.config(text=base)
+        self._spinner_label.config(text="\u2800")
 
     def add_help_section(self, title, items):
         self.help_sections.append((title, items))
@@ -372,6 +376,7 @@ class Console(tk.Frame):
         self.output_area.configure(font=new_font)
         self.input_entry.configure(font=new_font)
         self.prompt_label.configure(font=new_font)
+        self._spinner_label.configure(font=new_font)
         if self._autocomplete_popup:
             self._close_arg_popup()
             self._close_arg2_popup()

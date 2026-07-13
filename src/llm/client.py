@@ -17,7 +17,7 @@ class LLMClient:
         self._api_key = provider.get("api_key", "")
         self._model = _cfg.get_active_model(config)
         self._purpose = purpose
-        self._system_prompt = config.get("prompts", {}).get(purpose, "")
+        self._system_prompt = config.get("prompts", {}).get("system", "")
         self._client = None
         self.last_prompt_tokens = 0
 

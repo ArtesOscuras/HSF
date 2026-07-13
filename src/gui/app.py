@@ -294,6 +294,271 @@ class _ReviewDialogManager:
         self._parent.after(0, _close_ui)
 
 
+def _probe_one_port(ip, port, payload_bytes, label):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(3)
+    response = b""
+    try:
+        sock.connect((ip, port))
+        sock.sendall(payload_bytes)
+        sock.settimeout(3)
+        while True:
+            try:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+            except socket.timeout:
+                break
+    except Exception:
+        pass
+    finally:
+        sock.close()
+    text = response.decode(errors="replace").strip()
+    return label, text
+
+
+def _do_port_inspection(ip, port):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    probes = [
+        ("hello\r\n", "hello"),
+        ("GET / HTTP/1.0\r\nHost: {ip}\r\n\r\n", "HTTP GET"),
+        (bytes([0x16, 0x03, 0x01, 0x00, 0x01, 0x01, 0x00, 0x03, 0x03] + [0x00]*36), "TLS ClientHello"),
+        ("SSH-2.0-OpenSSH_client\r\n", "SSH hello"),
+        ("EHLO test\r\n", "SMTP EHLO"),
+        ("USER anonymous\r\n", "FTP USER"),
+        ("PING\r\n", "Redis PING"),
+        ("CAPA\r\n", "POP3 CAPA"),
+        ("a001 CAPABILITY\r\n", "IMAP CAPABILITY"),
+        ("INFO\r\n", "Redis INFO"),
+        ("stats\r\n", "Memcached stats"),
+        ("QUIT\r\n", "QUIT"),
+        ("\x01\x00\x00\x01\x01", "RDP connect"),
+        (b"\x00\x00\x00\xa4\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x0d\x00\x00\x00\x08", "PostgreSQL startup"),
+        (b"\x00\x00\x00\x85\xffSMBr\x00\x00\x00\x00\x18", "SMB negotiate"),
+        ("RFB 003.008\n", "VNC RFB"),
+        (b"\x00" * 36, "MySQL handshake"),
+        ('{"isMaster": 1}', "MongoDB isMaster"),
+        ('{"buildinfo": 1}', "MongoDB buildInfo"),
+        ("GET /version HTTP/1.0\r\nHost: {ip}\r\n\r\n", "Docker API"),
+        ("GET /_cluster/health HTTP/1.0\r\nHost: {ip}\r\n\r\n", "Elasticsearch"),
+        ("HELP\r\n", "generic HELP"),
+        ("STATUS\r\n", "generic STATUS"),
+        ("OPTIONS / HTTP/1.0\r\nHost: {ip}\r\n\r\n", "HTTP OPTIONS"),
+        ("OPTIONS * RTSP/1.0\r\nCSeq: 1\r\n\r\n", "RTSP OPTIONS"),
+        ("OPTIONS sip:test@{ip} SIP/2.0\r\nVia: SIP/2.0/TCP test\r\nFrom: <sip:test@test>\r\nTo: <sip:test@test>\r\nCall-ID: 1@test\r\nCSeq: 1 OPTIONS\r\n\r\n", "SIP OPTIONS"),
+        ("\xff\xfb\x01\xff\xfb\x03\xff\xfd\x18", "Telnet options"),
+        ("\x00\x00\x00\x01", "MySQL login"),
+    ]
+    results = []
+    futures = {}
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        for payload, label in probes:
+            if isinstance(payload, str):
+                payload_bytes = payload.replace("{ip}", ip).encode()
+            else:
+                payload_bytes = payload
+            futures[ex.submit(_probe_one_port, ip, port, payload_bytes, label)] = label
+        for f in as_completed(futures):
+            label, text = f.result()
+            if text:
+                results.append((label, text))
+    return results
+
+
+def _do_ping(ip):
+    try:
+        if os.geteuid() == 0:
+            from scapy.all import sr1, IP, ICMP
+            start = time.monotonic()
+            reply = sr1(IP(dst=ip) / ICMP(), timeout=2, verbose=False)
+            elapsed = time.monotonic() - start
+            if reply is not None:
+                return (elapsed * 1000, reply.ttl)
+    except Exception:
+        pass
+    if shutil.which("ping"):
+        cmd = ["ping", "-n", "1", ip] if platform.system().lower() == "windows" else ["ping", "-c", "1", ip]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            output = proc.stdout + proc.stderr
+            if proc.returncode != 0:
+                return None
+            m = re.search(r'time[=<](\d+\.?\d*)\s*ms', output)
+            rtt = float(m.group(1)) if m else None
+            m = re.search(r'ttl[=<](\d+)', output, re.IGNORECASE)
+            ttl = int(m.group(1)) if m else None
+            return (rtt, ttl)
+        except Exception:
+            pass
+    return None
+
+
+def _do_nslookup(host):
+    import subprocess, shutil
+    binary = shutil.which("nslookup")
+    if not binary:
+        return "nslookup not available on this system"
+    try:
+        proc = subprocess.run(
+            [binary, host], capture_output=True, text=True, timeout=10
+        )
+    except subprocess.TimeoutExpired:
+        return f"nslookup {host} timed out"
+    except Exception as e:
+        return f"nslookup {host} failed: {e}"
+    output = (proc.stdout + proc.stderr).strip()
+    if not output:
+        return f"No response for {host}"
+    addresses = []
+    for line in output.splitlines():
+        m = re.search(r"Address[es]*:\s+(\S+)", line)
+        if m:
+            addr = m.group(1)
+            if addr not in addresses and ":" not in addr:
+                addresses.append(addr)
+    if not addresses and proc.returncode != 0:
+        return f"Failed to resolve {host}"
+    if not addresses:
+        return output[:500]
+    lines = [f"nslookup {host}:"]
+    lines.append(output.splitlines()[-1] if output.splitlines() else "")
+    return "\n".join(lines)
+
+
+
+def _do_scan_ip(ip):
+    from src.tools.scanner.mdns_cache import get_services
+    import src.machines
+    src.machines.interface_name = ""
+    src.machines.interface_ip = ""
+    gateway = get_gateway_ip()
+    result = identify_device(ip, gateway_ip=gateway, hostname="")
+    ttl = _probe_ttl(ip)
+    mds = get_services(ip)
+    has_evidence = result != "device unknown" or ttl is not None or bool(mds)
+    if not has_evidence:
+        return None
+    machine = store.add_or_update(ip=ip, method="manual")
+    machine.device_type = result
+    model = extract_model_for_ip(machine.ip, resolve=True)
+    if model:
+        machine.model = model
+    if result == "Windows machine":
+        os_info, domain, server_name = _probe_smb_info(machine.ip)
+        if os_info:
+            machine.device_type = os_info
+            machine.os = os_info
+        if domain:
+            machine.domain = domain
+            domain_db.init_or_update(domain, machine.id, machine.ip, "smb")
+            machine_db.save_domain(machine.id, domain, "smb")
+        if server_name:
+            machine.hostname = server_name
+    if result == "Linux device":
+        banner = _probe_ssh_banner(machine.ip)
+        if banner:
+            distro = _identify_linux_distro(banner)
+            if distro:
+                machine.device_type = distro
+                machine.os = distro
+    machine_db.save_machine_info(machine)
+    return {
+        "id": machine.id,
+        "ip": machine.ip,
+        "device_type": machine.device_type,
+        "os": getattr(machine, "os", ""),
+        "hostname": getattr(machine, "hostname", ""),
+        "domain": getattr(machine, "domain", ""),
+        "model": getattr(machine, "model", ""),
+        "ttl": ttl,
+    }
+
+
+def _do_bannergrab(ip, port):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(3)
+    response = b""
+    try:
+        sock.connect((ip, port))
+        sock.settimeout(2)
+        while True:
+            try:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                response += chunk
+            except socket.timeout:
+                break
+    except (OSError, ConnectionError, socket.timeout):
+        return None
+    finally:
+        sock.close()
+    return response.decode(errors="replace").strip()
+
+
+_TCP_SCAN_PORTS = [
+    7, 9, 13, 21, 22, 23, 25, 37, 49, 53, 69, 70, 79, 80, 88, 110, 111,
+    113, 119, 123, 135, 137, 138, 139, 143, 161, 162, 179, 199, 389, 443,
+    445, 465, 512, 513, 514, 515, 548, 554, 587, 631, 636, 646, 873, 993,
+    995, 1025, 1026, 1027, 1080, 1099, 1433, 1434, 1521, 1723, 2049, 2121,
+    2222, 2375, 2701, 3128, 3260, 3306, 3389, 3690, 4369, 4444, 4786, 4848,
+    5000, 5353, 5432, 5555, 5672, 5800, 5900, 5985, 5986, 6379, 6667, 7001,
+    7002, 7777, 8000, 8009, 8080, 8180, 8443, 8888, 9000, 9090, 9200, 9443,
+    9999, 11211, 27017, 50070, 61616,
+]
+
+
+def _do_tcp_scan_common(ip):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    open_ports = []
+    lock = threading.Lock()
+    def _check(p):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex((ip, p))
+        sock.close()
+        if result == 0:
+            with lock:
+                open_ports.append(p)
+    with ThreadPoolExecutor(max_workers=50) as ex:
+        list(ex.map(_check, _TCP_SCAN_PORTS))
+    return sorted(open_ports)
+
+
+_UDP_SCAN_PORTS = [
+    7, 9, 11, 13, 17, 19, 37, 42, 49, 53,
+    67, 68, 69, 80, 88, 111, 113, 119, 123, 135,
+    137, 138, 139, 143, 161, 162, 177, 194, 389, 443,
+    445, 464, 500, 512, 514, 520, 546, 554, 587, 631,
+    636, 873, 993, 995, 1194, 1434, 1521, 1701, 1723, 1812,
+    1900, 2049, 2222, 3128, 3306, 3389, 3478, 4500, 5000, 5060,
+    5353, 5432, 5555, 5672, 5900, 5985, 6379, 7000, 7070, 8000,
+    8080, 8443, 8888, 9200, 10000, 11211, 27017, 49152,
+]
+
+
+def _do_udp_scan_common(ip):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    open_ports = []
+    lock = threading.Lock()
+    def _check(p):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(1)
+        try:
+            sock.sendto(b"", (ip, p))
+            sock.recvfrom(1024)
+            with lock:
+                open_ports.append(p)
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            pass
+        finally:
+            sock.close()
+    with ThreadPoolExecutor(max_workers=50) as ex:
+        list(ex.map(_check, _UDP_SCAN_PORTS))
+    return sorted(open_ports)
+
+
 class App(tk.Tk):
     def __init__(self):
         fonts.register_before_tk()
@@ -343,7 +608,7 @@ class App(tk.Tk):
         self._tcpscan_running = False
         self._tcpscan_process = None
         self._udpscan_running = False
-        self._bannergrab_running = False
+        self._port_inspector_running = False
         self._shell_listener = None
 
         self._register_views()
@@ -490,13 +755,13 @@ class App(tk.Tk):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
         self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "people", "evidence", "services", "dictionary", "rule"])
         self.console.register_command("use", self._cmd_use, "Use a tool")
-        self.console.set_subcommands("use", ["scanner", "bannergrab", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "whatweb", "bruteforce", "hashcat", "dicma"])
+        self.console.set_subcommands("use", ["scanner", "port-inspector", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "bannergrab", "whatweb", "bruteforce", "hashcat", "dicma"])
         self.console.register_command("connect", self._cmd_connect, "Connect via FTP/SFTP/SSH/WinRM")
         self.console.set_subcommands("connect", ["ftp", "sftp", "ssh", "winrm"])
         self.console.register_command("start", self._cmd_start, "Start listeners")
         self.console.set_subcommands("start", ["shells-listener", "mdns-listener"])
         self.console.register_command("stop", self._cmd_stop, "Stop listeners")
-        self.console.set_subcommands("stop", ["shells-listener", "mdns-listener", "scanner", "bruteforce", "fuzzer", "webrecorder", "tcpscan", "udpscan", "whatweb", "bannergrab", "hashcat"])
+        self.console.set_subcommands("stop", ["shells-listener", "mdns-listener", "scanner", "bruteforce", "fuzzer", "webrecorder", "tcpscan", "udpscan", "whatweb", "port-inspector", "bannergrab", "hashcat"])
         self.console.register_command("delete", self._cmd_delete, "Delete stored data")
         self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell", "people", "dictionary", "rule"])
         self.console.register_command("add", self._cmd_add, "Add to inventory")
@@ -558,7 +823,7 @@ class App(tk.Tk):
         self.console.set_arg2_provider("use", "udpscan", self._autocomplete_use_udpscan)
 
         self.console.set_arg2_provider("use", "whatweb", self._autocomplete_use_tcpscan)
-        self.console.set_arg3_provider("use", "whatweb", self._autocomplete_bannergrab_ports)
+        self.console.set_arg3_provider("use", "whatweb", self._autocomplete_port_inspector_ports)
 
         self.console.set_arg2_provider("use", "bruteforce", self._autocomplete_bruteforce_proto)
         self.console.set_arg3_provider("use", "bruteforce", self._autocomplete_webrecorder_target)
@@ -570,8 +835,11 @@ class App(tk.Tk):
         self.console.set_arg4_provider("use", "fuzzer", self._autocomplete_fuzzer_arg4)
         self.console.set_arg5_provider("use", "fuzzer", self._autocomplete_fuzzer_arg5)
 
-        self.console.set_arg2_provider("use", "bannergrab", self._autocomplete_use_bannergrab)
-        self.console.set_arg3_provider("use", "bannergrab", self._autocomplete_bannergrab_ports)
+        self.console.set_arg2_provider("use", "port-inspector", self._autocomplete_use_port_inspector)
+        self.console.set_arg3_provider("use", "port-inspector", self._autocomplete_port_inspector_ports)
+
+        self.console.set_arg2_provider("use", "bannergrab", self._autocomplete_use_tcpscan)
+        self.console.set_arg3_provider("use", "bannergrab", self._autocomplete_port_inspector_ports)
 
         self.console.set_arg2_provider("use", "webrecorder", self._autocomplete_webrecorder_target)
         self.console.set_arg3_provider("use", "webrecorder", self._autocomplete_webrecorder_ports)
@@ -841,7 +1109,7 @@ class App(tk.Tk):
         return results
 
     @staticmethod
-    def _autocomplete_use_bannergrab(prefix):
+    def _autocomplete_use_port_inspector(prefix):
         results = [("stop", "stop")]
         for m in store.get_all():
             results.append((f"{m.ip}  #{m.id}", m.ip))
@@ -965,7 +1233,7 @@ class App(tk.Tk):
         return results
 
     @staticmethod
-    def _autocomplete_bannergrab_ports(prefix, arg2_value=None):
+    def _autocomplete_port_inspector_ports(prefix, arg2_value=None):
         results = [("<port>", "")]
         if arg2_value:
             from src.machines import machine_db
@@ -1258,12 +1526,14 @@ class App(tk.Tk):
 
     def _cmd_use(self, args):
         if not args:
-            self.console.body("Usage: use <scanner|bannergrab|fuzzer|webrecorder|nslookup|ping|tcpscan|udpscan|whatweb|ftp|dicma> ...")
+            self.console.body("Usage: use <scanner|port-inspector|fuzzer|webrecorder|nslookup|ping|tcpscan|udpscan|bannergrab|whatweb|ftp|dicma> ...")
             return
         sub = args[0].lower()
         rest = args[1:]
         if sub == "scanner":
             self._cmd_use_scanner(rest)
+        elif sub == "port-inspector":
+            self._cmd_use_port_inspector(rest)
         elif sub == "bannergrab":
             self._cmd_use_bannergrab(rest)
         elif sub == "fuzzer":
@@ -1343,11 +1613,54 @@ class App(tk.Tk):
             return (name, addrs[0]["addr"], addrs[0]["netmask"])
         return None
 
-    def _cmd_use_bannergrab(self, args):
+    def _cmd_use_port_inspector(self, args):
         if not args:
             self._show_scan_dialog()
             return
+        self._cmd_port_inspector(args)
+
+    def _cmd_use_bannergrab(self, args):
         self._cmd_bannergrab(args)
+
+    def _cmd_bannergrab(self, args):
+        if not args:
+            self.console.body("Usage: bannergrab <ip|id> <port>")
+            return
+        if len(args) < 2:
+            self.console.body("Usage: bannergrab <ip|id> <port>")
+            return
+        target, port_str = args[0], args[1]
+        try:
+            port = int(port_str)
+        except ValueError:
+            self.console.error("Invalid port number")
+            return
+        machine = None
+        if re.match(r"^\d+$", target):
+            mid = int(target)
+            for m in store.get_all():
+                if m.id == mid:
+                    machine = m
+                    break
+        else:
+            machine = store.get(target)
+        if not machine:
+            self.console.warning(f"No machine found for: {target}")
+            return
+        ip = machine.ip
+        threading.Thread(target=self._run_bannergrab, args=(ip, port), daemon=True).start()
+
+    def _run_bannergrab(self, ip, port):
+        self.console.after(0, lambda: self.console.info(f"Bannergrab {ip}:{port}..."))
+        text = _do_bannergrab(ip, port)
+        if text is None:
+            self.console.after(0, lambda: self.console.error(f"Bannergrab {ip}:{port} failed"))
+        elif not text.strip():
+            self.console.after(0, lambda: self.console.warning(f"Bannergrab {ip}:{port}: no response"))
+        else:
+            self.console.after(0, lambda t=text: self.console.success(f"Bannergrab {ip}:{port}:"))
+            for line in text.split("\n")[:20]:
+                self.console.after(0, lambda l=line: self.console.body(f"  {l}"))
 
     def _cmd_use_fuzzer(self, args):
         self._cmd_fuzz(args)
@@ -2444,12 +2757,12 @@ class App(tk.Tk):
                 self.console.warning("No udp scan is running")
         elif sub == "whatweb":
             self.console.info("whatweb scan finished")
-        elif sub == "bannergrab":
-            if self._bannergrab_running:
-                self._bannergrab_running = False
-                self.console.info("Bannergrab stopped")
+        elif sub == "port-inspector":
+            if self._port_inspector_running:
+                self._port_inspector_running = False
+                self.console.info("Port inspector stopped")
             else:
-                self.console.warning("No bannergrab is running")
+                self.console.warning("No port inspector is running")
         elif sub == "hashcat":
             if hasattr(self, "_hashcat_engine") and self._hashcat_engine:
                 self._hashcat_engine.stop()
@@ -2583,8 +2896,8 @@ class App(tk.Tk):
             self._cmd_tcpscan([ip])
         elif action == "udpscan":
             self._cmd_udpscan([ip])
-        elif action == "bannergrab":
-            self._cmd_bannergrab([ip, str(result.get("port", 80))])
+        elif action == "port-inspector":
+            self._cmd_port_inspector([ip, str(result.get("port", 80))])
 
     def _show_scan_dialog(self):
         dialog = ScanDialog(self)
@@ -2627,44 +2940,11 @@ class App(tk.Tk):
         threading.Thread(target=self._run_scan_ip, args=(ip,), daemon=True).start()
 
     def _run_scan_ip(self, ip):
-        src.machines.interface_name = ""
-        src.machines.interface_ip = ""
-        _dbg(f"[scan-ip] checking {ip} for evidence...")
-        gateway = get_gateway_ip()
-        result = identify_device(ip, gateway_ip=gateway, hostname="")
-        ttl = _probe_ttl(ip)
-        from src.tools.scanner.mdns_cache import get_services
-        mds = get_services(ip)
-        has_evidence = result != "device unknown" or ttl is not None or bool(mds)
-        _dbg(f"[scan-ip] result={result} ttl={ttl} mds={sorted(mds.keys()) if mds else []} evidence={has_evidence}")
-        if not has_evidence:
+        info = _do_scan_ip(ip)
+        if info is None:
             event_bus.submit({"type": "scan_error", "message": f"No device detected at {ip}"})
             return
-        machine = store.add_or_update(ip=ip, method="manual")
-        machine.device_type = result
-        model = extract_model_for_ip(machine.ip, resolve=True)
-        if model:
-            machine.model = model
-        if result == "Windows machine":
-            os_info, domain, server_name = _probe_smb_info(machine.ip)
-            if os_info:
-                machine.device_type = os_info
-                machine.os = os_info
-            if domain:
-                machine.domain = domain
-                domain_db.init_or_update(domain, machine.id, machine.ip, "smb")
-                machine_db.save_domain(machine.id, domain, "smb")
-            if server_name:
-                machine.hostname = server_name
-        if result == "Linux device":
-            banner = _probe_ssh_banner(machine.ip)
-            if banner:
-                distro = _identify_linux_distro(banner)
-                if distro:
-                    machine.device_type = distro
-                    machine.os = distro
-        machine_db.save_machine_info(machine)
-        event_bus.submit({"type": "scan_ip_result", "machine": machine})
+        event_bus.submit({"type": "scan_ip_result", "machine": store.get(ip)})
 
     TCP_PORTS_COMMON = [
         7, 9, 13, 21, 22, 23, 25, 37, 49, 53, 69, 70, 79, 80, 88, 110, 111,
@@ -2741,10 +3021,10 @@ class App(tk.Tk):
             return self._tcp_scan_syn_nmap(ip, ports)
         return self._tcp_scan_connect(ip, ports, port_callback=port_callback)
 
-    def _run_tcpscan(self, ip, method):
+    def _run_tcpscan(self, ip, method, skip_phase1=False):
         machine = store.get(ip)
         self._tcpscan_running = True
-        all_ports = []
+        all_ports = list(machine_db.load_tcp_ports(machine.id)) if skip_phase1 and machine else []
         try:
             def _save_ports():
                 if machine and machine.id:
@@ -2755,26 +3035,27 @@ class App(tk.Tk):
                     all_ports.append(p)
                 _save_ports()
 
-            # Phase 1: common ports
-            open_ports = self._tcp_scan(ip, self.TCP_PORTS_COMMON, method, port_callback=_on_port)
-            for p in open_ports:
-                if p not in all_ports:
-                    all_ports.append(p)
-            _save_ports()
-            for p in open_ports:
-                self.console.after(0, lambda port=p: self.console.success(
-                    f"  {ip}  port {port} open"
+            if not skip_phase1:
+                # Phase 1: common ports
+                open_ports = _do_tcp_scan_common(ip)
+                for p in open_ports:
+                    if p not in all_ports:
+                        all_ports.append(p)
+                _save_ports()
+                for p in open_ports:
+                    self.console.after(0, lambda port=p: self.console.success(
+                        f"  {ip}  port {port} open"
+                    ))
+                self.console.after(0, lambda: self.console.info(
+                    f"TCP common ports ({len(_TCP_SCAN_PORTS)}) done. Continuing full scan (65535)..."
                 ))
-            self.console.after(0, lambda: self.console.info(
-                f"TCP common ports ({len(self.TCP_PORTS_COMMON)}) done. Continuing full scan (65535)..."
-            ))
 
-            if not self._tcpscan_running:
-                self.console.after(0, lambda: self.console.warning(f"TCP scan {ip} stopped"))
-                return
+                if not self._tcpscan_running:
+                    self.console.after(0, lambda: self.console.warning(f"TCP scan {ip} stopped"))
+                    return
 
             # Phase 2: remaining ports
-            common_set = set(self.TCP_PORTS_COMMON)
+            common_set = set(_TCP_SCAN_PORTS)
             remaining = [p for p in range(1, 65536) if p not in common_set]
             more = self._tcp_scan(ip, remaining, method, port_callback=_on_port)
             for p in more:
@@ -2933,10 +3214,10 @@ class App(tk.Tk):
             return self._udp_scapy_probe(ip, ports)
         return self._udp_scan_connect(ip, ports, port_callback=port_callback)
 
-    def _run_udpscan(self, ip):
+    def _run_udpscan(self, ip, skip_phase1=False):
         machine = store.get(ip)
         self._udpscan_running = True
-        all_ports = []
+        all_ports = list(machine_db.load_udp_ports(machine.id)) if skip_phase1 and machine else []
         try:
             def _save_ports():
                 if machine and machine.id:
@@ -2947,30 +3228,30 @@ class App(tk.Tk):
                     all_ports.append(p)
                 _save_ports()
 
-            method = "scapy" if self._is_root() else "connect"
-            self.console.after(0, lambda: self.console.info(
-                f"UDP scanning {ip} ({method})..."
-            ))
-
-            open_ports = self._udp_scan(ip, self.UDP_PORTS_COMMON, port_callback=_on_port)
-            for p in open_ports:
-                if p not in all_ports:
-                    all_ports.append(p)
-            _save_ports()
-            for p in open_ports:
-                self.console.after(0, lambda port=p: self.console.success(
-                    f"  {ip}  UDP {port} open"
+            if not skip_phase1:
+                self.console.after(0, lambda: self.console.info(
+                    f"UDP scanning {ip}..."
                 ))
 
-            if not self._udpscan_running:
-                self.console.after(0, lambda: self.console.warning(f"UDP scan {ip} stopped"))
-                return
+                open_ports = _do_udp_scan_common(ip)
+                for p in open_ports:
+                    if p not in all_ports:
+                        all_ports.append(p)
+                _save_ports()
+                for p in open_ports:
+                    self.console.after(0, lambda port=p: self.console.success(
+                        f"  {ip}  UDP {port} open"
+                    ))
 
-            self.console.after(0, lambda: self.console.info(
-                f"UDP common ports ({len(self.UDP_PORTS_COMMON)}) done. Continuing full scan (65535)..."
-            ))
+                if not self._udpscan_running:
+                    self.console.after(0, lambda: self.console.warning(f"UDP scan {ip} stopped"))
+                    return
 
-            common_set = set(self.UDP_PORTS_COMMON)
+                self.console.after(0, lambda: self.console.info(
+                    f"UDP common ports ({len(_UDP_SCAN_PORTS)}) done. Continuing full scan (65535)..."
+                ))
+
+            common_set = set(_UDP_SCAN_PORTS)
             remaining = [p for p in range(1, 65536) if p not in common_set]
             more = self._udp_scan(ip, remaining, port_callback=_on_port)
             for p in more:
@@ -3173,20 +3454,30 @@ class App(tk.Tk):
                     f"No web service detected at {ip}:{port}"
                 ))
 
-    def _cmd_bannergrab(self, args):
+    def _cmd_port_inspector(self, args):
         if not args:
-            self.console.body("Usage: bannergrab <ip|id> <port> | bannergrab stop")
+            self.console.body("Usage: port-inspector <ip|id> <port> | port-inspector stop")
+            return
+        if args[0].lower() == "stop":
+            if not self._port_inspector_running:
+                self.console.warning("No port inspector is running.")
+                return
+            self._port_inspector_running = False
+            self.console.info("Port inspector stopped")
+            return
+        if len(args) < 2:
+            self.console.body("Usage: port-inspector <ip|id> <port> | port-inspector stop")
             return
         sub = args[0].lower()
         if sub == "stop":
-            if not self._bannergrab_running:
-                self.console.warning("No bannergrab is running.")
+            if not self._port_inspector_running:
+                self.console.warning("No port inspector is running.")
                 return
-            self._bannergrab_running = False
-            self.console.info("Bannergrab stop requested")
+            self._port_inspector_running = False
+            self.console.info("Port inspector stopped")
             return
         if len(args) < 2:
-            self.console.body("Usage: bannergrab <ip|id> <port> | bannergrab stop")
+            self.console.body("Usage: port-inspector <ip|id> <port> | port-inspector stop")
             return
         target, port_str = args[0], args[1]
         try:
@@ -3207,99 +3498,27 @@ class App(tk.Tk):
             self.console.warning(f"No machine found for: {target}")
             return
         ip = machine.ip
-        if self._bannergrab_running:
-            self.console.warning("A bannergrab is already running.")
+        if self._port_inspector_running:
+            self.console.warning("A port inspector is already running.")
             return
-        self._bannergrab_running = True
-        threading.Thread(target=self._run_bannergrab, args=(ip, port, machine), daemon=True).start()
+        self._port_inspector_running = True
+        threading.Thread(target=self._run_port_inspector, args=(ip, port, machine), daemon=True).start()
 
-    def _run_bannergrab(self, ip, port, machine):
-        probes = [
-            ("hello\r\n", "hello"),
-            ("GET / HTTP/1.0\r\nHost: {ip}\r\n\r\n", "HTTP GET"),
-            (bytes([0x16, 0x03, 0x01, 0x00, 0x01, 0x01, 0x00, 0x03, 0x03] + [0x00]*36), "TLS ClientHello"),
-            ("SSH-2.0-OpenSSH_client\r\n", "SSH hello"),
-            ("EHLO test\r\n", "SMTP EHLO"),
-            ("USER anonymous\r\n", "FTP USER"),
-            ("PING\r\n", "Redis PING"),
-            ("CAPA\r\n", "POP3 CAPA"),
-            ("a001 CAPABILITY\r\n", "IMAP CAPABILITY"),
-            ("INFO\r\n", "Redis INFO"),
-            ("stats\r\n", "Memcached stats"),
-            ("QUIT\r\n", "QUIT"),
-            ("\x01\x00\x00\x01\x01", "RDP connect"),
-            (b"\x00\x00\x00\xa4\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00\x0d\x00\x00\x00\x08", "PostgreSQL startup"),
-            (b"\x00\x00\x00\x85\xffSMBr\x00\x00\x00\x00\x18", "SMB negotiate"),
-            ("RFB 003.008\n", "VNC RFB"),
-            (b"\x00" * 36, "MySQL handshake"),
-            ('{"isMaster": 1}', "MongoDB isMaster"),
-            ('{"buildinfo": 1}', "MongoDB buildInfo"),
-            ("GET /version HTTP/1.0\r\nHost: {ip}\r\n\r\n", "Docker API"),
-            ("GET /_cluster/health HTTP/1.0\r\nHost: {ip}\r\n\r\n", "Elasticsearch"),
-            ("HELP\r\n", "generic HELP"),
-            ("STATUS\r\n", "generic STATUS"),
-            ("OPTIONS / HTTP/1.0\r\nHost: {ip}\r\n\r\n", "HTTP OPTIONS"),
-            ("OPTIONS * RTSP/1.0\r\nCSeq: 1\r\n\r\n", "RTSP OPTIONS"),
-            ("OPTIONS sip:test@{ip} SIP/2.0\r\nVia: SIP/2.0/TCP test\r\nFrom: <sip:test@test>\r\nTo: <sip:test@test>\r\nCall-ID: 1@test\r\nCSeq: 1 OPTIONS\r\n\r\n", "SIP OPTIONS"),
-            ("\xff\xfb\x01\xff\xfb\x03\xff\xfd\x18", "Telnet options"),
-            ("\x00\x00\x00\x01", "MySQL login"),
-        ]
-        self.console.after(0, lambda: self.console.info(f"Bannergrab {ip}:{port} starting ({len(probes)} probes)..."))
+    def _run_port_inspector(self, ip, port, machine):
+        self.console.after(0, lambda: self.console.info(f"Port inspector {ip}:{port} starting..."))
         try:
-            for payload, label in probes:
-                if not self._bannergrab_running:
-                    self.console.after(0, lambda: self.console.warning(f"Bannergrab {ip}:{port} stopped"))
+            for label, text in _do_port_inspection(ip, port):
+                if not self._port_inspector_running:
+                    self.console.after(0, lambda: self.console.warning(f"Port inspector {ip}:{port} stopped"))
                     return
-                if isinstance(payload, str):
-                    payload_bytes = payload.replace("{ip}", ip).encode()
-                else:
-                    payload_bytes = payload
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(3)
-                try:
-                    sock.connect((ip, port))
-                    # Passive read first
-                    sock.setblocking(False)
-                    try:
-                        passive = sock.recv(4096)
-                    except (BlockingIOError, socket.timeout):
-                        passive = b""
-                    sock.setblocking(True)
-                    # Send probe if nothing received passively
-                    if passive:
-                        response = passive
-                    else:
-                        try:
-                            sock.sendall(payload_bytes)
-                            sock.settimeout(2)
-                            response = b""
-                            while True:
-                                try:
-                                    chunk = sock.recv(4096)
-                                    if not chunk:
-                                        break
-                                    response += chunk
-                                except socket.timeout:
-                                    break
-                        except (OSError, ConnectionError):
-                            response = b""
-                except (OSError, ConnectionError, socket.timeout) as e:
-                    self.console.after(0, lambda l=label: self.console.body(f"  [{l}] connection failed"))
-                    sock.close()
-                    continue
-                sock.close()
-                text = response.decode(errors="replace").strip()
-                if text:
-                    machine_db.save_banner(machine.id, port, text, label)
-                    self.console.after(0, lambda t=text, l=label: self._show_banner_result(ip, port, t, l))
-                else:
-                    self.console.after(0, lambda l=label: self.console.body(f"  [{l}] no response"))
+                machine_db.save_banner(machine.id, port, text, label)
+                self.console.after(0, lambda t=text, l=label: self._show_banner_result(ip, port, t, l))
         finally:
-            self._bannergrab_running = False
-            self.console.after(0, lambda: self.console.info(f"Bannergrab {ip}:{port} finished"))
+            self._port_inspector_running = False
+            self.console.after(0, lambda: self.console.info(f"Port inspector {ip}:{port} finished"))
 
     def _show_banner_result(self, ip, port, text, label):
-        self.console.after(0, lambda: self.console.success(f"Banner from {ip}:{port} ({label}):"))
+        self.console.after(0, lambda: self.console.success(f"Port inspector {ip}:{port} ({label}):"))
         for line in text.split("\n")[:10]:
             self.console.after(0, lambda l=line: self.console.body(f"  {l}"))
 
@@ -3483,6 +3702,23 @@ class App(tk.Tk):
         if text.lower() == "exit" or not text:
             self.destroy()
             return
+        if text.lower() == "menu":
+            self.console.info(
+                "Consultor mode commands:\n"
+                "  exit  - Quit HSF\n"
+                "  reset - Clear conversation history and start fresh\n"
+                "  menu  - Show this help\n\n"
+                "Press Tab with empty input to cycle modes."
+            )
+            return
+        if text.lower() == "reset":
+            self._llm_messages = []
+            self._last_ctx_hash = None
+            self._last_ctx = None
+            self._last_token_pct = None
+            self.console.success("Context reset. Conversation history cleared.")
+            self._update_mode_prompt()
+            return
         self._consultor_ask(text)
 
     def _leave_consultor_mode(self):
@@ -3635,6 +3871,8 @@ class App(tk.Tk):
                         display = f"fetched {len(result)} chars"
                     elif name == "websearch":
                         display = f"searched ({len(result)} chars)"
+                    elif name == "port_inspector":
+                        display = "inventoried"
                     elif len(result) > 120:
                         display = result[:117] + "..."
                     self.console.after(0, lambda d=display: self.console.info(
@@ -3885,18 +4123,6 @@ class App(tk.Tk):
                 parts.append(f"\nHashcat rules ({len(rule_files)}):")
                 for f in rule_files[:15]:
                     parts.append(f"  {f}")
-        from src.tools.fuzz.results_db import get_results as _get_fuzz_results
-        try:
-            fuzz_rows = _get_fuzz_results(limit=100)
-        except Exception:
-            fuzz_rows = []
-        if fuzz_rows:
-            parts.append(f"\nFuzz results ({len(fuzz_rows)} entries, experimental):")
-            for method, tgt, word, display in fuzz_rows:
-                if method == "directory":
-                    parts.append(f"  {method}: /{word}")
-                else:
-                    parts.append(f"  {method}: {word}.{tgt}")
         return "\n".join(parts)
 
     def _inject_context(self):
@@ -4031,56 +4257,13 @@ class App(tk.Tk):
             else:
                 self.console.warning(f"No machine with ID #{mid}")
                 return
-        threading.Thread(target=self._run_ping, args=(ip,), daemon=True).start()
-
-    def _run_ping(self, ip):
-        if self._is_root():
-            self._run_ping_scapy(ip)
-        elif shutil.which("ping"):
-            self._run_ping_system(ip)
+        result = _do_ping(ip)
+        if result is None:
+            self.console.warning(f"{ip}: no response")
         else:
-            self.console.after(0, lambda: self.console.error(
-                "No root privileges and 'ping' command not found in system"
-            ))
-
-    def _run_ping_scapy(self, ip):
-        from scapy.all import sr1, IP, ICMP
-        self.console.after(0, lambda: self.console.info(f"Pinging {ip} (scapy ICMP)..."))
-        try:
-            start = time.monotonic()
-            reply = sr1(IP(dst=ip) / ICMP(), timeout=2, verbose=False)
-            elapsed = time.monotonic() - start
-            if reply is None:
-                self.console.after(0, lambda: self.console.warning(f"{ip} no response"))
-            else:
-                rtt_ms = elapsed * 1000
-                ttl = reply.ttl
-                self.console.after(0, lambda: self.console.success(
-                    f"Reply from {ip}: time={rtt_ms:.1f}ms  ttl={ttl}"
-                ))
-        except Exception as e:
-            self.console.after(0, lambda: self.console.error(f"Ping {ip} failed: {e}"))
-
-    def _run_ping_system(self, ip):
-        if platform.system().lower() == "windows":
-            cmd = ["ping", "-n", "1", ip]
-        else:
-            cmd = ["ping", "-c", "1", ip]
-        self.console.after(0, lambda: self.console.info(f"Pinging {ip}..."))
-        try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            output = proc.stdout + proc.stderr
-            _dbg(f"[ping] returncode={proc.returncode}\n{output}")
-            for line_raw in output.splitlines():
-                stripped = line_raw.rstrip()
-                if stripped:
-                    self.console.after(0, lambda l=stripped: self.console.body(l))
-            if proc.returncode != 0:
-                self.console.after(0, lambda: self.console.warning(f"{ip} no response"))
-        except subprocess.TimeoutExpired:
-            self.console.after(0, lambda: self.console.warning(f"{ip} ping timed out"))
-        except Exception as e:
-            self.console.after(0, lambda: self.console.error(f"Ping {ip} failed: {e}"))
+            rtt_ms, ttl = result
+            ttl_part = f"  ttl={ttl}" if ttl is not None else ""
+            self.console.success(f"{ip}: time={rtt_ms:.1f}ms{ttl_part}")
 
     def _cmd_nslookup(self, args):
         if not args:
@@ -4100,22 +4283,8 @@ class App(tk.Tk):
 
     def _run_nslookup(self, target):
         self.console.after(0, lambda: self.console.info(f"nslookup {target}..."))
-        try:
-            proc = subprocess.run(
-                ["nslookup", target], capture_output=True, text=True, timeout=10
-            )
-            output = proc.stdout + proc.stderr
-            _dbg(f"[nslookup] returncode={proc.returncode}\n{output}")
-            for line_raw in output.splitlines():
-                stripped = line_raw.rstrip()
-                if stripped:
-                    self.console.after(0, lambda l=stripped: self.console.body(l))
-            if proc.returncode != 0:
-                self.console.after(0, lambda: self.console.warning(f"nslookup {target} failed"))
-        except subprocess.TimeoutExpired:
-            self.console.after(0, lambda: self.console.warning(f"nslookup {target} timed out"))
-        except Exception as e:
-            self.console.after(0, lambda: self.console.error(f"nslookup {target} failed: {e}"))
+        result = _do_nslookup(target)
+        self.console.after(0, lambda: self.console.body(result))
 
     def _cmd_domain(self, args):
         if not args:
