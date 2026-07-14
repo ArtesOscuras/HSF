@@ -17,6 +17,7 @@ class _UserEditDialog(tk.Toplevel):
         self.geometry("450x340")
         self.configure(bg="#111111")
         self.transient(parent)
+        self.wait_visibility()
         self.grab_set()
 
         self.columnconfigure(0, weight=0)

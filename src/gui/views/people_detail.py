@@ -18,6 +18,7 @@ class _PersonEditDialog(tk.Toplevel):
         self.geometry("500x500")
         self.configure(bg="#111111")
         self.transient(parent)
+        self.wait_visibility()
         self.grab_set()
 
         self.columnconfigure(0, weight=0)

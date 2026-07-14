@@ -26,6 +26,7 @@ class SettingsDialog(tk.Toplevel):
         self.minsize(800, 660)
         self.configure(bg=BG)
         self.transient(parent)
+        self.wait_visibility()
         self.grab_set()
 
         self.columnconfigure(0, weight=1)
@@ -305,6 +306,7 @@ class SettingsDialog(tk.Toplevel):
         dialog.geometry("540x520")
         dialog.configure(bg=BG)
         dialog.transient(self)
+        dialog.wait_visibility()
         dialog.grab_set()
 
         dialog.columnconfigure(0, weight=0)

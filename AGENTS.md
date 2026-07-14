@@ -205,7 +205,7 @@ self.wait_visibility()   # must precede grab_set on Linux
 self.grab_set()
 ```
 
-This pattern is already used in `HashcatDialog`, `InitDialog`, `_AddUserDialog`, and `_CredentialGenerator`. New dialogs must follow it.
+This pattern is already used in `HashcatDialog`, `InitDialog`, `_CredentialGenerator`, `SettingsDialog`, `_AddUserDialog`, `_AddPersonDialog`, `_UserEditDialog`, `_PersonEditDialog`, and others. New dialogs must follow it.
 
 ---
 

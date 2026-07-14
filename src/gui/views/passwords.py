@@ -59,6 +59,7 @@ class PasswordsView(BaseView):
             insertbackground=BRIGHT,
         )
         self.text.grid(row=0, column=0, sticky="nsew")
+        self.text.bind("<Return>", self._on_return)
 
         scrollbar = tk.Scrollbar(text_frame, orient=tk.VERTICAL,
                                  command=self.text.yview)
@@ -83,13 +84,12 @@ class PasswordsView(BaseView):
         back_btn.bind("<Enter>", lambda e: back_btn.config(bg="#333333"))
         back_btn.bind("<Leave>", lambda e: back_btn.config(bg="#222222"))
 
-        self._last_items = None
-        self._loaded = False
+        self._last_items = set()
         self._poll_id = None
 
     def on_activate(self):
-        self._loaded = False
-        self.after(100, self._poll)
+        self._load_from_db()
+        self._poll_id = self.after(2000, self._poll)
 
     def on_deactivate(self):
         self._sync()
@@ -98,11 +98,7 @@ class PasswordsView(BaseView):
             self._poll_id = None
 
     def _poll(self):
-        if not self._loaded:
-            self._load_from_db()
-            self._loaded = True
-        else:
-            self._sync()
+        self._sync()
         self._poll_id = self.after(2000, self._poll)
 
     def _load_from_db(self):
@@ -110,25 +106,41 @@ class PasswordsView(BaseView):
         self.text.delete("1.0", tk.END)
         for p in items:
             self.text.insert(tk.END, f"{p}\n")
-        self._last_items = items
+        self._last_items = set(items)
+
+    def _on_return(self, event):
+        cursor = self.text.index(tk.INSERT)
+        line_num = int(cursor.split('.')[0])
+        line = self.text.get(f"{line_num}.0", f"{line_num}.end").rstrip("\n\r")
+        if line:
+            credential_db.save_password(line)
+        self.text.insert(tk.INSERT, "\n")
+        return "break"
 
     def _sync(self):
         content = self.text.get("1.0", "end-1c")
-        lines = [l.strip() for l in content.split("\n") if l.strip()]
+        text_lines = set(l.rstrip("\n\r") for l in content.split("\n") if l.strip())
+        db_items = set(credential_db.load_passwords())
 
-        db_items = credential_db.load_passwords()
-        if set(lines) != set(db_items):
-            self._load_from_db()
-            return
+        # A) User added → save to DB
+        for item in text_lines - db_items:
+            credential_db.save_password(item)
 
-        if lines == (self._last_items or []):
-            return
+        # B) User deleted → remove from DB
+        for old in self._last_items - text_lines:
+            credential_db.delete_password(old)
 
-        for old in (self._last_items or []):
-            if old not in lines:
-                credential_db.delete_password(old)
-        for item in lines:
-            if not self._last_items or item not in self._last_items:
-                credential_db.save_password(item)
+        # C) Agent added → insert at end of Text
+        for item in db_items - text_lines - self._last_items:
+            self.text.insert(tk.END, f"{item}\n")
 
-        self._last_items = lines
+        # D) Agent deleted → remove line from Text
+        if self._last_items - db_items:
+            cur = self.text.get("1.0", "end-1c").split("\n")
+            for old in self._last_items - db_items:
+                for i, line in enumerate(cur):
+                    if line.rstrip("\n\r") == old:
+                        self.text.delete(f"{i+1}.0", f"{i+2}.0")
+                        break
+
+        self._last_items = set(credential_db.load_passwords())
