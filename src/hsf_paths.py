@@ -65,6 +65,11 @@ def rules_dir() -> Path:
                         _dst.write_bytes(f.read_bytes())
     return p
 
+def pocs_dir() -> Path:
+    p = _get_data_home() / "pocs"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
 def settings_file() -> Path:
     p = _get_data_home() / "settings.json"
     return p

@@ -23,4 +23,5 @@ from .people_detail import PeopleDetailView
 from .services import ServicesView
 from .dictionarys import DictionarysView
 from .rules_view import RulesView
+from .pocs import PocsView
 from .file_detail import FileDetailView

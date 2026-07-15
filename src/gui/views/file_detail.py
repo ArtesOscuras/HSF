@@ -1,9 +1,9 @@
 import os
 import re
+import subprocess
 import threading
 import tkinter as tk
 from src.gui import fonts
-from .base import BaseView
 
 MUTED = "#888888"
 BRIGHT = "#ffffff"
@@ -11,124 +11,499 @@ BG = "#111111"
 FG = "#ffffff"
 SUCCESS = "#00cc66"
 ERR_COLOR = "#f44747"
+LINE_NUM_FG = "#555555"
+BASE_BG = "#000000"
 
 
-class FileDetailView(BaseView):
-    name = "file_detail"
-    description = "File content preview"
+class FileDetailView:
+    pass
 
-    def __init__(self, parent, file_path, title, **kwargs):
+
+class PocDialog(tk.Toplevel):
+    MAX_MATCHES = 200
+
+    def __init__(self, parent, file_path, title="POC"):
+        super().__init__(parent)
         self._file_path = file_path
-        self._detail_title = title
-        super().__init__(parent, **kwargs)
+        self._proc = None
+        self._dirty = False
+        self._lines = []
+        self._total = 0
+        self._matches = []
+        self._match_index = -1
+        self._last_query = ""
+        self._last_regex = False
 
-    def _build_ui(self):
+        self.title(title)
+        self.geometry("1100x800")
+        self.minsize(800, 600)
+        self.configure(bg=BG)
+
+        self.transient(parent)
+        self.wait_visibility()
+        self.grab_set()
+
         self.columnconfigure(0, weight=1)
         self.rowconfigure(0, weight=0)
-        self.rowconfigure(1, weight=1)
-        self.rowconfigure(2, weight=0)
+        self.rowconfigure(1, weight=0)
+        self.rowconfigure(2, weight=1)
+        self.rowconfigure(3, weight=0)
 
-        header = tk.Frame(self, bg="#000000")
-        header.grid(row=0, column=0, sticky="ew", pady=(15, 5))
+        self._build_search_bar()
+        self._build_editor_with_output()
+        self._build_footer()
 
-        self._title_label = tk.Label(
-            header, text=self._detail_title,
-            font=fonts.view_font_bold(22), fg=BRIGHT, bg="#000000",
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.after(50, self._load_file)
+
+        self.bind("<Control-f>", lambda e: self._focus_search())
+        self.bind("<Control-s>", lambda e: self._save())
+        self.bind("<Escape>", lambda e: self._focus_editor())
+        self.bind("<F5>", lambda e: self._exec_poc())
+
+    def _build_search_bar(self):
+        top = tk.Frame(self, bg=BG)
+        top.grid(row=0, column=0, sticky="ew", padx=15, pady=(15, 0))
+
+        search_frame = tk.Frame(top, bg=BG)
+        search_frame.pack(fill=tk.X, pady=(0, 4))
+        search_frame.columnconfigure(0, weight=1)
+
+        self._search_var = tk.StringVar()
+        self._search_var.trace_add("write", lambda *a: self._on_query_changed())
+        self._search_entry = tk.Entry(
+            search_frame, textvariable=self._search_var,
+            bg="#000000", fg=FG, insertbackground=FG,
+            font=fonts.view_font(13), relief=tk.FLAT, borderwidth=0,
+            highlightbackground="#333333", highlightthickness=1,
         )
-        self._title_label.pack(anchor="center")
-        self._title_label.bind("<Button-1>",
-                               lambda e: self._on_back_click())
-        self._title_label.bind("<Enter>",
-                               lambda e: self._title_label.config(
-                                   font=fonts.view_font_bold_under(22)))
-        self._title_label.bind("<Leave>",
-                               lambda e: self._title_label.config(
-                                   font=fonts.view_font_bold(22)))
+        self._search_entry.grid(row=0, column=0, sticky="ew", ipady=4)
+        self._search_entry.bind("<Return>", lambda e: self._find_next())
 
-        text_frame = tk.Frame(self, bg="#000000")
-        text_frame.grid(row=1, column=0, sticky="nsew",
-                        padx=(300, 300), pady=(10, 0))
-        text_frame.columnconfigure(0, weight=1)
-        text_frame.rowconfigure(0, weight=1)
+        self._regex_var = tk.BooleanVar(value=False)
+        self._regex_var.trace_add("write", lambda *a: self._on_query_changed())
+        regex_cb = tk.Checkbutton(
+            search_frame, text="Regex", variable=self._regex_var,
+            bg=BG, fg=MUTED, selectcolor="#333333",
+            font=fonts.view_font(11), activebackground=BG,
+            activeforeground=FG,
+        )
+        regex_cb.grid(row=0, column=1, padx=(10, 4))
 
-        self.text = tk.Text(
-            text_frame, bg="#000000", fg=BRIGHT,
+        clear_q = tk.Label(search_frame, text="\u00d7", fg=MUTED, bg=BG,
+                           font=fonts.view_font_bold(16), cursor="")
+        clear_q.grid(row=0, column=2)
+        clear_q.bind("<Button-1>", lambda e: self._search_var.set(""))
+        clear_q.bind("<Enter>", lambda e: clear_q.config(fg=FG))
+        clear_q.bind("<Leave>", lambda e: clear_q.config(fg=MUTED))
+
+        nav_frame = tk.Frame(top, bg=BG)
+        nav_frame.pack(fill=tk.X)
+
+        prev_btn = self._make_btn(nav_frame, "\u25B2  Prev")
+        prev_btn.pack(side=tk.LEFT)
+        prev_btn.bind("<Button-1>", lambda e: self._find_prev())
+
+        next_btn = self._make_btn(nav_frame, "Next  \u25BC")
+        next_btn.pack(side=tk.LEFT, padx=(6, 0))
+        next_btn.bind("<Button-1>", lambda e: self._find_next())
+
+        self._match_label = tk.Label(
+            nav_frame, text="", fg=MUTED, bg=BG, font=fonts.view_font(11))
+        self._match_label.pack(side=tk.LEFT, padx=(12, 0))
+
+        line_frame = tk.Frame(nav_frame, bg=BG)
+        line_frame.pack(side=tk.RIGHT)
+        tk.Label(line_frame, text="Line:", fg=MUTED, bg=BG,
+                 font=fonts.view_font(11)).pack(side=tk.LEFT)
+        self._line_var = tk.StringVar()
+        self._line_entry = tk.Entry(
+            line_frame, textvariable=self._line_var,
+            bg="#000000", fg=FG, insertbackground=FG,
+            font=fonts.view_font(11), relief=tk.FLAT, borderwidth=0,
+            highlightbackground="#333333", highlightthickness=1, width=6)
+        self._line_entry.pack(side=tk.LEFT, padx=(4, 0), ipady=2)
+        self._line_entry.bind("<Return>", lambda e: self._go_line())
+        go_btn = self._make_btn(line_frame, "Go")
+        go_btn.pack(side=tk.LEFT, padx=(4, 0))
+        go_btn.bind("<Button-1>", lambda e: self._go_line())
+
+    def _build_editor_with_output(self):
+        info_frame = tk.Frame(self, bg=BG)
+        info_frame.grid(row=1, column=0, sticky="ew", padx=15, pady=(6, 0))
+
+        self._info_label = tk.Label(
+            info_frame, text="", fg=MUTED, bg=BG,
+            font=fonts.view_font(10))
+        self._info_label.pack(side=tk.LEFT)
+
+        tk.Label(info_frame, text="Ctrl+F Search  |  Ctrl+S Save  |  F5 Execute",
+                 fg=MUTED, bg=BG, font=fonts.view_font(10)).pack(side=tk.RIGHT)
+
+        self._pane = tk.PanedWindow(
+            self, orient=tk.VERTICAL,
+            bg=BG, sashwidth=6, sashrelief=tk.RAISED,
+            sashpad=0, borderwidth=0)
+        self._pane.grid(row=2, column=0, sticky="nsew", padx=15, pady=4)
+
+        editor_frame = tk.Frame(self._pane, bg=BASE_BG)
+        editor_frame.columnconfigure(1, weight=1)
+        editor_frame.rowconfigure(0, weight=1)
+
+        self._line_nums = tk.Text(
+            editor_frame, bg=BASE_BG, fg=LINE_NUM_FG,
             font=fonts.view_font(13), borderwidth=0,
             highlightthickness=0, state=tk.DISABLED,
-            cursor="", wrap=tk.NONE,
+            cursor="", wrap=tk.NONE, width=5,
+            padx=8, pady=2, takefocus=False,
         )
-        self.text.tag_configure("muted", foreground=MUTED)
-        self.text.tag_configure("highlight", background="#444400",
-                                foreground=BRIGHT)
-        self.text.grid(row=0, column=0, sticky="nsew")
+        self._line_nums.grid(row=0, column=0, sticky="ns")
 
-        scrollbar = tk.Scrollbar(text_frame, orient=tk.VERTICAL,
-                                 command=self.text.yview)
-        scrollbar.configure(bg="#333333", troughcolor="#1a1a1a",
-                            activebackground="#555555", width=10,
-                            borderwidth=0, highlightthickness=0,
-                            elementborderwidth=0)
-        scrollbar.grid(row=0, column=1, sticky="ns")
-        self.text.configure(yscrollcommand=scrollbar.set)
-
-        btn_frame = tk.Frame(self, bg="#000000")
-        btn_frame.grid(row=2, column=0, pady=(15, 15))
-
-        search_btn = tk.Label(
-            btn_frame, text="  Search  ", bg="#222222", fg=BRIGHT,
-            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
-            padx=15, pady=6,
+        self._editor = tk.Text(
+            editor_frame, bg=BASE_BG, fg=BRIGHT,
+            font=fonts.view_font(13), borderwidth=0,
+            highlightthickness=0,
+            insertbackground=BRIGHT,
+            wrap=tk.NONE, undo=True, maxundo=100,
+            padx=8, pady=2,
         )
-        search_btn.pack(side=tk.LEFT, padx=(0, 10))
-        search_btn.bind("<Button-1>", lambda e: self._open_search())
-        search_btn.bind("<Enter>", lambda e: search_btn.config(bg="#333333"))
-        search_btn.bind("<Leave>", lambda e: search_btn.config(bg="#222222"))
+        self._editor.tag_configure("highlight", background="#444400",
+                                   foreground=BRIGHT)
+        self._editor.grid(row=0, column=1, sticky="nsew")
 
-        back_btn = tk.Label(
-            btn_frame, text="  \u2190 Back  ", bg="#222222", fg=BRIGHT,
-            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
-            padx=15, pady=6,
+        self._scrollbar = tk.Scrollbar(
+            editor_frame, orient=tk.VERTICAL,
+            command=self._on_scrollbar_move)
+        self._scrollbar.configure(
+            bg="#333333", troughcolor="#1a1a1a",
+            activebackground="#555555", width=10,
+            borderwidth=0, highlightthickness=0,
+            elementborderwidth=0)
+        self._scrollbar.grid(row=0, column=2, sticky="ns")
+
+        self._editor.configure(yscrollcommand=self._on_editor_scroll)
+
+        self._editor.bind("<Key>", lambda e: self.after(10, self._update_line_nums))
+        self._editor.bind("<<Modified>>", lambda e: self._on_modified())
+
+        self._pane.add(editor_frame)
+        self._pane.paneconfigure(editor_frame, stretch="always")
+
+        out_frame = tk.Frame(self._pane, bg=BG)
+        out_frame.columnconfigure(0, weight=1)
+        out_frame.rowconfigure(0, weight=0)
+        out_frame.rowconfigure(1, weight=1)
+
+        self._out_label = tk.Label(
+            out_frame, text="Output", fg=MUTED, bg=BG,
+            font=fonts.view_font_bold(11), anchor="w")
+        self._out_label.grid(row=0, column=0, sticky="w")
+
+        self._out_text = tk.Text(
+            out_frame, bg=BASE_BG, fg=BRIGHT,
+            font=fonts.view_font(12), borderwidth=0,
+            highlightthickness=0, state=tk.DISABLED,
+            cursor="", wrap=tk.WORD,
+            padx=8, pady=4,
         )
-        back_btn.pack(side=tk.RIGHT, padx=(10, 0))
-        back_btn.bind("<Button-1>", lambda e: self._on_back_click())
-        back_btn.bind("<Enter>", lambda e: back_btn.config(bg="#333333"))
-        back_btn.bind("<Leave>", lambda e: back_btn.config(bg="#222222"))
+        self._out_text.tag_configure("muted", foreground=MUTED)
+        self._out_text.tag_configure("error", foreground=ERR_COLOR)
+        self._out_text.tag_configure("success", foreground=SUCCESS)
+        self._out_text.grid(row=1, column=0, sticky="nsew")
 
-        self._load_preview()
+        self._pane.add(out_frame)
+        self._pane.paneconfigure(out_frame, stretch="always", height=120)
 
-    def _load_preview(self):
-        self.text.configure(state=tk.NORMAL)
-        self.text.delete("1.0", tk.END)
+        self._append_output("Press F5 or click Execute to run this POC.\n", "muted")
+
+    def _build_footer(self):
+        footer = tk.Frame(self, bg=BG)
+        footer.grid(row=5, column=0, sticky="ew", padx=15, pady=(8, 15))
+
+        self._exec_btn = self._make_btn(footer, "  Execute  ")
+        self._exec_btn.configure(fg=SUCCESS)
+        self._exec_btn.pack(side=tk.LEFT)
+        self._exec_btn.bind("<Button-1>", lambda e: self._exec_poc())
+
+        self._stop_btn = self._make_btn(footer, "  Stop  ")
+        self._stop_btn.configure(fg=ERR_COLOR)
+        self._stop_btn.bind("<Button-1>", lambda e: self._stop_poc())
+
+        self._save_btn = self._make_btn(footer, "  Save  ")
+        self._save_btn.pack(side=tk.LEFT, padx=(6, 0))
+        self._save_btn.bind("<Button-1>", lambda e: self._save())
+
+        close_btn = self._make_btn(footer, "  Close  ")
+        close_btn.pack(side=tk.RIGHT)
+        close_btn.bind("<Button-1>", lambda e: self._on_close())
+
+    def _make_btn(self, parent, text):
+        btn = tk.Label(parent, text=text, bg="#222222", fg=FG,
+                       relief=tk.RAISED, bd=1, padx=14, pady=6,
+                       font=fonts.view_font(10), cursor="")
+        btn.bind("<Enter>", lambda e: btn.config(bg="#333333"))
+        btn.bind("<Leave>", lambda e: btn.config(bg="#222222"))
+        return btn
+
+    # ─── File I/O ──────────────────────────────────────────
+
+    def _load_file(self):
+        def _run():
+            try:
+                with open(self._file_path, "r", encoding="utf-8",
+                          errors="replace") as f:
+                    self._lines = f.read().splitlines()
+            except Exception:
+                self._lines = ["# Could not read file."]
+            self.after(0, self._on_loaded)
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _on_loaded(self):
+        self._total = len(self._lines)
+        self._editor.delete("1.0", tk.END)
+        for line in self._lines:
+            self._editor.insert(tk.END, line + "\n")
+        self._editor.edit_reset()
+        self._editor.edit_modified(False)
+        self._dirty = False
+        self._update_line_nums()
+        self._update_info()
+        self._editor.focus_set()
+
+    def _save(self):
+        content = self._editor.get("1.0", "end-1c")
         try:
-            with open(self._file_path, "r", encoding="utf-8",
-                      errors="replace") as f:
-                all_lines = f.readlines()
-            total = len(all_lines)
-            shown = min(total, 100)
-            for i in range(shown):
-                self.text.insert(tk.END, all_lines[i].rstrip("\n").rstrip("\r") + "\n")
-            if total > 100:
-                self.text.insert(tk.END, "\n...", "muted")
-            size = os.path.getsize(self._file_path)
-            if size >= 1024 * 1024:
-                size_str = f"{size / (1024 * 1024):.1f} MB"
-            elif size >= 1024:
-                size_str = f"{size / 1024:.0f} KB"
-            else:
-                size_str = f"{size} B"
-            self.text.insert(tk.END, f"\n\n({size_str}, {total} lines total)", "muted")
-        except Exception:
-            self.text.insert(tk.END, "Could not read file.", "muted")
-        self.text.configure(state=tk.DISABLED)
+            with open(self._file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+        except (PermissionError, OSError) as e:
+            self._append_output(f"Error saving: {e}\n", "error")
+            return
+        self._lines = content.splitlines()
+        self._total = len(self._lines)
+        self._editor.edit_modified(False)
+        self._dirty = False
+        self._update_info()
+        self._on_query_changed()
 
-    def _open_search(self):
-        _SearchDialog(self)
+    def _on_modified(self):
+        if self._editor.edit_modified():
+            self._dirty = True
+            self._update_info()
+            self._editor.edit_modified(False)
 
-    def on_activate(self):
-        pass
+    def _on_close(self):
+        if self._dirty:
+            self._save()
+        if self._proc and self._proc.poll() is None:
+            self._proc.terminate()
+        self.destroy()
 
-    def on_deactivate(self):
-        pass
+    def _update_info(self):
+        size = os.path.getsize(self._file_path) if os.path.isfile(self._file_path) else 0
+        if size >= 1024 * 1024:
+            size_str = f"{size / (1024 * 1024):.1f} MB"
+        elif size >= 1024:
+            size_str = f"{size / 1024:.0f} KB"
+        else:
+            size_str = f"{size} B"
+        dirty = " \u2022" if self._dirty else ""
+        self._info_label.config(
+            text=f"{os.path.basename(self._file_path)}{dirty}  |  "
+                 f"{self._total} lines  |  {size_str}")
+
+    # ─── Line numbers ──────────────────────────────────────
+
+    def _update_line_nums(self):
+        content = self._editor.get("1.0", "end-1c")
+        self._lines = content.splitlines()
+        self._total = len(self._lines)
+        num_pad = max(1, len(str(self._total)))
+        ln_fmt = f"{{:>{num_pad}}} "
+        editor_top = self._editor.yview()[0]
+        self._line_nums.configure(state=tk.NORMAL)
+        self._line_nums.delete("1.0", tk.END)
+        for i in range(self._total):
+            self._line_nums.insert(tk.END, ln_fmt.format(i + 1) + "\n")
+        self._line_nums.configure(state=tk.DISABLED)
+        self._line_nums.yview_moveto(editor_top)
+
+    def _on_editor_scroll(self, *args):
+        self._line_nums.yview_moveto(float(args[0]) if args else 0.0)
+        self._scrollbar.set(*args)
+
+    def _on_scrollbar_move(self, *args):
+        self._editor.yview(*args)
+        self._line_nums.yview(*args)
+
+    # ─── Search ────────────────────────────────────────────
+
+    def _focus_search(self):
+        self._search_entry.focus_set()
+        self._search_entry.select_range(0, tk.END)
+
+    def _focus_editor(self):
+        self._editor.focus_set()
+
+    def _on_query_changed(self):
+        self._matches = []
+        self._match_index = -1
+        self._last_query = ""
+        self._last_regex = False
+        self._match_label.config(text="")
+
+    def _ensure_fresh(self):
+        query = self._search_var.get().strip()
+        use_regex = self._regex_var.get()
+        if not query:
+            return False
+        if (query != self._last_query or use_regex != self._last_regex
+                or not self._matches):
+            count = self._find_all_matches(query)
+            if count == 0:
+                self._match_label.config(text="No matches", fg=ERR_COLOR)
+                return False
+            self._match_index = 0
+        return True
+
+    def _find_all_matches(self, query):
+        self._matches = []
+        use_regex = self._regex_var.get()
+        self._last_query = query
+        self._last_regex = use_regex
+        content = self._editor.get("1.0", "end-1c")
+        search_lines = content.split("\n")
+        if use_regex:
+            try:
+                pattern = re.compile(query, re.IGNORECASE)
+            except re.error:
+                self._match_label.config(text="Invalid regex", fg=ERR_COLOR)
+                return 0
+            for line_num in range(len(search_lines)):
+                if len(self._matches) >= self.MAX_MATCHES:
+                    break
+                for m in pattern.finditer(search_lines[line_num]):
+                    if len(self._matches) >= self.MAX_MATCHES:
+                        break
+                    self._matches.append((line_num, m.start(), m.end()))
+        else:
+            qlower = query.lower()
+            for line_num in range(len(search_lines)):
+                if len(self._matches) >= self.MAX_MATCHES:
+                    break
+                line = search_lines[line_num].lower()
+                col = 0
+                while True:
+                    col = line.find(qlower, col)
+                    if col < 0:
+                        break
+                    if len(self._matches) >= self.MAX_MATCHES:
+                        break
+                    self._matches.append((line_num, col, col + len(query)))
+                    col += 1
+        return len(self._matches)
+
+    def _find_next(self):
+        if not self._ensure_fresh():
+            return
+        self._match_index = (self._match_index + 1) % len(self._matches)
+        self._goto_match(self._match_index)
+
+    def _find_prev(self):
+        if not self._ensure_fresh():
+            return
+        self._match_index = (self._match_index - 1) % len(self._matches)
+        self._goto_match(self._match_index)
+
+    def _goto_match(self, index):
+        line_num, col_start, col_end = self._matches[index]
+        pos = f"{line_num + 1}.{col_start}"
+        end_pos = f"{line_num + 1}.{col_end}"
+        self._editor.tag_remove("highlight", "1.0", tk.END)
+        self._editor.tag_add("highlight", pos, end_pos)
+        self._editor.see(pos)
+        self._update_line_nums()
+        count = len(self._matches)
+        self._match_label.config(
+            text=f"{index + 1} of {count}",
+            fg=SUCCESS)
+
+    def _go_line(self):
+        try:
+            n = int(self._line_var.get())
+        except ValueError:
+            return
+        if n < 1 or n > self._total:
+            return
+        self._editor.tag_remove("highlight", "1.0", tk.END)
+        self._editor.see(f"{n}.0")
+        self._editor.mark_set("insert", f"{n}.0")
+        self._update_line_nums()
+        self._match_label.config(text=f"Line {n}", fg=SUCCESS)
+
+    # ─── Execution ─────────────────────────────────────────
+
+    def _exec_poc(self):
+        if self._proc and self._proc.poll() is None:
+            return
+        if self._dirty:
+            self._save()
+        self._append_output("", tag=None)
+        self._append_output("Running...\n", "muted")
+        self._exec_btn.pack_forget()
+        self._stop_btn.pack(side=tk.LEFT, padx=(6, 0))
+        threading.Thread(target=self._run_poc, daemon=True).start()
+
+    def _run_poc(self):
+        try:
+            self._proc = subprocess.Popen(
+                ["python3", self._file_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=os.path.dirname(self._file_path),
+            )
+        except Exception as e:
+            self.after(0, lambda: self._append_output(f"Error: {e}\n", "error"))
+            self.after(0, self._on_done)
+            return
+
+        def read_stream(stream, tag):
+            for line in iter(stream.readline, ""):
+                self.after(0, lambda l=line, t=tag: self._append_output(l, t))
+            stream.close()
+
+        t1 = threading.Thread(target=read_stream,
+                              args=(self._proc.stdout, None), daemon=True)
+        t2 = threading.Thread(target=read_stream,
+                              args=(self._proc.stderr, "error"), daemon=True)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        self._proc.wait()
+        self.after(0, self._on_done)
+
+    def _on_done(self):
+        rc = self._proc.returncode if self._proc else -1
+        tag = "success" if rc == 0 else "error"
+        self._append_output(f"\nExit code: {rc}\n", tag)
+        self._stop_btn.pack_forget()
+        self._exec_btn.pack(side=tk.LEFT)
+        self._proc = None
+
+    def _stop_poc(self):
+        if self._proc and self._proc.poll() is None:
+            self._proc.terminate()
+            self._append_output("\nStopped by user.\n", "error")
+
+    def _append_output(self, text, tag=None):
+        self._out_text.configure(state=tk.NORMAL)
+        if tag:
+            self._out_text.insert(tk.END, text, tag)
+        else:
+            self._out_text.insert(tk.END, text)
+        self._out_text.see(tk.END)
+        self._out_text.configure(state=tk.DISABLED)
 
 
 class _SearchDialog(tk.Toplevel):
@@ -138,7 +513,7 @@ class _SearchDialog(tk.Toplevel):
     def __init__(self, parent, file_path=None, title=None):
         super().__init__(parent)
         self._parent = parent
-        self._file_path = file_path or parent._file_path
+        self._file_path = file_path
         self._lines = []
         self._shown_start = 0
         self._shown_end = 0
@@ -464,5 +839,8 @@ class _SearchDialog(tk.Toplevel):
         self._match_label.config(text="Line %d" % n, fg=SUCCESS)
 
 
-def open_file_search(parent, file_path, title="Search"):
+def open_file_search(parent, file_path, title="Search", file_type=None):
+    if file_type == "poc":
+        return PocDialog(parent, file_path=file_path, title=title)
     return _SearchDialog(parent, file_path=file_path, title=title)
+

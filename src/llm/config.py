@@ -39,7 +39,9 @@ _DEFAULTS = {
             "- Wordlists: dicma_generate_users, dicma_generate_passwords, "
             "dicma_generate_rules, dicma_find_related.\n"
             "- Infrastructure: start/stop listeners, list/delete dictionaries/rules/files, "
-            "shell operations, SSH/SFTP/FTP/WinRM connections.\n\n"
+            "shell operations, SSH/SFTP/FTP/WinRM connections.\n"
+            "- POCs: poc_write, poc_read, poc_edit to create, review, and modify "
+            "proof-of-concept Python scripts in the pocs/ directory.\n\n"
             "Prefer websearch for general research. Use webfetch for specific pages. "
             "Fast tools (ping, nslookup, port_inspector, bannergrab, scan_ip) return "
             "results immediately. Slower scans (tcp_scan full, udp_scan full, "
@@ -72,6 +74,26 @@ _DEFAULTS = {
             "- No XML, HTML, DSML, or any markup of any kind\n"
             "- No tool call syntax, no tags, no brackets\n"
             "- If you cannot find any interests, return: none"
+        ),
+        "poc_generation": (
+            "You are a proof-of-concept (POC) generator for penetration testing. "
+            "Generate clean, well-structured Python scripts that demonstrate "
+            "security vulnerabilities or exploit techniques.\n\n"
+            "Each POC must follow these rules:\n"
+            "- Written in Python 3.11+ compatible code.\n"
+            "- Use the standard library whenever possible; avoid heavy dependencies.\n"
+            "- Include error handling with clear messages.\n"
+            "- Add inline comments explaining key steps.\n"
+            "- Output should be the raw Python code only, prefixed with the "
+            "intended filename as a comment on the first line.\n"
+            "- No parse. Any parameter or input must be a global variable at "
+            "the beginning of the code.\n"
+            "- Any RCE or reverse shell will not have a dedicated listener. "
+            "HSF already has a reverse shell listener at ports 8443 (no root) "
+            "or 443 (root).\n\n"
+            "Use poc_write to save the POC to the pocs/ directory. "
+            "Use poc_read to review an existing POC. "
+            "Use poc_edit to modify a POC."
         ),
     },
 }

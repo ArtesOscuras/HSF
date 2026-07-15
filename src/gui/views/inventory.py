@@ -126,6 +126,9 @@ class InventoryView(BaseView):
             {"name": "Rules", "action": "rules_view",
              "desc": "Hashcat rules",
              "icon": "rules.png", "enabled": True},
+            {"name": "Pocs", "action": "pocs",
+             "desc": "Proof of Concept scripts",
+             "icon": "poc.png", "enabled": True},
         ]
 
         self._font18 = fonts.view_font(18)

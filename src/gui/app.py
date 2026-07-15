@@ -12,7 +12,7 @@ from src.network_iface import interfaces, ifaddresses, AF_INET
 from . import fonts
 from .console import Console
 from .visualizer import Visualizer
-from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UsersView, PasswordsView, HashListView, ShellListView, ToolsView, InventoryView, PeopleView, ServicesView, DictionarysView, RulesView
+from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UsersView, PasswordsView, HashListView, ShellListView, ToolsView, InventoryView, PeopleView, ServicesView, DictionarysView, RulesView, PocsView
 from .dialogs import ScanDialog
 from src import settings as hsf_settings
 from src.machines import store, start_autosave as start_machines_autosave, stop_autosave as stop_machines_autosave
@@ -750,10 +750,14 @@ class App(tk.Tk):
         rules_view._on_item_click = self._open_rule_view
         self.visualizer.register_view("rules_view", rules_view)
 
+        pocs_view = PocsView(self.visualizer)
+        pocs_view._on_item_click = self._open_poc_view
+        self.visualizer.register_view("pocs", pocs_view)
+
     def _register_commands(self):
         self.console.set_mode_cycle_callback(self._cycle_mode)
         self.console.register_command("view", self._cmd_view, "Switch or list views")
-        self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "people", "evidence", "services", "dictionary", "rule"])
+        self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "people", "evidence", "services", "dictionary", "rule", "poc"])
         self.console.register_command("use", self._cmd_use, "Use a tool")
         self.console.set_subcommands("use", ["scanner", "port-inspector", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "bannergrab", "whatweb", "bruteforce", "hashcat", "dicma"])
         self.console.register_command("connect", self._cmd_connect, "Connect via FTP/SFTP/SSH/WinRM")
@@ -763,7 +767,7 @@ class App(tk.Tk):
         self.console.register_command("stop", self._cmd_stop, "Stop listeners")
         self.console.set_subcommands("stop", ["shells-listener", "mdns-listener", "scanner", "bruteforce", "fuzzer", "webrecorder", "tcpscan", "udpscan", "whatweb", "port-inspector", "bannergrab", "hashcat"])
         self.console.register_command("delete", self._cmd_delete, "Delete stored data")
-        self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell", "people", "dictionary", "rule"])
+        self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell", "people", "dictionary", "rule", "poc"])
         self.console.register_command("add", self._cmd_add, "Add to inventory")
         self.console.set_subcommands("add", ["machine", "domain", "credential", "user", "password", "hash", "people", "dictionary", "rule"])
         self.console.register_command("settings", self._cmd_settings, "Open settings dialog")
@@ -785,6 +789,7 @@ class App(tk.Tk):
         self.console.set_arg2_provider("delete", "people", self._autocomplete_people)
         self.console.set_arg2_provider("delete", "dictionary", self._autocomplete_delete_dictionary)
         self.console.set_arg2_provider("delete", "rule", self._autocomplete_delete_rules)
+        self.console.set_arg2_provider("delete", "poc", self._autocomplete_delete_pocs)
 
         self.console.set_arg2_provider("view", "machine", self._autocomplete_store_ip_noall)
         self.console.set_arg2_provider("view", "domain", self._autocomplete_domain_only)
@@ -796,6 +801,7 @@ class App(tk.Tk):
         self.console.set_arg2_provider("view", "people", self._autocomplete_people_noall)
         self.console.set_arg2_provider("view", "dictionary", self._autocomplete_dictionary_noall)
         self.console.set_arg2_provider("view", "rule", self._autocomplete_rules_noall)
+        self.console.set_arg2_provider("view", "poc", self._autocomplete_pocs_noall)
 
         self.console.set_arg2_provider("connect", "ftp", self._autocomplete_store_ip_noall)
         self.console.set_arg2_provider("connect", "sftp", self._autocomplete_store_ip_noall)
@@ -999,6 +1005,30 @@ class App(tk.Tk):
         try:
             for fname in sorted(os.listdir(str(rules_dir()))):
                 if os.path.isfile(os.path.join(str(rules_dir()), fname)):
+                    results.append((fname, fname))
+        except OSError:
+            pass
+        return results
+
+    @staticmethod
+    def _autocomplete_delete_pocs(prefix):
+        from src.hsf_paths import pocs_dir
+        results = ["all"]
+        try:
+            for fname in sorted(os.listdir(str(pocs_dir()))):
+                if os.path.isfile(os.path.join(str(pocs_dir()), fname)):
+                    results.append((fname, fname))
+        except OSError:
+            pass
+        return results
+
+    @staticmethod
+    def _autocomplete_pocs_noall(prefix):
+        from src.hsf_paths import pocs_dir
+        results = []
+        try:
+            for fname in sorted(os.listdir(str(pocs_dir()))):
+                if os.path.isfile(os.path.join(str(pocs_dir()), fname)):
                     results.append((fname, fname))
         except OSError:
             pass
@@ -1458,6 +1488,11 @@ class App(tk.Tk):
                 self._cmd_view_file(rest, "rule")
             else:
                 self.visualizer.activate_view("rules_view")
+        elif sub == "poc":
+            if rest:
+                self._cmd_view_file(rest, "poc")
+            else:
+                self.visualizer.activate_view("pocs")
         elif sub == "people":
             if rest:
                 self._cmd_view_people(rest)
@@ -1474,6 +1509,10 @@ class App(tk.Tk):
             from src.hsf_paths import lst_dir
             base = str(lst_dir())
             title = f"Dictionary \u2014 {fname}"
+        elif file_type == "poc":
+            from src.hsf_paths import pocs_dir
+            base = str(pocs_dir())
+            title = f"POC \u2014 {fname}"
         else:
             from src.hsf_paths import rules_dir
             base = str(rules_dir())
@@ -1483,7 +1522,7 @@ class App(tk.Tk):
             self.console.warning(f"File not found: {fname}")
             return
         from .views.file_detail import open_file_search
-        open_file_search(self, path, title)
+        open_file_search(self, path, title, file_type=file_type)
 
     def _resolve_target(self, target):
         if re.match(r"^\d+\.\d+\.\d+\.\d+$", target):
@@ -2568,6 +2607,14 @@ class App(tk.Tk):
         if not os.path.isfile(path):
             return
         open_file_search(self, path, f"Rule \u2014 {fname}")
+
+    def _open_poc_view(self, fname):
+        from src.hsf_paths import pocs_dir
+        from .views.file_detail import open_file_search
+        path = os.path.join(str(pocs_dir()), fname)
+        if not os.path.isfile(path):
+            return
+        open_file_search(self, path, f"POC \u2014 {fname}", file_type="poc")
 
     def _open_user_view(self, username):
         view_name = f"user_{username}"
@@ -4108,7 +4155,7 @@ class App(tk.Tk):
             parts.append(f"\nShell sessions ({len(sessions)}):")
             for s in sessions[:10]:
                 parts.append(f"  {s.get('type','?')} #{s.get('id','?')}")
-        from src.hsf_paths import lst_dir, rules_dir
+        from src.hsf_paths import lst_dir, rules_dir, pocs_dir
         lst = str(lst_dir())
         if os.path.isdir(lst):
             lst_files = sorted(f for f in os.listdir(lst) if os.path.isfile(os.path.join(lst, f)))
@@ -4122,6 +4169,13 @@ class App(tk.Tk):
             if rule_files:
                 parts.append(f"\nHashcat rules ({len(rule_files)}):")
                 for f in rule_files[:15]:
+                    parts.append(f"  {f}")
+        pocs_d = str(pocs_dir())
+        if os.path.isdir(pocs_d):
+            poc_files = sorted(f for f in os.listdir(pocs_d) if os.path.isfile(os.path.join(pocs_d, f)))
+            if poc_files:
+                parts.append(f"\nPOCs ({len(poc_files)}):")
+                for f in poc_files[:15]:
                     parts.append(f"  {f}")
         return "\n".join(parts)
 
@@ -4844,6 +4898,8 @@ class App(tk.Tk):
             self._cmd_delete_dictionary(args[1:])
         elif sub == "rule":
             self._cmd_delete_rule(args[1:])
+        elif sub == "poc":
+            self._cmd_delete_poc(args[1:])
         else:
             self.console.error(f"Unknown delete target: {sub}.")
 
@@ -5078,6 +5134,30 @@ class App(tk.Tk):
             self.console.success(f"Rule '{target}' deleted")
         else:
             self.console.warning(f"Rule not found: {target}")
+
+    def _cmd_delete_poc(self, args):
+        if not args:
+            self.console.body("Usage: delete poc <filename|all>")
+            return
+        from src.hsf_paths import pocs_dir
+        import os as _os
+        d = str(pocs_dir())
+        target = args[0]
+        if target == "all":
+            count = 0
+            for f in sorted(_os.listdir(d)):
+                fp = _os.path.join(d, f)
+                if _os.path.isfile(fp):
+                    _os.remove(fp)
+                    count += 1
+            self.console.success(f"{count} POC files deleted")
+            return
+        path = _os.path.join(d, target)
+        if _os.path.isfile(path):
+            _os.remove(path)
+            self.console.success(f"POC '{target}' deleted")
+        else:
+            self.console.warning(f"POC not found: {target}")
 
     def _cmd_delete_password(self, args):
         if not args:
