@@ -76,7 +76,6 @@ class LLMClient:
 
         self._ensure_client()
         m = model or self._model
-        current = list(messages)
         consecutive_xml_errors = 0
 
         while True:
@@ -84,7 +83,7 @@ class LLMClient:
                 return None
             resp = self._client.chat.completions.create(
                 model=m,
-                messages=self._messages(current),
+                messages=self._messages(messages),
                 tools=_TOOLS,
             )
             if hasattr(resp, 'usage') and resp.usage:
@@ -94,7 +93,7 @@ class LLMClient:
                 consecutive_xml_errors = 0
                 if choice.message.content and on_text:
                     on_text(choice.message.content)
-                current.append(choice.message)
+                messages.append(choice.message)
                 for tc in choice.message.tool_calls:
                     args = {}
                     try:
@@ -105,7 +104,7 @@ class LLMClient:
                     result = _execute(tc.function.name, args, tool_context)
                     if on_tool:
                         on_tool(tc.function.name, args, result)
-                    current.append({
+                    messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
                         "content": result,
@@ -119,12 +118,12 @@ class LLMClient:
                     if consecutive_xml_errors >= 5:
                         stream = self._client.chat.completions.create(
                             model=m,
-                            messages=self._messages(current),
+                            messages=self._messages(messages),
                             stream=True,
                         )
                         return stream
-                    current.append(choice.message)
-                    current.append({
+                    messages.append(choice.message)
+                    messages.append({
                         "role": "system",
                         "content": (
                             "INVALID TOOL CALL FORMAT. You used XML tags like "
@@ -137,7 +136,7 @@ class LLMClient:
                 consecutive_xml_errors = 0
                 stream = self._client.chat.completions.create(
                     model=m,
-                    messages=self._messages(current),
+                    messages=self._messages(messages),
                     stream=True,
                 )
                 return stream

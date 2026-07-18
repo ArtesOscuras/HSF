@@ -3894,7 +3894,7 @@ class App(tk.Tk):
         if not self._silent_mode_cycle:
             self.console.info("Left agent mode.")
 
-    def _agent_ask(self, prompt):
+    def _agent_ask(self, prompt, _retry=False):
         import threading, re
         _tool_xml_re = re.compile(r'<[^>]*DSML', re.IGNORECASE)
         def _clean(text):
@@ -3903,8 +3903,11 @@ class App(tk.Tk):
         def _run():
             self.console.start_thinking()
             stop = self._agent_stop_event
-            self._llm_messages.append({"role": "user", "content": prompt})
-            self._llm_messages.append({"role": "user", "content": prompt})
+            if not _retry:
+                msg_before = len(self._llm_messages)
+                self._llm_messages.append({"role": "user", "content": prompt})
+            else:
+                msg_before = len(self._llm_messages)
             succeeded = False
             try:
                 from src.llm import LLMClient
@@ -3966,8 +3969,6 @@ class App(tk.Tk):
                         self.console.after(0, self._update_mode_prompt)
                         succeeded = True
                     else:
-                        self._llm_messages.pop()
-                        self._llm_messages.pop()
                         self._llm_messages.append({"role": "assistant", "content": full})
                         self._llm_messages.append({
                             "role": "system",
@@ -3979,7 +3980,7 @@ class App(tk.Tk):
                             ),
                         })
                         succeeded = True
-                        self.console.after(0, lambda p=prompt: self._agent_ask(p))
+                        self.console.after(0, lambda p=prompt: self._agent_ask(p, _retry=True))
                 else:
                     self._agent_consecutive_xml_errors = 0
                     self._llm_messages.append({"role": "assistant", "content": _clean(full)})
@@ -3994,7 +3995,7 @@ class App(tk.Tk):
                 self.console.stop_thinking()
                 if not succeeded:
                     try:
-                        self._llm_messages.pop()
+                        del self._llm_messages[msg_before:]
                     except (IndexError, AttributeError):
                         pass
         threading.Thread(target=_run, daemon=True).start()
