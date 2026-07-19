@@ -484,12 +484,14 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "webfetch",
-            "description": "Fetch the content of a URL and return it as text or markdown. Use this to read a specific web page.",
+            "description": "Fetch content from a URL and return as text or markdown. Use offset/limit to read large pages progressively (default: first 500 lines).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "url": {"type": "string", "description": "The URL to fetch (http:// or https://)"},
                     "format": {"type": "string", "enum": ["text", "markdown"], "description": "Output format (default: markdown)"},
+                    "offset": {"type": "integer", "description": "1-indexed line number to start reading from (default: 1)"},
+                    "limit": {"type": "integer", "description": "Maximum number of lines to return (default: 500)"},
                 },
                 "required": ["url"],
             },
@@ -1111,9 +1113,11 @@ def _check_machine(args, ctx=None):
         banners = machine_db.load_banners(m.id)
         if banners:
             lines.append(f"  Banners ({len(banners)}):")
-            for port, output, probe in banners:
+            for port, output, probe in banners[:10]:
                 truncated = output[:500] + "..." if len(output) > 500 else output
                 lines.append(f"    Port {port}: {truncated}")
+            if len(banners) > 10:
+                lines.append(f"    ... and {len(banners)-10} more banners")
     except Exception:
         pass
 
@@ -1827,7 +1831,12 @@ def _webfetch(args, ctx=None):
     from src.llm.web import fetch_url
     from urllib.parse import urlparse
     url = args.get("url", "")
-    result = fetch_url(url, format=args.get("format", "markdown"))
+    result = fetch_url(
+        url,
+        format=args.get("format", "markdown"),
+        offset=int(args.get("offset", 1)),
+        limit=int(args.get("limit", 0)) or None,
+    )
     if not result.startswith("Error"):
         try:
             parsed = urlparse(url)

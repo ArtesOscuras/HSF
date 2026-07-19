@@ -4198,13 +4198,16 @@ class App(tk.Tk):
             self._llm_messages[0]["content"] = ctx
             delta = self._build_context_delta(ctx)
             if delta:
+                self._llm_messages[:] = [
+                    m for m in self._llm_messages
+                    if not (isinstance(m, dict) and m.get("_is_delta"))
+                ]
                 self._llm_messages.append({
                     "role": "system", "content": delta, "_is_delta": True})
         else:
             self._llm_messages[0]["content"] = ctx
 
         self._last_ctx_hash = ctx_hash
-        self._last_ctx = ctx
         self._last_ctx = ctx
 
     def _build_context_delta(self, new_ctx):

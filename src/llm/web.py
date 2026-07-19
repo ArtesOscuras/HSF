@@ -70,7 +70,15 @@ def _fetch_raw(url, timeout):
         headers = {"User-Agent": _HSF_UA}
         resp = requests.get(url, headers=headers, timeout=timeout, stream=True, verify=False)
 
-    content_type = resp.headers.get("content-type", "")
+    content_type = resp.headers.get("content-type", "").lower()
+    _text_types = ("text/", "application/json", "application/xml",
+                   "application/javascript", "application/xhtml+xml",
+                   "application/ld+json", "application/rss+xml",
+                   "application/atom+xml")
+    if not any(content_type.startswith(t) for t in _text_types):
+        resp.close()
+        return f"[non-text content skipped: {content_type}]", content_type
+
     chunks = []
     total = 0
     for chunk in resp.iter_content(chunk_size=8192):
@@ -89,7 +97,7 @@ def _fetch_raw(url, timeout):
     return text, content_type
 
 
-def fetch_url(url, format="markdown", timeout=DEFAULT_TIMEOUT):
+def fetch_url(url, format="markdown", timeout=DEFAULT_TIMEOUT, offset=1, limit=None):
     if not url.startswith("http://") and not url.startswith("https://"):
         url = "https://" + url
 
@@ -102,13 +110,23 @@ def fetch_url(url, format="markdown", timeout=DEFAULT_TIMEOUT):
 
     if format == "text":
         if is_html:
-            return _extract_text(content)
-        return content
-
-    if format == "markdown":
+            content = _extract_text(content)
+    elif format == "markdown":
         if is_html:
-            return _html_to_markdown(content)
-        return content
+            content = _html_to_markdown(content)
+    else:
+        pass
+
+    if offset > 1 or limit is not None:
+        lines = content.splitlines(keepends=True)
+        total = len(lines)
+        start = max(0, offset - 1)
+        end = start + limit if limit else total
+        sliced = lines[start:end]
+        shown = len(sliced)
+        shown_end = offset + shown - 1 if shown > 0 else offset
+        header = f"[{total} lines total, showing lines {offset}-{shown_end}]"
+        return header + "\n" + "".join(sliced)
 
     return content
 
