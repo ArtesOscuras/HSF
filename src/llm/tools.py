@@ -702,6 +702,7 @@ TOOLS = [
                     "scheme": {"type": "string", "enum": ["http", "https"], "description": "HTTP or HTTPS (default: http). Ignores self-signed certificates."},
                     "skip_codes": {"type": "array", "items": {"type": "integer"}, "description": "HTTP status codes to skip/ignore (default: [404]). Pass empty array to show all codes."},
                     "hide_size": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2, "description": "Hide responses whose body size (bytes) falls within [min, max] range. Both inclusive."},
+                    "workers": {"type": "integer", "description": "Number of concurrent threads (default: 50). Reduce if server is slow or blocking requests."},
                 },
                 "required": ["method", "target", "wordlist"],
             },
@@ -2242,6 +2243,7 @@ def _fuzz_start(args, ctx=None):
     scheme = args.get("scheme", "http")
     skip_codes = args.get("skip_codes", [404]) or []
     hide_size = args.get("hide_size")
+    workers = int(args.get("workers", 50))
     if hide_size and len(hide_size) == 2:
         hide_size = tuple(hide_size)
     else:
@@ -2322,7 +2324,7 @@ def _fuzz_start(args, ctx=None):
         method=method,
         target_ip=resolved_ip,
         url_template=url_template,
-        workers=50,
+        workers=workers,
         show_codes=show_codes,
         on_found=_on_found,
         scheme=scheme,
