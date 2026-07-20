@@ -66,6 +66,21 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "add_subdomain",
+            "description": "Add a subdomain to an existing domain in the inventory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "domain": {"type": "string", "description": "Parent domain name (e.g. 'example.com')"},
+                    "subdomain": {"type": "string", "description": "Full subdomain (e.g. 'admin.example.com')"},
+                },
+                "required": ["domain", "subdomain"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "check_machine",
             "description": (
                 "Get all known information about a machine in the inventory. "
@@ -1091,6 +1106,17 @@ def _add_domain(args, ctx=None):
     domain = args.get("domain", "")
     domain_db.init_or_update(domain, 0, "", "agent")
     return f"Domain '{domain}' added."
+
+
+@register("add_subdomain")
+def _add_subdomain(args, ctx=None):
+    from src.machines import domain_db
+    domain = args.get("domain", "")
+    subdomain = args.get("subdomain", "")
+    if not domain or not subdomain:
+        return "Missing domain or subdomain."
+    domain_db.save_subdomain(domain, subdomain, "agent")
+    return f"Subdomain '{subdomain}' added to domain '{domain}'."
 
 
 @register("check_machine")

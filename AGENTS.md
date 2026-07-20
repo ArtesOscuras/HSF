@@ -400,7 +400,7 @@ HSF integrates with LLMs via an extensible provider system supporting any OpenAI
 
 ### Agent Tool-Calling (`src/llm/client.py` → `chat_with_tools()`)
 
-The agent mode gives the LLM the ability to call **62 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
+The agent mode gives the LLM the ability to call **63 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
 
 **Tool-calling loop**:
 ...
@@ -423,9 +423,9 @@ def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None,
 
 Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` variable. Each entry follows the `{"type": "function", "function": {...}}` format with `name`, `description`, and `parameters` (JSON Schema).
 
-**62 tools** in seven categories:
+**63 tools** in seven categories:
 
-**Data tools** (22) — query and manipulate inventory, no `tool_context` needed:
+**Data tools** (23) — query and manipulate inventory, no `tool_context` needed:
 
 **Query tools:**
 
@@ -448,6 +448,7 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 | `delete_user` | Delete a user by username |
 | `add_machine` | Add a machine (IP) to network inventory |
 | `add_domain` | Add a domain to inventory |
+| `add_subdomain` | Add a subdomain to an existing domain (`domain`, `subdomain`) |
 | `add_credential` | Add credential (username + password or 32-char NT hash). Auto-detects NT hash vs plaintext; computes NTLM hash for plaintext passwords |
 | `add_hash` | Add hash entry to inventory (`hash_type`, `hash_value`, `hascat_mode` optional) |
 | `delete_hash` | Delete hash by ID |

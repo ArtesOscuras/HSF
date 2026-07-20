@@ -41,7 +41,7 @@ _DEFAULTS = {
             "- Data: check_status (see all machines, domains, and counts), check_machine, "
             "check_domain, check_inventory, check_hash, check_shells, "
             "check_evidences, check_fuzz_results (query inventory); add/delete users, "
-            "machines, domains, credentials, hashes, passwords, people.\n"
+            "machines, domains, subdomains, credentials, hashes, passwords, people.\n"
             "- Network: list_interfaces, scan_interface, scan_ip, stop_scan, "
             "tcp_scan/udp_scan (return common ports immediately then continue full "
             "scan in background — results via check_machine), ping, nslookup, "

@@ -180,6 +180,26 @@ def load_tcp_ports(machine_id):
         return []
 
 
+def load_udp_ports(machine_id):
+    _init_db_dir()
+    path = _get_path(machine_id)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with sqlite3.connect(path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS udp_ports (
+                    port INTEGER,
+                    service TEXT,
+                    discovered_at TEXT
+                )
+            """)
+            rows = conn.execute("SELECT port FROM udp_ports ORDER BY port").fetchall()
+            return [r[0] for r in rows]
+    except (sqlite3.DatabaseError, sqlite3.OperationalError):
+        return []
+
+
 def save_udp_ports(machine_id, ports):
     _init_db_dir()
     path = _get_path(machine_id)
