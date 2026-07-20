@@ -1033,6 +1033,7 @@ TOOLS = [
                     "old_string": {"type": "string", "description": "The exact text to find and replace in the file."},
                     "new_string": {"type": "string", "description": "The replacement text."},
                     "replace_all": {"type": "boolean", "description": "Replace all occurrences instead of just the first (default false)."},
+                    "new_filename": {"type": "string", "description": "Optional new filename to rename the POC to (must end with .py)."},
                 },
                 "required": ["filename", "old_string", "new_string"],
             },
@@ -2781,11 +2782,12 @@ def _poc_edit(args, ctx=None):
     old_string = args.get("old_string", "")
     new_string = args.get("new_string", "")
     replace_all = args.get("replace_all", False)
+    new_name = args.get("new_filename", "").strip() or None
     if not filename:
         return "Missing filename."
-    if old_string == new_string:
+    if old_string == new_string and not new_name:
         return "No changes to apply: old_string and new_string are identical."
-    if not old_string:
+    if not old_string and not new_name:
         return "old_string must not be empty. Use poc_write to create or overwrite a file."
     path = _resolve_poc_path(filename)
     if not path:
@@ -2797,22 +2799,41 @@ def _poc_edit(args, ctx=None):
             content = f.read()
     except (PermissionError, OSError) as e:
         return f"Error reading {filename}: {e}"
-    occurrences = content.count(old_string)
-    if occurrences == 0:
-        return "Could not find old_string in the file. It must match exactly, including whitespace and indentation."
-    if occurrences > 1 and not replace_all:
-        return f"Found {occurrences} exact matches for old_string. Provide more surrounding context to make it unique, or set replace_all to true."
-    if replace_all:
-        new_content = content.replace(old_string, new_string)
+    if old_string and old_string != new_string:
+        occurrences = content.count(old_string)
+        if occurrences == 0:
+            return "Could not find old_string in the file. It must match exactly, including whitespace and indentation."
+        if occurrences > 1 and not replace_all:
+            return f"Found {occurrences} exact matches for old_string. Provide more surrounding context to make it unique, or set replace_all to true."
+        if replace_all:
+            new_content = content.replace(old_string, new_string)
+        else:
+            new_content = content.replace(old_string, new_string, 1)
+        try:
+            with open(path, "w") as f:
+                f.write(new_content)
+        except (PermissionError, OSError) as e:
+            return f"Error writing {filename}: {e}"
+        plural = "s" if occurrences > 1 else ""
+        edit_msg = f": {occurrences} replacement{plural} made"
     else:
-        new_content = content.replace(old_string, new_string, 1)
-    try:
-        with open(path, "w") as f:
-            f.write(new_content)
-    except (PermissionError, OSError) as e:
-        return f"Error writing {filename}: {e}"
-    plural = "s" if occurrences > 1 else ""
-    return f"POC '{filename}' edited: {occurrences} replacement{plural} made."
+        edit_msg = ""
+
+    if new_name:
+        if not new_name.endswith(".py"):
+            return "New filename must end with .py"
+        new_path = _resolve_poc_path(new_name)
+        if not new_path:
+            return f"Invalid new filename: {new_name}"
+        if os.path.exists(new_path):
+            return f"A POC named '{new_name}' already exists."
+        try:
+            os.rename(path, new_path)
+        except (PermissionError, OSError) as e:
+            return f"Error renaming to {new_name}: {e}"
+        return f"POC '{filename}' renamed to '{new_name}'{edit_msg}."
+
+    return f"POC '{filename}' edited{edit_msg}." if edit_msg else f"No changes applied to '{filename}'."
 
 
 @register("poc_exec")

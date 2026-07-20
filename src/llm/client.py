@@ -97,6 +97,8 @@ class LLMClient:
                         pass
             choice = resp.choices[0]
             if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
+                if stop_event and stop_event.is_set():
+                    return None
                 consecutive_xml_errors = 0
                 if choice.message.content and on_text:
                     try:

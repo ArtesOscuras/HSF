@@ -76,6 +76,8 @@ class ShellListener:
                 ip, port = addr
                 _dbg(f"[shell-listener] new connection from {ip}:{port}")
                 session = shell_db.add_session(ip, port, self._port)
+                from src.gui.views.shell_list import enable_default_agent_access
+                enable_default_agent_access(session["id"])
                 shell_db.set_socket(session["id"], conn)
                 t = threading.Thread(target=self._handle_session,
                                      args=(session["id"], conn), daemon=True)

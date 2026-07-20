@@ -105,6 +105,8 @@ class SSHConnectionThread:
 
         session = shell_db.add_session(self._host, self._port, 0)
         self._sid = session["id"]
+        from src.gui.views.shell_list import enable_default_agent_access
+        enable_default_agent_access(session["id"])
         session["type"] = "SSH"
         session["cmd_queue"] = self._queue
         session["ssh_channel"] = channel

@@ -718,6 +718,8 @@ class RemoteAccessDialog(tk.Toplevel):
             session["type"] = "SFTP"
             session["pty_fd"] = master_fd
             session["pid"] = proc.pid
+            from src.gui.views.shell_list import enable_default_agent_access
+            enable_default_agent_access(session["id"])
             _dbg(f"[remote-access] sftp session #{session['id']} pty_fd={master_fd}")
 
             t = threading.Thread(

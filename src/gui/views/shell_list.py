@@ -257,3 +257,9 @@ def toggle_agent_shell(sid):
     else:
         _agent_allowed.add(sid)
         return True
+
+
+def enable_default_agent_access(sid):
+    from src import settings
+    if settings.get("agent_default_shell_access", False):
+        _agent_allowed.add(sid)

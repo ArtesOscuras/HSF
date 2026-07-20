@@ -527,7 +527,7 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 |---|---|
 | `poc_write` | Create or overwrite a `.py` file in the `pocs/` directory (`filename`, `content`). Rejects filenames without `.py` extension. Path-traversal protected via `_resolve_poc_path()`. |
 | `poc_read` | Read a POC file from the `pocs/` directory (`filename`, optional `offset`/`limit`). Returns content with line count header. Maximum 50,000 chars per read. |
-| `poc_edit` | Edit a POC file by exact string replacement (`filename`, `old_string`, `new_string`, optional `replace_all`). If `old_string` is not found, returns an error with instructions. If multiple matches found without `replace_all=true`, returns the count and asks for more context. Path-traversal protected. |
+| `poc_edit` | Edit a POC file by exact string replacement (`filename`, `old_string`, `new_string`, optional `replace_all`, optional `new_filename` to rename the file). If `old_string` is not found, returns an error with instructions. If multiple matches found without `replace_all=true`, returns the count and asks for more context. Path-traversal protected. |
 | `poc_exec` | Execute a POC Python script (`filename`) and return its output. Output truncated to last 5000 chars if too large. Respects the "Agent can execute POCs" safety setting. |
 
 **POC system overview:**

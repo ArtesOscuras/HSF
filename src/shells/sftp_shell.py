@@ -106,6 +106,8 @@ class SFTPConnectionThread:
         session["type"] = "SFTP"
         session["cmd_queue"] = self._queue
         self._sid = session["id"]
+        from src.gui.views.shell_list import enable_default_agent_access
+        enable_default_agent_access(session["id"])
 
         shell_db.append_output(self._sid, f"Connected to {self._host}:{self._port}\n")
         shell_db.append_output(self._sid, f"Logged in as {self._user}\n")
