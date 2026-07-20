@@ -25,6 +25,17 @@ from src.tools.scanner.identifier import identify_device, get_gateway_ip, extrac
 from src.shells import ShellListener, shell_db
 from src import event_bus
 
+import datetime as _datetime
+
+def _ctx_log(msg):
+    try:
+        from src.hsf_paths import logs_dir
+        p = os.path.join(str(logs_dir()), "ctx_debug.log")
+        with open(p, "a") as f:
+            f.write(f"{_datetime.datetime.now().isoformat()} {msg}\n")
+    except Exception:
+        pass
+
 
 class _ReviewDialogManager:
     def __init__(self, parent):
@@ -3831,7 +3842,9 @@ class App(tk.Tk):
         pct = (used * 100) // limit
         if used > 0 and pct == 0:
             pct = 1
-        return min(99, pct)
+        pct = min(99, pct)
+        _ctx_log(f"get_ctx_pct api={api} est={estimated} used={used} limit={limit} pct={pct} msgs={len(self._llm_messages)}")
+        return pct
 
     def _update_mode_prompt(self):
         try:
@@ -3843,7 +3856,9 @@ class App(tk.Tk):
             elif self._consultor_mode:
                 text = f"Consultor ({pct}%)> " if pct is not None else "Consultor> "
                 self.console.prompt_label.config(text=text, fg="#e6b422")
-        except Exception:
+            _ctx_log(f"update_prompt pct={pct} agent={self._agent_mode} consul={self._consultor_mode} ok")
+        except Exception as e:
+            _ctx_log(f"update_prompt ERROR: {e}")
             pass
 
     def _enter_agent_mode(self):
@@ -3911,6 +3926,7 @@ class App(tk.Tk):
             else:
                 msg_before = len(self._llm_messages)
             succeeded = False
+            _ctx_log(f"agent_ask start msgs={len(self._llm_messages)} retry={_retry} prompt_len={len(prompt)}")
             try:
                 from src.llm import LLMClient
                 client = LLMClient(purpose="agent")
@@ -3919,7 +3935,7 @@ class App(tk.Tk):
                     if stop is not None and stop.is_set():
                         return
                     display = result
-                    if name in ("check_machine", "check_status"):
+                    if name in ("check_machine", "check_status", "check_inventory", "check_domain"):
                         display = result.split("\n")[0] + "..."
                     elif name == "webfetch":
                         display = f"fetched {len(result)} chars"
@@ -3945,6 +3961,7 @@ class App(tk.Tk):
                     self.console.after(0, lambda: self.console.warning("Agent stopped."))
                     return
                 self.console.after(0, lambda: setattr(self, '_total_api_tokens', client.last_prompt_tokens))
+                _ctx_log(f"agent_ask tokens={client.last_prompt_tokens} msgs={len(self._llm_messages)} after_stream")
                 if stream is None:
                     self.console.after(0, lambda: self.console.info("  (no response)"))
                     return
@@ -3994,7 +4011,9 @@ class App(tk.Tk):
                     self.console.after(0, lambda: self.console.info("---"))
                     self.console.after(0, self._update_mode_prompt)
                     succeeded = True
+                    _ctx_log(f"agent_ask success msgs={len(self._llm_messages)} pct={self._get_context_percentage()}")
             except Exception as e:
+                _ctx_log(f"agent_ask ERROR: {e}")
                 if stop is not None and not stop.is_set():
                     try:
                         self.console.after(0, lambda m=str(e): self.console.error(f"Agent error: {m}"))
@@ -4078,6 +4097,7 @@ class App(tk.Tk):
         self._llm_messages.insert(0, {
             "role": "system", "content": ctx, "_is_context": True})
         self._context_injected = True
+        _ctx_log(f"inject_context len={len(ctx)} msgs={len(self._llm_messages)}")
 
     def _cmd_exit(self, args):
         self.destroy()
