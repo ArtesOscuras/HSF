@@ -77,6 +77,7 @@ class LLMClient:
         self._ensure_client()
         m = model or self._model
         consecutive_xml_errors = 0
+        self._safe_len = len(messages) - 1
 
         while True:
             if stop_event and stop_event.is_set():
@@ -88,6 +89,12 @@ class LLMClient:
             )
             if hasattr(resp, 'usage') and resp.usage:
                 self.last_prompt_tokens = resp.usage.prompt_tokens
+                if tool_context:
+                    tool_context._total_api_tokens = resp.usage.prompt_tokens
+                    try:
+                        tool_context.after(0, tool_context._update_mode_prompt)
+                    except RuntimeError:
+                        pass
             choice = resp.choices[0]
             if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
                 consecutive_xml_errors = 0
@@ -112,6 +119,7 @@ class LLMClient:
                         "tool_call_id": tc.id,
                         "content": result,
                     })
+                self._safe_len = len(messages)
                 continue
             if choice.message.content:
                 if _XML_TOOL_PATTERN.search(choice.message.content):

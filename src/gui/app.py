@@ -4026,9 +4026,10 @@ class App(tk.Tk):
                     pass
             finally:
                 self.console.stop_thinking()
-                if not succeeded:
+                if not succeeded and not (stop is not None and stop.is_set()):
                     try:
-                        del self._llm_messages[msg_before:]
+                        safe = getattr(client, '_safe_len', msg_before)
+                        del self._llm_messages[safe:]
                     except (IndexError, AttributeError):
                         pass
         threading.Thread(target=_run, daemon=True).start()
