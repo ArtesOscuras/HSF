@@ -29,8 +29,9 @@ import datetime as _datetime
 
 def _ctx_log(msg):
     try:
-        from src.hsf_paths import logs_dir
-        p = os.path.join(str(logs_dir()), "ctx_debug.log")
+        import os as _os
+        p = _os.path.expanduser("~/.local/share/hsf/log/ctx_debug.log")
+        _os.makedirs(_os.path.dirname(p), exist_ok=True)
         with open(p, "a") as f:
             f.write(f"{_datetime.datetime.now().isoformat()} {msg}\n")
     except Exception:
