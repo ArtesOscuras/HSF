@@ -17,12 +17,13 @@ _ssl_context.verify_mode = ssl.CERT_NONE
 
 
 class FuzzEngine:
-    def __init__(self, target, wordlist_path, method, target_ip=None, on_result=None, workers=None, on_progress=None, on_found=None, on_done=None, url_template=None, show_codes=None, hide_size_range=None):
+    def __init__(self, target, wordlist_path, method, target_ip=None, on_result=None, workers=None, on_progress=None, on_found=None, on_done=None, url_template=None, show_codes=None, hide_size_range=None, scheme="http"):
         self._target = target
         self._wordlist_path = wordlist_path
         self._method = method
         self._target_ip = target_ip
         self._url_template = url_template
+        self._scheme = scheme
         self._show_codes = show_codes if show_codes is not None else SHOW_CODES
         self._hide_size_range = hide_size_range if hide_size_range is not None else None
         self._on_result = on_result
@@ -112,19 +113,20 @@ class FuzzEngine:
     def _build_request(self, word):
         method = self._method
         target = self._target
+        s = self._scheme
         if method == "directory":
             if self._url_template:
                 url = self._url_template.replace("FUZZ", word)
             else:
-                url = f"http://{target}/{word}/"
+                url = f"{s}://{target}/{word}/"
             return urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
         elif method == "vhost":
             ip = self._target_ip or target
             req = urllib.request.Request(
-                f"http://{ip}/",
+                f"{s}://{ip}/",
                 headers={"User-Agent": USER_AGENT, "Host": f"{word}.{target}"},
             )
             return req
         else:
-            url = f"http://{word}.{target}/"
+            url = f"{s}://{word}.{target}/"
             return urllib.request.Request(url, headers={"User-Agent": USER_AGENT})

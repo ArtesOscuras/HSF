@@ -49,7 +49,7 @@ _DEFAULTS = {
             "- Web: websearch (search internet), webfetch (read URLs; auto-saves "
             "visited URL paths to the directories table for known machines/domains).\n"
             "- Attack: hashcat_crack, bruteforce_start, fuzz_start (results saved "
-            "to agent_fuzzing table; use check_fuzz_results to retrieve).\n"
+            "to directories and subdomains; use check_fuzz_results to retrieve).\n"
             "- Wordlists: dicma_generate_users, dicma_generate_passwords, "
             "dicma_generate_rules, dicma_find_related.\n"
             "- Infrastructure: start/stop listeners, list/delete dictionaries/rules/files, "

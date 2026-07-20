@@ -193,10 +193,10 @@ TOOLS = [
             "name": "check_fuzz_results",
             "description": (
                 "Retrieve fuzzing results for a specific machine (by IP or ID). "
-                "Returns both agent fuzz results from fuzz_start (agent_fuzzing table, "
-                "truncated to 50 entries) and user-saved directory results "
-                "(directories table, all results). Use this after fuzz_start completes "
-                "or to see directories discovered by the user."
+                "Returns saved directories and subdomains discovered via "
+                "fuzzing for the machine's associated domain. "
+                "Use offset/limit to paginate through large result sets "
+                "(default: first 60 entries per section)."
             ),
             "parameters": {
                 "type": "object",
@@ -205,6 +205,8 @@ TOOLS = [
                         "type": "string",
                         "description": "Machine IP address or ID number (e.g. '192.168.1.100' or '5')",
                     },
+                    "offset": {"type": "integer", "description": "1-indexed entry to start from (default: 1)"},
+                    "limit": {"type": "integer", "description": "Max entries per section (default: 60)"},
                 },
                 "required": ["target"],
             },
@@ -684,10 +686,11 @@ TOOLS = [
             "name": "fuzz_start",
             "description": (
                 "Start a directory, vhost or DNS subdomain fuzzing scan against a target. "
-                "Runs asynchronously — returns immediately. Results are saved to the machine's "
-                "agent_fuzzing table. Use check_fuzz_results to retrieve them once the scan finishes. "
-                "Directory mode fuzzes HTTP paths (e.g. /admin, /login), vhost mode fuzzes virtual "
-                "host subdomains (Host header), dns mode fuzzes DNS subdomains."
+                "Runs asynchronously — returns immediately. Results are saved to the "
+                "directories and subdomains tables. Use check_fuzz_results to retrieve them "
+                "once the scan finishes. Automatically checks for wildcard/catch-all before "
+                "starting — aborts with a warning if detected. Directory mode fuzzes HTTP "
+                "paths, vhost mode fuzzes virtual host subdomains, dns mode fuzzes DNS subdomains."
             ),
             "parameters": {
                 "type": "object",
@@ -696,6 +699,9 @@ TOOLS = [
                     "target": {"type": "string", "description": "Target IP address, machine ID, or domain name"},
                     "wordlist": {"type": "string", "description": "Wordlist filename from the wordlist directory (e.g. 'common.txt', 'subdomains.txt')"},
                     "port": {"type": "integer", "description": "Port number (default: 80). Only used for 'directory' method."},
+                    "scheme": {"type": "string", "enum": ["http", "https"], "description": "HTTP or HTTPS (default: http). Ignores self-signed certificates."},
+                    "skip_codes": {"type": "array", "items": {"type": "integer"}, "description": "HTTP status codes to skip/ignore (default: [404]). Pass empty array to show all codes."},
+                    "hide_size": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2, "description": "Hide responses whose body size (bytes) falls within [min, max] range. Both inclusive."},
                 },
                 "required": ["method", "target", "wordlist"],
             },
@@ -1615,7 +1621,7 @@ def _check_evidences(args, ctx=None):
 
 @register("check_fuzz_results")
 def _check_fuzz_results(args, ctx=None):
-    from src.machines import store, machine_db
+    from src.machines import store, machine_db, domain_db
 
     target = args.get("target", "").strip()
     if not target:
@@ -1631,26 +1637,41 @@ def _check_fuzz_results(args, ctx=None):
     if not machine:
         return f"Machine '{target}' not found in inventory."
 
-    fuzz_rows = machine_db.load_agent_fuzz(machine.id, limit=50)
+    offset = int(args.get("offset", 1))
+    limit = int(args.get("limit", 60)) or 60
+    start = max(0, offset - 1)
+    end = start + limit
+
     dir_rows = machine_db.load_directories(machine.id)
 
-    if not fuzz_rows and not dir_rows:
+    domain = getattr(machine, "domain", "")
+    sub_rows = []
+    if domain:
+        try:
+            sub_rows = domain_db.load_subdomains(domain)
+        except Exception:
+            pass
+
+    if not dir_rows and not sub_rows:
         return f"No fuzz or directory results for machine #{machine.id} ({machine.ip})."
 
     lines = [f"Fuzz & directory results for #{machine.id} ({machine.ip}):"]
 
-    if fuzz_rows:
-        lines.append(f"\nAgent fuzz results ({len(fuzz_rows)}):")
-        for method, word, display in fuzz_rows:
-            if method == "directory":
-                lines.append(f"  /{word}")
-            else:
-                lines.append(f"  [{method}] {display}")
-
     if dir_rows:
-        lines.append(f"\nSaved directories ({len(dir_rows)}):")
-        for path, _ in dir_rows:
+        lines.append(f"\nSaved directories ({len(dir_rows)} total):")
+        for path, _ in dir_rows[start:end]:
             lines.append(f"  {path}")
+        if end < len(dir_rows):
+            lines.append(
+                f"  ... {len(dir_rows) - end} more — use offset={end + 1}")
+
+    if sub_rows:
+        lines.append(f"\nSubdomains for {domain} ({len(sub_rows)} total):")
+        for name, _, method in sub_rows[start:end]:
+            lines.append(f"  {name} [{method}]")
+        if end < len(sub_rows):
+            lines.append(
+                f"  ... {len(sub_rows) - end} more — use offset={end + 1}")
 
     return "\n".join(lines)
 
@@ -2218,29 +2239,82 @@ def _fuzz_start(args, ctx=None):
     target = args.get("target", "")
     wordlist = args.get("wordlist", "")
     port = args.get("port", 80)
+    scheme = args.get("scheme", "http")
+    skip_codes = args.get("skip_codes", [404]) or []
+    hide_size = args.get("hide_size")
+    if hide_size and len(hide_size) == 2:
+        hide_size = tuple(hide_size)
+    else:
+        hide_size = None
+    if scheme not in ("http", "https"):
+        scheme = "http"
     if not method or not target or not wordlist:
         return "Missing method, target, or wordlist."
     from src.hsf_paths import lst_dir
     wl_path = os.path.join(str(lst_dir()), wordlist)
     if not os.path.isfile(wl_path):
         return f"Wordlist not found: {wordlist}"
-    resolved_ip = None
-    if method == "vhost":
-        resolved_ip = ctx._resolve_to_ip(target)
-    else:
-        resolved_ip = ctx._resolve_to_ip(target)
+    resolved_ip = ctx._resolve_to_ip(target)
     from src.machines import store, machine_db
     machine = store.get(resolved_ip or target)
-    if machine:
-        machine_db.clear_agent_fuzz(machine.id)
     display_target = resolved_ip or target
     url_template = None
     if method == "directory":
-        url_template = f"http://{display_target}:{port}/FUZZ"
-    show_codes = {200, 201, 204, 301, 302, 307, 400, 401, 403, 405, 500, 502, 503}
+        url_template = f"{scheme}://{display_target}:{port}/FUZZ"
+
+    import random, string, ssl, urllib.request
+    word = ''.join(random.choices(string.ascii_lowercase, k=10))
+    if method == "directory":
+        url = url_template.replace("FUZZ", word)
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "HSF/1.0"})
+    elif method == "vhost":
+        ip = resolved_ip or target
+        req = urllib.request.Request(
+            f"{scheme}://{ip}/",
+            headers={"User-Agent": "HSF/1.0",
+                     "Host": f"{word}.{target}"})
+    else:
+        req = urllib.request.Request(
+            f"{scheme}://{word}.{target}/",
+            headers={"User-Agent": "HSF/1.0"})
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+    try:
+        resp = urllib.request.urlopen(req, timeout=5, context=ssl_ctx)
+        body = resp.read(10240)
+        status = resp.status
+    except urllib.request.HTTPError as e:
+        body = e.read(10240)
+        status = e.code
+    except Exception:
+        status = None
+    from src.tools.fuzz.engine import SHOW_CODES as ENGINE_CODES
+    show_codes = ENGINE_CODES - set(skip_codes)
+    wildcard_hit = status is not None and status in show_codes
+    if wildcard_hit and hide_size:
+        lo, hi = hide_size
+        if lo <= len(body) <= hi:
+            wildcard_hit = False
+    if wildcard_hit:
+        return (
+            f"WILDCARD DETECTED — random {method} request responded with "
+            f"status {status}, {len(body)} bytes. "
+            f"Server may have a catch-all response. Fuzzing aborted. "
+            f"Adjust skip_codes or hide_size filter if the wildcard response "
+            f"is expected."
+        )
+
+    from src.machines import domain_db
     def _on_found(word, display):
-        if machine:
-            machine_db.save_agent_fuzz(machine.id, method, word, display)
+        if method == "directory":
+            if machine:
+                machine_db.save_directory(machine.id, f"/{word}")
+        elif method == "vhost":
+            domain_db.save_subdomain(target, f"{word}.{target}", "vhost")
+        else:
+            domain_db.save_subdomain(target, f"{word}.{target}", "dns")
     from src.tools.fuzz import FuzzEngine
     engine = FuzzEngine(
         target=target,
@@ -2251,9 +2325,11 @@ def _fuzz_start(args, ctx=None):
         workers=50,
         show_codes=show_codes,
         on_found=_on_found,
+        scheme=scheme,
+        hide_size_range=hide_size,
     )
     engine.start()
-    return f"Fuzzing ({method}) started against {target} with {wordlist}. Results saved to agent_fuzzing. Use check_fuzz_results to retrieve them."
+    return f"Fuzzing ({method}) started against {target} with {wordlist}. Results will be saved to directories and subdomains. Use check_fuzz_results to retrieve them."
 
 
 @register("start_listener")

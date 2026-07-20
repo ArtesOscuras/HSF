@@ -230,26 +230,6 @@ def save_udp_port(machine_id, port):
     return False
 
 
-def load_udp_ports(machine_id):
-    _init_db_dir()
-    path = _get_path(machine_id)
-    if not os.path.isfile(path):
-        return []
-    try:
-        with sqlite3.connect(path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS udp_ports (
-                    port INTEGER,
-                    service TEXT,
-                    discovered_at TEXT
-                )
-            """)
-            rows = conn.execute("SELECT port FROM udp_ports ORDER BY port").fetchall()
-            return [r[0] for r in rows]
-    except (sqlite3.DatabaseError, sqlite3.OperationalError):
-        return []
-
-
 def save_web_service(machine_id, port, output):
     _init_db_dir()
     path = _get_path(machine_id)
@@ -387,62 +367,6 @@ def load_banners(machine_id):
             return [(r[0], r[1], r[2]) for r in rows]
     except (sqlite3.DatabaseError, sqlite3.OperationalError):
         return []
-
-
-def save_agent_fuzz(machine_id, method, word, display):
-    _init_db_dir()
-    path = _get_path(machine_id)
-    now = datetime.now().isoformat()
-    try:
-        with sqlite3.connect(path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS agent_fuzzing (
-                    method TEXT,
-                    word TEXT,
-                    display TEXT,
-                    scanned_at TEXT
-                )
-            """)
-            conn.execute(
-                "INSERT INTO agent_fuzzing VALUES (?, ?, ?, ?)",
-                (method, word, display, now),
-            )
-    except (PermissionError, OSError, sqlite3.OperationalError):
-        pass
-
-
-def load_agent_fuzz(machine_id, limit=50):
-    _init_db_dir()
-    path = _get_path(machine_id)
-    if not os.path.isfile(path):
-        return []
-    try:
-        with sqlite3.connect(path) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS agent_fuzzing (
-                    method TEXT,
-                    word TEXT,
-                    display TEXT,
-                    scanned_at TEXT
-                )
-            """)
-            rows = conn.execute(
-                "SELECT method, word, display FROM agent_fuzzing ORDER BY scanned_at DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-            return [(r[0], r[1], r[2]) for r in rows]
-    except (sqlite3.DatabaseError, sqlite3.OperationalError):
-        return []
-
-
-def clear_agent_fuzz(machine_id):
-    _init_db_dir()
-    path = _get_path(machine_id)
-    try:
-        with sqlite3.connect(path) as conn:
-            conn.execute("DELETE FROM agent_fuzzing")
-    except (sqlite3.DatabaseError, sqlite3.OperationalError):
-        pass
 
 
 def delete_all():

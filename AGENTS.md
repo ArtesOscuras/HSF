@@ -438,7 +438,7 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 | `check_hash` | List all hashes (truncated). With `hash_id`: return full hash value and details |
 | `check_shells` | List all shell sessions with ID, type, status, active flag, IP, ports, OS, timestamps |
 | `check_evidences` | List evidence sessions with metadata, filenames, request directories (no file contents) |
-| `check_fuzz_results` | Retrieve fuzz results (agent_fuzzing table, max 50) and user-saved directories (all) for a machine |
+| `check_fuzz_results` | Retrieve fuzz results for a machine: saved directories and subdomains discovered via fuzzing. Uses offset/limit pagination (default: 60 entries per section). |
 
 **Mutation tools:**
 
@@ -497,7 +497,7 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 |---|---|
 | `hashcat_crack` | Crack a hash with hashcat (`hash_value` must be in inventory, `wordlist`) |
 | `bruteforce_start` | Start a brute force attack (`protocol`, `target`, optional `port`) |
-| `fuzz_start` | Start directory/vhost/DNS fuzzing (`method`, `target`, `wordlist`). Runs asynchronously — results are saved to the machine's `agent_fuzzing` table. Use `check_fuzz_results` to retrieve them. |
+| `fuzz_start` | Start directory/vhost/DNS fuzzing (`method`, `target`, `wordlist`, optional `port`, `scheme`, `skip_codes`, `hide_size`). Performs wildcard detection before scanning — aborts if catch-all found. Runs asynchronously — results are saved to the `directories` and `subdomains` tables. Use `check_fuzz_results` to retrieve them. |
 
 **Infrastructure tools** (15) — manage services, files, evidence, and shell sessions:
 

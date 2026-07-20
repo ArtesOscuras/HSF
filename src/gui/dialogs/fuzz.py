@@ -1,8 +1,12 @@
 from src.gui import fonts
 import os
+import random
 import re
 import socket
+import string
 import tkinter as tk
+import urllib.request
+import ssl
 from tkinter import ttk
 from urllib.parse import urlparse
 
@@ -284,6 +288,14 @@ class FuzzDialog(tk.Toplevel):
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=row, column=1, sticky="ew", padx=15, pady=(10, 0))
 
+        self._wildcard_dir_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            tab, text="Wildcard detection", variable=self._wildcard_dir_var,
+            bg=BG, fg=FG, selectcolor=BG,
+            font=fonts.view_font(10),
+            activebackground=BG, activeforeground=FG,
+        ).grid(row=row + 1, column=1, sticky="w", padx=15, pady=(10, 0))
+
     def _build_vhost_tab(self):
         tab = self._tab_vhost
         self._target_vhost = _TargetSection(tab, 0, mode="domains")
@@ -326,6 +338,14 @@ class FuzzDialog(tk.Toplevel):
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=5, column=1, sticky="ew", padx=15, pady=(10, 0))
 
+        self._wildcard_vhost_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            tab, text="Wildcard detection", variable=self._wildcard_vhost_var,
+            bg=BG, fg=FG, selectcolor=BG,
+            font=fonts.view_font(10),
+            activebackground=BG, activeforeground=FG,
+        ).grid(row=6, column=1, sticky="w", padx=15, pady=(10, 0))
+
     def _build_dns_tab(self):
         tab = self._tab_dns
         self._target_dns = _TargetSection(tab, 0, mode="domains")
@@ -367,6 +387,14 @@ class FuzzDialog(tk.Toplevel):
             font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333", highlightbackground="#333333",
         ).grid(row=5, column=1, sticky="ew", padx=15, pady=(10, 0))
+
+        self._wildcard_dns_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(
+            tab, text="Wildcard detection", variable=self._wildcard_dns_var,
+            bg=BG, fg=FG, selectcolor=BG,
+            font=fonts.view_font(10),
+            activebackground=BG, activeforeground=FG,
+        ).grid(row=6, column=1, sticky="w", padx=15, pady=(10, 0))
 
     def _build_output_section(self):
         tk.Label(
@@ -503,6 +531,46 @@ class FuzzDialog(tk.Toplevel):
             self._output_text.see(tk.END)
         self._output_text.configure(state=tk.DISABLED)
 
+    def _check_wildcard(self, method, target_val, url_template, target_ip,
+                        show_codes, hide_size_range):
+        word = ''.join(random.choices(string.ascii_lowercase, k=10))
+        if method == "directory":
+            url = url_template.replace("FUZZ", word)
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "HSF/1.0"})
+        elif method == "vhost":
+            ip = target_ip or target_val
+            req = urllib.request.Request(
+                f"http://{ip}/",
+                headers={"User-Agent": "HSF/1.0",
+                         "Host": f"{word}.{target_val}"})
+        else:
+            req = urllib.request.Request(
+                f"http://{word}.{target_val}/",
+                headers={"User-Agent": "HSF/1.0"})
+
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            resp = urllib.request.urlopen(req, timeout=5, context=ctx)
+            body = resp.read(10240)
+            status = resp.status
+        except urllib.request.HTTPError as e:
+            body = e.read(10240)
+            status = e.code
+        except Exception:
+            return False, None, None
+
+        detected = True
+        if show_codes and status not in show_codes:
+            detected = False
+        if hide_size_range:
+            lo, hi = hide_size_range
+            if lo <= len(body) <= hi:
+                detected = False
+        return detected, status, len(body)
+
     def _start(self):
         tab = self._notebook.index(self._notebook.select())
 
@@ -523,6 +591,21 @@ class FuzzDialog(tk.Toplevel):
             hide_size = self._parse_range(self._range_dir_var.get())
 
             self._write_output(f"\n[*] Starting directory fuzz: url={url_template} wordlist={os.path.basename(wordlist)} threads={workers} codes={show_codes}\n", "info")
+            if self._wildcard_dir_var.get():
+                self._write_output("[*] Checking wildcard...\n", "info")
+                hit, status, size = self._check_wildcard(
+                    "directory", target_val, url_template, target_ip,
+                    show_codes, hide_size)
+                if hit:
+                    self._write_output(
+                        f"[!] WILDCARD DETECTED — random path responded "
+                        f"with status {status}, {size} bytes. "
+                        f"Adjust show_codes or hide_size_range filters. "
+                        f"Fuzzing aborted.\n", "error")
+                    return
+                self._write_output(
+                    f"[*] Wildcard test passed (status {status}, {size} bytes).\n",
+                    "info")
             self._engine = FuzzEngine(
                 target=target_val, wordlist_path=wordlist, method="directory",
                 url_template=url_template, on_result=self._write_output,
@@ -547,6 +630,20 @@ class FuzzDialog(tk.Toplevel):
             hide_size = self._parse_range(self._range_vhost_var.get())
 
             self._write_output(f"\n[*] Starting vhost fuzz: target={target_label} wordlist={os.path.basename(wordlist)} threads={workers} codes={show_codes}\n", "info")
+            if self._wildcard_vhost_var.get():
+                self._write_output("[*] Checking wildcard...\n", "info")
+                hit, status, size = self._check_wildcard(
+                    "vhost", target_val, None, ip, show_codes, hide_size)
+                if hit:
+                    self._write_output(
+                        f"[!] WILDCARD DETECTED — random vhost responded "
+                        f"with status {status}, {size} bytes. "
+                        f"Adjust show_codes or hide_size_range filters. "
+                        f"Fuzzing aborted.\n", "error")
+                    return
+                self._write_output(
+                    f"[*] Wildcard test passed (status {status}, {size} bytes).\n",
+                    "info")
             self._engine = FuzzEngine(
                 target=target_val, wordlist_path=wordlist, method="vhost",
                 target_ip=ip, on_result=self._write_output, workers=workers,
@@ -570,6 +667,20 @@ class FuzzDialog(tk.Toplevel):
             hide_size = self._parse_range(self._range_dns_var.get())
 
             self._write_output(f"\n[*] Starting dns fuzz: target={target_label} wordlist={os.path.basename(wordlist)} threads={workers} codes={show_codes}\n", "info")
+            if self._wildcard_dns_var.get():
+                self._write_output("[*] Checking wildcard...\n", "info")
+                hit, status, size = self._check_wildcard(
+                    "dns", target_val, None, None, show_codes, hide_size)
+                if hit:
+                    self._write_output(
+                        f"[!] WILDCARD DETECTED — random subdomain responded "
+                        f"with status {status}, {size} bytes. "
+                        f"Adjust show_codes or hide_size_range filters. "
+                        f"Fuzzing aborted.\n", "error")
+                    return
+                self._write_output(
+                    f"[*] Wildcard test passed (status {status}, {size} bytes).\n",
+                    "info")
             self._engine = FuzzEngine(
                 target=target_val, wordlist_path=wordlist, method="dns",
                 on_result=self._write_output, workers=workers,
