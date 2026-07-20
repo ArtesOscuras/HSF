@@ -74,6 +74,8 @@ _DEFAULTS = {
             "- Shell commands return truncated output (last 5000 chars). "
             "For large output, pipe through head, tail, or grep in your "
             "shell command to narrow results.\n"
+            "- When writing files on a remote shell, prefer printf or echo "
+            "-e over heredocs to reduce context noise from echoed input.\n"
             "- Only one fuzz scan at a time — do not run directory, vhost, and "
             "DNS fuzzing simultaneously. Wait for each to finish via "
             "check_fuzz_results before starting the next.\n\n"

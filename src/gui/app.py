@@ -3919,7 +3919,9 @@ class App(tk.Tk):
                     if stop is not None and stop.is_set():
                         return
                     display = result
-                    if name == "webfetch":
+                    if name in ("check_machine", "check_status"):
+                        display = result.split("\n")[0] + "..."
+                    elif name == "webfetch":
                         display = f"fetched {len(result)} chars"
                     elif name == "websearch":
                         display = f"searched ({len(result)} chars"
