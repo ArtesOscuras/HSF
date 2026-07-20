@@ -46,7 +46,7 @@ class LLMClient:
             result.append(
                 {"role": "system", "content": self._system_prompt})
         if self._purpose == "agent":
-            result.append({"role": "system", "content": "[MODE: AGENT] You may use tools."})
+            result.append({"role": "system", "content": "[MODE: AGENT] You may use tools via the function calling API. Never use XML or markup to invoke tools."})
         else:
             result.append({"role": "system", "content": "[MODE: CONSULTOR] Do NOT use tools. Provide analysis and advice only."})
         result.extend(messages)
@@ -135,6 +135,7 @@ class LLMClient:
                             "INVALID TOOL CALL FORMAT. You used XML tags like "
                             "<invoke> which is not supported. You MUST use the "
                             "proper function calling mechanism to invoke tools. "
+                            "The tool was NOT executed — nothing happened. "
                             "Do NOT emit raw XML. Retry your tool calls correctly."
                         ),
                     })

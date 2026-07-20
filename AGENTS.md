@@ -400,7 +400,7 @@ HSF integrates with LLMs via an extensible provider system supporting any OpenAI
 
 ### Agent Tool-Calling (`src/llm/client.py` → `chat_with_tools()`)
 
-The agent mode gives the LLM the ability to call **63 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
+The agent mode gives the LLM the ability to call **64 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
 
 **Tool-calling loop**:
 ...
@@ -423,7 +423,7 @@ def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None,
 
 Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` variable. Each entry follows the `{"type": "function", "function": {...}}` format with `name`, `description`, and `parameters` (JSON Schema).
 
-**63 tools** in seven categories:
+**64 tools** in seven categories:
 
 **Data tools** (23) — query and manipulate inventory, no `tool_context` needed:
 
@@ -521,13 +521,14 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 | `connect_winrm` | Connect to a remote Windows machine via WinRM using stored credentials |
 | `list_pocs` | List all POC Python files in the pocs/ directory |
 
-**POC tools** (3) — create, read, and edit proof-of-concept scripts in the `pocs/` directory, no `tool_context` needed:
+**POC tools** (4) — create, read, edit, and execute proof-of-concept scripts in the `pocs/` directory, no `tool_context` needed:
 
 | Tool | Description |
 |---|---|
 | `poc_write` | Create or overwrite a `.py` file in the `pocs/` directory (`filename`, `content`). Rejects filenames without `.py` extension. Path-traversal protected via `_resolve_poc_path()`. |
 | `poc_read` | Read a POC file from the `pocs/` directory (`filename`, optional `offset`/`limit`). Returns content with line count header. Maximum 50,000 chars per read. |
 | `poc_edit` | Edit a POC file by exact string replacement (`filename`, `old_string`, `new_string`, optional `replace_all`). If `old_string` is not found, returns an error with instructions. If multiple matches found without `replace_all=true`, returns the count and asks for more context. Path-traversal protected. |
+| `poc_exec` | Execute a POC Python script (`filename`) and return its output. Output truncated to last 5000 chars if too large. Respects the "Agent can execute POCs" safety setting. |
 
 **POC system overview:**
 

@@ -1038,6 +1038,23 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "poc_exec",
+            "description": (
+                "Execute a POC Python script and return its output. "
+                "Output is truncated to last 5000 chars if too large."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "The POC filename to execute (e.g. 'sqli_poc.py')"},
+                },
+                "required": ["filename"],
+            },
+        },
+    },
 ]
 
 _HANDLERS = {}
@@ -1065,6 +1082,16 @@ def execute(name, args_dict, tool_context=None):
 # ─── Tool Handlers ──────────────────────────────────────────
 # All handlers receive (args_dict, tool_context).
 # tool_context is the App instance (or None).
+
+MAX_SHELL_CHARS = 5000
+
+
+def _fmt_shell(prefix, combined):
+    total = len(combined)
+    if total > MAX_SHELL_CHARS:
+        combined = combined[-MAX_SHELL_CHARS:]
+        return f"{prefix}[{total} chars total, last {MAX_SHELL_CHARS}]\n{combined}"
+    return f"{prefix}\n{combined}"
 
 
 @register("add_user")
@@ -2576,8 +2603,7 @@ def _shell_exec(args, ctx=None):
             if out:
                 all_out.append(out)
             combined = "".join(all_out)
-            return (f"{prefix}stopped by user\n{combined}"
-                    if combined else f"{prefix}stopped by user before output arrived")
+            return _fmt_shell(f"{prefix}stopped by user", combined) if combined else f"{prefix}stopped by user before output arrived"
         time.sleep(0.1)
         out = shell_db.drain_agent_output(sid)
         if out:
@@ -2594,10 +2620,10 @@ def _shell_exec(args, ctx=None):
         if out:
             all_out.append(out)
         combined = "".join(all_out)
-        return f"{prefix}password prompt detected, interrupted\n{combined}"
+        return _fmt_shell(f"{prefix}password prompt detected, interrupted", combined)
     if re.search(r'(?:^|\n)[^\n]*[$#>]\s*$', clean):
-        return f"{prefix}[finished]\n{combined}"
-    return f"{prefix}[running] -- use shell_wait for more output, shell_interrupt to stop\n{combined}"
+        return _fmt_shell(f"{prefix}[finished]", combined)
+    return _fmt_shell(f"{prefix}[running] -- use shell_wait for more output, shell_interrupt to stop", combined)
 
 
 @register("shell_wait")
@@ -2627,8 +2653,7 @@ def _shell_wait(args, ctx=None):
             if out:
                 all_out.append(out)
             combined = "".join(all_out)
-            return (f"{prefix}stopped by user\n{combined}"
-                    if combined else f"{prefix}stopped by user, no output")
+            return _fmt_shell(f"{prefix}stopped by user", combined) if combined else f"{prefix}stopped by user, no output"
         time.sleep(0.1)
         out = shell_db.drain_agent_output(sid)
         if out:
@@ -2641,16 +2666,15 @@ def _shell_wait(args, ctx=None):
             clean = re.sub(r'\x1b\][^\x07]*\x07', '', combined)
             clean = re.sub(r'\x1b\[[?0-9;]*[a-zA-Z]', '', clean)
             if re.search(r'(?:^|\n)[^\n]*[$#>]\s*$', clean):
-                return f"{prefix}[finished]\n{combined}"
+                return _fmt_shell(f"{prefix}[finished]", combined)
         if stale > 20:
             if all_out:
                 combined = "".join(all_out)
-                return f"{prefix}[paused] -- output stopped, may be waiting for input or finished\n{combined}"
+                return _fmt_shell(f"{prefix}[paused] -- output stopped, may be waiting for input or finished", combined)
             else:
                 return f"{prefix}[idle] -- no output, no command may be running"
     combined = "".join(all_out)
-    return (f"{prefix}[running]\n{combined}"
-            if combined else f"{prefix}[running] still no output after 10s")
+    return _fmt_shell(f"{prefix}[running]", combined) if combined else f"{prefix}[running] still no output after 10s"
 
 
 @register("shell_interrupt")
@@ -2679,8 +2703,7 @@ def _shell_interrupt(args, ctx=None):
             if out:
                 all_out.append(out)
             combined = "".join(all_out)
-            return (f"{prefix}interrupted, also stopped by user\n{combined}"
-                    if combined else f"{prefix}interrupted, also stopped by user")
+            return _fmt_shell(f"{prefix}interrupted, also stopped by user", combined) if combined else f"{prefix}interrupted, also stopped by user"
         out = shell_db.drain_agent_output(sid)
         if out:
             all_out.append(out)
@@ -2689,10 +2712,9 @@ def _shell_interrupt(args, ctx=None):
             clean = re.sub(r'\x1b\][^\x07]*\x07', '', combined)
             clean = re.sub(r'\x1b\[[?0-9;]*[a-zA-Z]', '', clean)
             if re.search(r'(?:^|\n)[^\n]*[$#>]\s*$', clean):
-                return f"{prefix}[interrupted]\n{combined}"
+                return _fmt_shell(f"{prefix}[interrupted]", combined)
     combined = "".join(all_out)
-    return (f"{prefix}[interrupted]\n{combined}"
-            if combined else f"{prefix}[interrupted] no output after Ctrl+C")
+    return _fmt_shell(f"{prefix}[interrupted]", combined) if combined else f"{prefix}[interrupted] no output after Ctrl+C"
 
 
 @register("poc_write")
@@ -2791,6 +2813,44 @@ def _poc_edit(args, ctx=None):
         return f"Error writing {filename}: {e}"
     plural = "s" if occurrences > 1 else ""
     return f"POC '{filename}' edited: {occurrences} replacement{plural} made."
+
+
+@register("poc_exec")
+def _poc_exec(args, ctx=None):
+    filename = args.get("filename", "").strip()
+    if not filename:
+        return "Missing filename."
+    from src import settings
+    if not settings.get("agent_exec_pocs", False):
+        return "POC execution is disabled. Enable it in Settings > Safety."
+    path = _resolve_poc_path(filename)
+    if not path:
+        return f"Invalid filename: {filename}"
+    if not os.path.isfile(path):
+        return f"POC '{filename}' not found."
+    import subprocess
+    try:
+        proc = subprocess.run(
+            ["python3", path],
+            capture_output=True, text=True, timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return f"POC '{filename}' timed out after 30 seconds."
+    except FileNotFoundError:
+        return "python3 is not available on this system."
+    except Exception as e:
+        return f"Error executing POC: {e}"
+    output = proc.stdout
+    if proc.stderr:
+        output += "\n" + proc.stderr
+    total = len(output)
+    if total > MAX_SHELL_CHARS:
+        output = output[-MAX_SHELL_CHARS:]
+        header = (f"POC '{filename}' (exit {proc.returncode})"
+                  f"[{total} chars total, last {MAX_SHELL_CHARS}]\n")
+    else:
+        header = f"POC '{filename}' (exit {proc.returncode})\n"
+    return header + output if output.strip() else f"POC '{filename}' executed (exit {proc.returncode}) with no output."
 
 
 def _resolve_target(ctx, target):

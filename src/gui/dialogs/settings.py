@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk
 from src.gui import fonts
 from src import llm
+from src import settings as _app_settings
 
 BG = "#111111"
 BG_WIDGET = "#000000"
@@ -52,6 +53,10 @@ class SettingsDialog(tk.Toplevel):
         self._tab_prompts = tk.Frame(self._nb, bg=BG)
         self._nb.add(self._tab_prompts, text="  Prompts  ")
         self._build_prompts_tab(self._tab_prompts)
+
+        self._tab_safety = tk.Frame(self._nb, bg=BG)
+        self._nb.add(self._tab_safety, text="  Safety  ")
+        self._build_safety_tab(self._tab_safety)
 
         self._nb.select(0)
 
@@ -133,6 +138,52 @@ class SettingsDialog(tk.Toplevel):
         self._config["prompts"] = prompts
         llm.config.save(self._config)
         self._refresh_prompts()
+
+    # ─── Safety Tab ──────────────────────────────────────────
+
+    def _build_safety_tab(self, parent):
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=0)
+        parent.rowconfigure(1, weight=1)
+
+        tk.Label(
+            parent, text="Agent Safety",
+            font=fonts.view_font_bold(11), fg=FG, bg=BG,
+        ).grid(row=0, column=0, sticky="w", padx=15, pady=(10, 5))
+
+        content = tk.Frame(parent, bg=BG_WIDGET)
+        content.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 5))
+        content.columnconfigure(1, weight=1)
+
+        tk.Label(
+            content, text="  Agent can execute POCs",
+            font=fonts.view_font(11), fg=FG, bg=BG_WIDGET,
+        ).grid(row=0, column=0, sticky="w", padx=15, pady=(12, 12))
+
+        self._poc_exec_var = tk.BooleanVar(
+            value=_app_settings.get("agent_exec_pocs", False))
+        self._poc_toggle = tk.Label(
+            content, text="", bg=BG_WIDGET,
+            font=fonts.view_font_bold(11),
+            cursor="", padx=8, pady=4,
+        )
+        self._poc_toggle.grid(row=0, column=1, sticky="e", padx=15, pady=(12, 12))
+        self._poc_toggle.bind("<Button-1>", lambda e: self._toggle_poc_exec())
+        self._refresh_poc_toggle()
+
+    def _refresh_poc_toggle(self):
+        on = self._poc_exec_var.get()
+        self._poc_toggle.config(
+            text="  ON  " if on else " OFF ",
+            fg="#cc3333" if on else "#00cc66",
+        )
+
+    def _toggle_poc_exec(self):
+        current = self._poc_exec_var.get()
+        self._poc_exec_var.set(not current)
+        _app_settings.set("agent_exec_pocs", not current)
+        _app_settings.save()
+        self._refresh_poc_toggle()
 
     # ─── Models Tab ──────────────────────────────────────────
 
