@@ -92,7 +92,10 @@ class LLMClient:
             if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
                 consecutive_xml_errors = 0
                 if choice.message.content and on_text:
-                    on_text(choice.message.content)
+                    try:
+                        on_text(choice.message.content)
+                    except RuntimeError:
+                        pass
                 messages.append(choice.message)
                 for tc in choice.message.tool_calls:
                     args = {}
@@ -114,7 +117,10 @@ class LLMClient:
                 if _XML_TOOL_PATTERN.search(choice.message.content):
                     consecutive_xml_errors += 1
                     if on_warning:
-                        on_warning("Tool calling error")
+                        try:
+                            on_warning("Tool calling error")
+                        except RuntimeError:
+                            pass
                     if consecutive_xml_errors >= 5:
                         stream = self._client.chat.completions.create(
                             model=m,

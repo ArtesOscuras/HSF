@@ -3825,7 +3825,9 @@ class App(tk.Tk):
         limit = self._get_model_context_limit()
         if limit <= 0:
             return None
-        used = getattr(self, '_total_api_tokens', 0) or self._estimate_tokens(self._llm_messages)
+        api = getattr(self, '_total_api_tokens', 0) or 0
+        estimated = self._estimate_tokens(self._llm_messages)
+        used = max(api, estimated)
         pct = (used * 100) // limit
         if used > 0 and pct == 0:
             pct = 1
@@ -3914,19 +3916,22 @@ class App(tk.Tk):
                 client = LLMClient(purpose="agent")
                 def _on_tool(name, args, result):
                     self._agent_consecutive_xml_errors = 0
-                    if stop.is_set():
+                    if stop is not None and stop.is_set():
                         return
                     display = result
                     if name == "webfetch":
                         display = f"fetched {len(result)} chars"
                     elif name == "websearch":
-                        display = f"searched ({len(result)} chars)"
+                        display = f"searched ({len(result)} chars"
                     elif name == "port_inspector":
                         display = "inventoried"
                     elif len(result) > 120:
                         display = result[:117] + "..."
-                    self.console.after(0, lambda d=display: self.console.info(
-                        f"  [tool] {name} {str(args)[:60]} → {d}"))
+                    try:
+                        self.console.after(0, lambda d=display: self.console.info(
+                            f"  [tool] {name} {str(args)[:60]} → {d}"))
+                    except RuntimeError:
+                        pass
                 stream = client.chat_with_tools(
                     self._llm_messages, on_tool=_on_tool, tool_context=self,
                     on_text=lambda text: self.console.after(
@@ -3934,7 +3939,7 @@ class App(tk.Tk):
                     on_warning=lambda msg: self.console.after(
                         0, lambda m=msg: self.console.warning(m)),
                     stop_event=stop)
-                if stop.is_set():
+                if stop is not None and stop.is_set():
                     self.console.after(0, lambda: self.console.warning("Agent stopped."))
                     return
                 self.console.after(0, lambda: setattr(self, '_total_api_tokens', client.last_prompt_tokens))
@@ -3944,7 +3949,7 @@ class App(tk.Tk):
                 full = ""
                 buf = ""
                 for chunk in stream:
-                    if stop.is_set():
+                    if stop is not None and stop.is_set():
                         self.console.after(0, lambda: self.console.warning("Agent stopped."))
                         return
                     if chunk.choices and chunk.choices[0].delta.content:
@@ -3988,9 +3993,15 @@ class App(tk.Tk):
                     self.console.after(0, self._update_mode_prompt)
                     succeeded = True
             except Exception as e:
-                if not stop.is_set():
-                    self.console.after(0, lambda m=str(e): self.console.error(f"Agent error: {m}"))
-                self.console.after(0, self._update_mode_prompt)
+                if stop is not None and not stop.is_set():
+                    try:
+                        self.console.after(0, lambda m=str(e): self.console.error(f"Agent error: {m}"))
+                    except RuntimeError:
+                        pass
+                try:
+                    self.console.after(0, self._update_mode_prompt)
+                except RuntimeError:
+                    pass
             finally:
                 self.console.stop_thinking()
                 if not succeeded:

@@ -256,11 +256,17 @@ class Console(tk.Frame):
         ch = self._SPINNER_CHARS[self._spinner_idx % len(self._SPINNER_CHARS)]
         self._spinner_label.config(text=ch)
         self._spinner_idx += 1
-        self._spinner_timer = self.after(150, self._tick_spinner)
+        try:
+            self._spinner_timer = self.after(150, self._tick_spinner)
+        except RuntimeError:
+            pass
 
     def stop_thinking(self):
         self._thinking = False
-        self.after(0, self._stop_thinking_ui)
+        try:
+            self.after(0, self._stop_thinking_ui)
+        except RuntimeError:
+            pass
 
     def _stop_thinking_ui(self):
         if getattr(self, '_spinner_timer', None):
