@@ -602,7 +602,7 @@ class App(tk.Tk):
         self._llm_messages = []
         self._silent_mode_cycle = False
         self._last_ctx_hash = None
-        self._last_ctx = None
+        self._context_injected = False
         self._last_token_pct = None
         self._fuzz_dlg = None
         self._tcpscan_running = False
@@ -3761,8 +3761,8 @@ class App(tk.Tk):
         if text.lower() == "reset":
             self._llm_messages = []
             self._last_ctx_hash = None
-            self._last_ctx = None
             self._last_token_pct = None
+            self._context_injected = False
             self.console.success("Context reset. Conversation history cleared.")
             self._update_mode_prompt()
             return
@@ -3869,8 +3869,8 @@ class App(tk.Tk):
         if text.lower() == "reset":
             self._llm_messages = []
             self._last_ctx_hash = None
-            self._last_ctx = None
             self._last_token_pct = None
+            self._context_injected = False
             self.console.success("Context reset. Conversation history cleared.")
             self._update_mode_prompt()
             return
@@ -4041,203 +4041,30 @@ class App(tk.Tk):
         threading.Thread(target=_run, daemon=True).start()
 
     def _build_model_context(self):
-        parts = ["Current HSF application state:"]
-        from src.machines import store
+        parts = ["HSF state:"]
+        from src.machines import store, domain_db
         machines = store.get_all()
-        from src.machines import machine_db
         if machines:
-            parts.append(f"\nMachines ({len(machines)}):")
-            for m in machines:
-                info = f"  #{m.id} {m.ip}"
-                if getattr(m, "hostname", ""):
-                    info += f" ({m.hostname})"
-                if getattr(m, "domain", ""):
-                    info += f"  domain: {m.domain}"
-                if getattr(m, "device_type", ""):
-                    info += f"  device: {m.device_type}"
-                parts.append(info)
-                try:
-                    tcp = machine_db.load_tcp_ports(m.id)
-                    if tcp:
-                        ports = [str(p) for p in tcp]
-                        parts.append(f"    TCP: {', '.join(ports)}")
-                except Exception: pass
-                try:
-                    udp = machine_db.load_udp_ports(m.id)
-                    if udp:
-                        ports = [str(p) for p in udp]
-                        parts.append(f"    UDP: {', '.join(ports)}")
-                except Exception: pass
-                try:
-                    banners = machine_db.load_banners(m.id)
-                    if banners:
-                        parts.append(f"    Banners: {len(banners)} service(s)")
-                except Exception: pass
-                try:
-                    ws = machine_db.load_web_services(m.id)
-                    if ws:
-                        parts.append(f"    Web services: {len(ws)} (ports: "
-                            + ", ".join(str(w[0]) for w in ws[:5]) + ")")
-                except Exception: pass
-        from src.machines import domain_db
+            items = ", ".join(
+                f"#{m.id} {m.ip}" for m in machines)
+            parts.append(f"Machines: {items}.")
         domains = domain_db.list_all()
         if domains:
-            parts.append(f"\nDomains ({len(domains)}):")
-            for d in domains:
-                parts.append(f"  {d}")
-                try:
-                    subs = domain_db.load_subdomains(d)
-                    if subs:
-                        snames = [s[0] for s in subs[:8]]
-                        parts.append(f"    Subdomains: {', '.join(snames)}"
-                            + (f" (+{len(subs)-8} more)" if len(subs)>8 else ""))
-                except Exception: pass
-                try:
-                    ds = domain_db.load_directories(d)
-                    if ds: parts.append(f"    Directories: {len(ds)} found")
-                except Exception: pass
-                try:
-                    ws = domain_db.load_web_services(d)
-                    if ws: parts.append(f"    Web services: {len(ws)} found")
-                except Exception: pass
-                try:
-                    dm = domain_db.load_domain_machines(d)
-                    if dm:
-                        ips = [m.get("machine_ip","") for m in dm[:5] if m.get("machine_ip")]
-                        if ips: parts.append(f"    Machines: {', '.join(ips)}")
-                except Exception: pass
-        from src.machines.credential_db import (
-            load_users, load_passwords, load_credentials, load_hashes)
-        users = load_users()
-        if users:
-            parts.append(f"\nUsers ({len(users)}):")
-            for u in users[:30]:
-                info = f"  #{u.get('id','?')} {u['username']}"
-                if u.get("type"): info += f" ({u['type']})"
-                if u.get("domain"): info += f"  domain: {u['domain']}"
-                if u.get("machine"): info += f"  machine: {u['machine']}"
-                parts.append(info)
-        from src.machines.people_db import load_people as load_ppl
-        people = load_ppl()
-        if people:
-            parts.append(f"\nPeople ({len(people)}):")
-            for p in people[:20]:
-                info = f"  #{p['id']} {p.get('first_name','')} {p.get('last_name','')}".strip()
-                if p.get("company"): info += f"  company: {p['company']}"
-                if p.get("role"): info += f"  role: {p['role']}"
-                if p.get("username"): info += f"  username: {p['username']}"
-                if p.get("domain"): info += f"  domain: {p['domain']}"
-                parts.append(info)
-        pwds = load_passwords()
-        if pwds: parts.append(f"\nPassword inventory: {len(pwds)} entries")
-        creds = load_credentials()
-        if creds:
-            parts.append(f"\nCredentials ({len(creds)}):")
-            for c in creds[:20]:
-                info = f"  #{c['id']} {c['username']}"
-                if c.get("domain"): info += f"  domain: {c['domain']}"
-                parts.append(info)
-        hashes = load_hashes()
-        if hashes:
-            parts.append(f"\nHashes ({len(hashes)}):")
-            for h in hashes[:20]:
-                parts.append(f"  #{h.get('id','?')} [{h.get('type','?')}] {h.get('hash','')}")
-        import os
-        from src.hsf_paths import evidence_dir
-        ev_dir = str(evidence_dir())
-        if os.path.isdir(ev_dir):
-            evs = sorted(os.listdir(ev_dir))
-            if evs:
-                parts.append(f"\nEvidence sessions ({len(evs)}):")
-                for e in evs[:10]: parts.append(f"  {e}")
-        from src.shells import shell_db
-        sessions = shell_db.get_all()
-        if sessions:
-            parts.append(f"\nShell sessions ({len(sessions)}):")
-            for s in sessions[:10]:
-                parts.append(f"  {s.get('type','?')} #{s.get('id','?')}")
-        from src.hsf_paths import lst_dir, rules_dir, pocs_dir
-        lst = str(lst_dir())
-        if os.path.isdir(lst):
-            lst_files = sorted(f for f in os.listdir(lst) if os.path.isfile(os.path.join(lst, f)))
-            if lst_files:
-                parts.append(f"\nDictionaries ({len(lst_files)}):")
-                for f in lst_files[:15]:
-                    parts.append(f"  {f}")
-        rules_d = str(rules_dir())
-        if os.path.isdir(rules_d):
-            rule_files = sorted(f for f in os.listdir(rules_d) if os.path.isfile(os.path.join(rules_d, f)))
-            if rule_files:
-                parts.append(f"\nHashcat rules ({len(rule_files)}):")
-                for f in rule_files[:15]:
-                    parts.append(f"  {f}")
-        pocs_d = str(pocs_dir())
-        if os.path.isdir(pocs_d):
-            poc_files = sorted(f for f in os.listdir(pocs_d) if os.path.isfile(os.path.join(pocs_d, f)))
-            if poc_files:
-                parts.append(f"\nPOCs ({len(poc_files)}):")
-                for f in poc_files[:15]:
-                    parts.append(f"  {f}")
-        return "\n".join(parts)
+            parts.append(f"Domains: {', '.join(domains)}.")
+        if not machines and not domains:
+            parts.append("No machines or domains.")
+        parts.append(
+            "Use check_status for details, "
+            "check_inventory for inventory.")
+        return " ".join(parts)
 
     def _inject_context(self):
-        import hashlib
-        ctx = self._build_model_context()
-        ctx_hash = hashlib.md5(ctx.encode()).hexdigest()
-
-        if ctx_hash == self._last_ctx_hash:
+        if self._context_injected:
             return
-
-        has_ctx = (self._llm_messages and
-                   self._llm_messages[0].get("_is_context"))
-
-        if not has_ctx:
-            self._llm_messages.insert(0, {
-                "role": "system", "content": ctx, "_is_context": True})
-        elif self._last_ctx:
-            self._llm_messages[0]["content"] = ctx
-            delta = self._build_context_delta(ctx)
-            if delta:
-                self._llm_messages[:] = [
-                    m for m in self._llm_messages
-                    if not (isinstance(m, dict) and m.get("_is_delta"))
-                ]
-                self._llm_messages.append({
-                    "role": "system", "content": delta, "_is_delta": True})
-        else:
-            self._llm_messages[0]["content"] = ctx
-
-        self._last_ctx_hash = ctx_hash
-        self._last_ctx = ctx
-
-    def _build_context_delta(self, new_ctx):
-        import difflib
-        old_lines = (self._last_ctx or "").splitlines()
-        new_lines = new_ctx.splitlines()
-        added = []
-        removed = []
-        for line in difflib.unified_diff(old_lines, new_lines,
-                                         lineterm="", n=0):
-            if line.startswith("@@") or line.startswith("---") or line.startswith("+++"):
-                continue
-            if line.startswith("+") and not line.startswith("+++"):
-                added.append(line[1:])
-            elif line.startswith("-") and not line.startswith("---"):
-                removed.append(line[1:])
-        if not added and not removed:
-            return ""
-        parts = ["Application state changed:"]
-        if removed:
-            parts.append("Removed:\n" + "\n".join(
-                f"  {r}" for r in removed[:30]))
-        if added:
-            parts.append("Added:\n" + "\n".join(
-                f"  {a}" for a in added[:30]))
-        if len(removed) > 30:
-            parts.append(f"  ... and {len(removed)-30} more removed lines")
-        if len(added) > 30:
-            parts.append(f"  ... and {len(added)-30} more added lines")
-        return "\n".join(parts)
+        ctx = self._build_model_context()
+        self._llm_messages.insert(0, {
+            "role": "system", "content": ctx, "_is_context": True})
+        self._context_injected = True
 
     def _cmd_exit(self, args):
         self.destroy()

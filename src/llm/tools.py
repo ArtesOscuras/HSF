@@ -126,6 +126,40 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "check_status",
+            "description": (
+                "Get current HSF state summary: all machine IPs with hostname, "
+                "device type, domain, and port counts; all domain names; plus "
+                "counts of users, credentials, passwords, hashes, evidence "
+                "sessions, shell sessions. Use this to see what targets are "
+                "available."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_hash",
+            "description": (
+                "Get hash info. Without parameters: list all hashes (ID, type, "
+                "truncated value). With hash_id: return full hash details "
+                "(complete value, type, mode)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hash_id": {"type": "integer", "description": "Specific hash ID to get full details"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "check_shells",
             "description": (
                 "List all shell sessions (reverse shells, SSH, SFTP, FTP, WinRM). "
@@ -1359,6 +1393,121 @@ def _check_inventory(args, ctx=None):
             if len(poc_files) > 30:
                 lines.append(f"  ... and {len(poc_files) - 30} more")
 
+    return "\n".join(lines)
+
+
+@register("check_status")
+def _check_status(args, ctx=None):
+    from src.machines import store, machine_db, domain_db
+    from src.machines.credential_db import (
+        load_users, load_passwords, load_credentials, load_hashes)
+    from src.shells import shell_db
+    import os
+    from src.hsf_paths import evidence_dir, lst_dir, rules_dir, pocs_dir
+
+    lines = ["Current HSF state:"]
+
+    machines = store.get_all()
+    if machines:
+        lines.append(f"\nMachines ({len(machines)}):")
+        for m in machines:
+            info = f"  #{m.id} {m.ip}"
+            if getattr(m, "hostname", ""):
+                info += f" ({m.hostname})"
+            if getattr(m, "domain", ""):
+                info += f"  domain: {m.domain}"
+            if getattr(m, "device_type", ""):
+                info += f"  device: {m.device_type}"
+            try:
+                tcp = machine_db.load_tcp_ports(m.id)
+                udp = machine_db.load_udp_ports(m.id)
+                parts = []
+                if tcp:
+                    parts.append(f"tcp:{len(tcp)}")
+                if udp:
+                    parts.append(f"udp:{len(udp)}")
+                if parts:
+                    info += f"  ports: {', '.join(parts)}"
+            except Exception:
+                pass
+            lines.append(info)
+    else:
+        lines.append("\nNo machines in inventory.")
+
+    domains = domain_db.list_all()
+    if domains:
+        lines.append(f"\nDomains ({len(domains)}):")
+        for d in domains:
+            lines.append(f"  {d}")
+    else:
+        lines.append("\nNo domains in inventory.")
+
+    users = load_users()
+    creds = load_credentials()
+    pwds = load_passwords()
+    hashes = load_hashes()
+
+    parts = []
+    if users:
+        parts.append(f"{len(users)} users")
+    if creds:
+        parts.append(f"{len(creds)} credentials")
+    if pwds:
+        parts.append(f"{len(pwds)} passwords")
+    if hashes:
+        parts.append(f"{len(hashes)} hashes")
+    if parts:
+        lines.append(f"\nInventory: {', '.join(parts)}")
+
+    sessions = shell_db.get_all()
+    if sessions:
+        lines.append(f"\nShell sessions: {len(sessions)} active")
+
+    ev_dir = str(evidence_dir())
+    if os.path.isdir(ev_dir):
+        evs = [e for e in os.listdir(ev_dir)
+               if os.path.isdir(os.path.join(ev_dir, e))]
+        if evs:
+            lines.append(f"Evidence sessions: {len(evs)}")
+
+    for label, path in [("Dictionaries", lst_dir()),
+                         ("Hashcat rules", rules_dir()),
+                         ("POCs", pocs_dir())]:
+        p = str(path)
+        if os.path.isdir(p):
+            files = [f for f in os.listdir(p)
+                     if os.path.isfile(os.path.join(p, f))]
+            if files:
+                lines.append(f"{label}: {len(files)}")
+
+    return "\n".join(lines)
+
+
+@register("check_hash")
+def _check_hash(args, ctx=None):
+    from src.machines.credential_db import load_hashes
+    hash_id = args.get("hash_id")
+    hashes = load_hashes()
+    if not hashes:
+        return "No hashes in inventory."
+    if hash_id is not None:
+        h = next((x for x in hashes if x.get("id") == hash_id), None)
+        if not h:
+            return f"Hash #{hash_id} not found."
+        return (
+            f"Hash #{h['id']}\n"
+            f"  Type: {h.get('type', '?')}\n"
+            f"  Value: {h['hash']}\n"
+            f"  Mode: {h.get('hascat_mode', 'N/A')}"
+        )
+    lines = [f"Hashes ({len(hashes)}):"]
+    for h in hashes:
+        hval = h["hash"]
+        truncated = hval[:60] + "..." if len(hval) > 60 else hval
+        info = f"  #{h['id']} [{h.get('type', '?')}] {truncated}"
+        if h.get("hascat_mode"):
+            info += f" mode: {h['hascat_mode']}"
+        lines.append(info)
     return "\n".join(lines)
 
 
