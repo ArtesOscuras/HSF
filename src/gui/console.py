@@ -53,6 +53,7 @@ class Console(tk.Frame):
         self._mode_label = ""
         self._mode_fg = FG
         self._mode_cycle_cb = None
+        self._prompt_hovered = False
         self._focus_callback = None
         self._is_system = False
         self._thinking = False
@@ -145,6 +146,11 @@ class Console(tk.Frame):
             font=(fonts.family(), self._font_size),
         )
         self._spinner_label.grid(row=0, column=1, sticky="w")
+
+        self.prompt_label.bind("<Button-1>", self._on_prompt_click)
+        self.prompt_label.bind("<Enter>", self._on_prompt_enter)
+        self.prompt_label.bind("<Leave>", self._on_prompt_leave)
+        self._spinner_label.bind("<Button-1>", self._on_prompt_click)
 
         self.input_var = tk.StringVar()
         self.input_text = tk.Text(
@@ -407,6 +413,8 @@ class Console(tk.Frame):
         self.input_text.configure(font=new_font)
         self.prompt_label.configure(font=new_font)
         self._spinner_label.configure(font=new_font)
+        if self._prompt_hovered:
+            self.prompt_label.config(font=(fonts.family(), self._font_size, "underline"))
         if self._autocomplete_popup:
             self._close_arg_popup()
             self._close_arg2_popup()
@@ -517,6 +525,18 @@ class Console(tk.Frame):
             if self._filter_id:
                 self.after_cancel(self._filter_id)
             self._filter_id = self.after(80, self._filter_autocomplete)
+
+    def _on_prompt_click(self, event=None):
+        if self._mode_cycle_cb:
+            self._mode_cycle_cb()
+
+    def _on_prompt_enter(self, event=None):
+        self._prompt_hovered = True
+        self.prompt_label.config(font=(fonts.family(), self._font_size, "underline"))
+
+    def _on_prompt_leave(self, event=None):
+        self._prompt_hovered = False
+        self.prompt_label.config(font=(fonts.family(), self._font_size))
 
     def _on_tab(self, event):
         if self._is_system:
