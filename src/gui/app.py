@@ -3867,7 +3867,8 @@ class App(tk.Tk):
     def _enter_agent_mode(self):
         self._agent_mode = True
         import threading
-        self._agent_stop_event = threading.Event()
+        if self._agent_stop_event is None:
+            self._agent_stop_event = threading.Event()
         self._last_token_pct = None
         if not self._silent_mode_cycle:
             self.console.info(
