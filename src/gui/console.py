@@ -53,6 +53,7 @@ class Console(tk.Frame):
         self._mode_label = ""
         self._mode_fg = FG
         self._mode_cycle_cb = None
+        self._focus_callback = None
         self._is_system = False
         self._thinking = False
         self._spinner_timer = None
@@ -179,6 +180,8 @@ class Console(tk.Frame):
         self.input_text.bind("<Command-minus>", lambda e: self._adjust_font(-1), add="+")
         self.input_text.bind("<Control-equal>", lambda e: self._adjust_font(+1), add="+")
         self.input_text.bind("<Command-equal>", lambda e: self._adjust_font(+1), add="+")
+        self.input_text.bind("<Control-f>", lambda e: self._focus_callback and self._focus_callback(), add="+")
+        self.input_text.bind("<Command-f>", lambda e: self._focus_callback and self._focus_callback(), add="+")
 
         self.winfo_toplevel().bind("<Button-1>", self._on_root_click, add="+")
         self.winfo_toplevel().bind("<Escape>", self._on_escape, add="+")

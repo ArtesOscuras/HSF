@@ -595,6 +595,7 @@ class App(tk.Tk):
         hsf_settings.load()
         console_font = hsf_settings.get("console_font_size", 11)
         self.console = Console(self._pane, initial_font_size=console_font)
+        self.console._focus_callback = self._toggle_focus
         self._pane.add(self.console, stretch="always")
 
         self.after(300, self._set_initial_sash)
@@ -782,6 +783,7 @@ class App(tk.Tk):
         self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell", "people", "dictionary", "rule", "poc"])
         self.console.register_command("add", self._cmd_add, "Add to inventory")
         self.console.set_subcommands("add", ["machine", "domain", "credential", "user", "password", "hash", "people", "dictionary", "rule"])
+        self.console.register_command("init", self._cmd_init, "Re-run initialization checks")
         self.console.register_command("settings", self._cmd_settings, "Open settings dialog")
         self.console.register_command("consultor", self._cmd_consultor, "Enter LLM consultor mode")
         self.console.register_command("agent", self._cmd_agent, "Enter LLM agent mode")
@@ -5074,12 +5076,12 @@ class App(tk.Tk):
 
     def _toggle_focus(self, event=None):
         focused = self.focus_get()
-        if focused is self.console.input_entry:
+        if focused is self.console.input_text:
             view = self.visualizer.get_active_view()
             if view and hasattr(view, "terminal"):
                 view.terminal.focus_set()
             return "break"
-        self.console.input_entry.focus()
+        self.console.input_text.focus()
         return "break"
 
     def _on_close(self):
