@@ -2578,16 +2578,16 @@ def _shell_exec(args, ctx=None):
     cmd = args.get("command", "")
     if not sid or not cmd:
         return "Missing shell_id or command."
-    from src.gui.views.shell_list import is_agent_allowed
-    if not is_agent_allowed(sid):
-        return (f"Agent access is disabled for shell #{sid}. "
-                "Enable the 'Agent' toggle in that shell's view first.")
     from src.shells import shell_db, send_command, send_raw
     s = shell_db.get_session(sid)
     if not s:
         return f"Shell session #{sid} not found."
     if s.get("status") != "connected":
         return f"Shell #{sid} is not connected (status: {s.get('status', '?')})."
+    from src.gui.views.shell_list import is_agent_allowed
+    if not is_agent_allowed(sid):
+        return (f"Agent access is disabled for shell #{sid}. "
+                "Enable the 'Agent' toggle in that shell's view first.")
     shell_db.enable_agent_buffer(sid)
     shell_db.drain_agent_output(sid)
     shell_db.touch_agent(sid, cmd)
@@ -2632,16 +2632,16 @@ def _shell_wait(args, ctx=None):
     sid = int(args.get("shell_id", 0))
     if not sid:
         return "Missing shell_id."
-    from src.gui.views.shell_list import is_agent_allowed
-    if not is_agent_allowed(sid):
-        return (f"Agent access is disabled for shell #{sid}. "
-                "Enable the 'Agent' toggle in that shell's view first.")
     from src.shells import shell_db, send_raw
     s = shell_db.get_session(sid)
     if not s:
         return f"Shell session #{sid} not found."
     if s.get("status") != "connected":
         return f"Shell #{sid} is not connected."
+    from src.gui.views.shell_list import is_agent_allowed
+    if not is_agent_allowed(sid):
+        return (f"Agent access is disabled for shell #{sid}. "
+                "Enable the 'Agent' toggle in that shell's view first.")
     import time, re
     prefix = f"Shell #{sid}: "
     all_out = []
@@ -2683,16 +2683,16 @@ def _shell_interrupt(args, ctx=None):
     sid = int(args.get("shell_id", 0))
     if not sid:
         return "Missing shell_id."
-    from src.gui.views.shell_list import is_agent_allowed
-    if not is_agent_allowed(sid):
-        return (f"Agent access is disabled for shell #{sid}. "
-                "Enable the 'Agent' toggle in that shell's view first.")
     from src.shells import shell_db, send_raw
     s = shell_db.get_session(sid)
     if not s:
         return f"Shell session #{sid} not found."
     if s.get("status") != "connected":
         return f"Shell #{sid} is not connected."
+    from src.gui.views.shell_list import is_agent_allowed
+    if not is_agent_allowed(sid):
+        return (f"Agent access is disabled for shell #{sid}. "
+                "Enable the 'Agent' toggle in that shell's view first.")
     import time, re
     prefix = f"Shell #{sid}: "
     send_raw(sid, "\x03")
