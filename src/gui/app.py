@@ -4177,13 +4177,17 @@ class App(tk.Tk):
             else:
                 self.console.warning(f"No machine with ID #{mid}")
                 return
+        self.console.body(f"Pinging {ip}...")
+        threading.Thread(target=self._run_ping, args=(ip,), daemon=True).start()
+
+    def _run_ping(self, ip):
         result = _do_ping(ip)
         if result is None:
-            self.console.warning(f"{ip}: no response")
+            self.console.after(0, lambda: self.console.warning(f"{ip}: no response"))
         else:
             rtt_ms, ttl = result
             ttl_part = f"  ttl={ttl}" if ttl is not None else ""
-            self.console.success(f"{ip}: time={rtt_ms:.1f}ms{ttl_part}")
+            self.console.after(0, lambda: self.console.success(f"{ip}: time={rtt_ms:.1f}ms{ttl_part}"))
 
     def _cmd_nslookup(self, args):
         if not args:
