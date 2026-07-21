@@ -116,7 +116,7 @@ class Console(tk.Frame):
             bg=BG,
             fg=FG_DIM,
             insertbackground=FG,
-            font=(fonts.family(), 11),
+            font=(fonts.family(), self._font_size),
             borderwidth=0,
             highlightthickness=0,
         )
@@ -135,41 +135,61 @@ class Console(tk.Frame):
             text="HSF> ",
             bg=BG_INPUT,
             fg=FG,
-            font=(fonts.family(), 11),
+            font=(fonts.family(), self._font_size),
         )
         self.prompt_label.grid(row=0, column=0, sticky="w")
 
         self._spinner_label = tk.Label(
             input_frame, text="\u2800", bg=BG_INPUT, fg="#5ba3ec",
-            font=(fonts.family(), 11),
+            font=(fonts.family(), self._font_size),
         )
         self._spinner_label.grid(row=0, column=1, sticky="w")
 
         self.input_var = tk.StringVar()
-        self.input_entry = tk.Entry(
+        self.input_text = tk.Text(
             input_frame,
-            textvariable=self.input_var,
             bg=BG,
             fg=FG,
             insertbackground=FG,
-            font=(fonts.family(), 11),
+            font=(fonts.family(), self._font_size),
             borderwidth=1,
             relief=tk.FLAT,
             highlightthickness=1,
             highlightcolor="#222222",
             highlightbackground="#222222",
+            height=1,
+            wrap=tk.NONE,
+            undo=False,
         )
-        self.input_entry.grid(row=0, column=2, sticky="ew")
-        self.input_entry.bind("<Return>", self._on_enter)
-        self.input_entry.bind("<Up>", self._on_up)
-        self.input_entry.bind("<Down>", self._on_down)
-        self.input_entry.bind("<KeyPress>", self._on_key_press)
-        self.input_entry.bind("<KeyRelease>", self._on_key_release)
-        self.input_entry.bind("<Tab>", self._on_tab)
-        self.input_entry.bind("<Escape>", self._on_escape)
-        self.input_entry.bind("<FocusIn>", self._on_focus_in)
-        self.input_entry.bind("<FocusOut>", self._on_focus_out)
-        self.input_entry.focus()
+        self.input_text.grid(row=0, column=2, sticky="ew")
+        self.input_text.bind("<Return>", self._on_enter)
+        self.input_text.bind("<Up>", self._on_up)
+        self.input_text.bind("<Down>", self._on_down)
+        self.input_text.bind("<KeyPress>", self._on_key_press)
+        self.input_text.bind("<KeyRelease>", self._on_key_release)
+        self.input_text.bind("<Tab>", self._on_tab)
+        self.input_text.bind("<Escape>", self._on_escape)
+        self.input_text.bind("<FocusIn>", self._on_focus_in)
+        self.input_text.bind("<FocusOut>", self._on_focus_out)
+        self.input_text.focus()
+
+        self.input_text.bind("<Control-plus>", lambda e: self._adjust_font(+1), add="+")
+        self.input_text.bind("<Control-minus>", lambda e: self._adjust_font(-1), add="+")
+        self.input_text.bind("<Command-plus>", lambda e: self._adjust_font(+1), add="+")
+        self.input_text.bind("<Command-minus>", lambda e: self._adjust_font(-1), add="+")
+        self.input_text.bind("<Control-equal>", lambda e: self._adjust_font(+1), add="+")
+        self.input_text.bind("<Command-equal>", lambda e: self._adjust_font(+1), add="+")
+
+    def _input_get(self):
+        return self.input_text.get("1.0", "end-1c")
+
+    def _input_set(self, text):
+        self.input_text.delete("1.0", "end")
+        self.input_text.insert("1.0", text)
+        self.input_text.mark_set("insert", "end-1c")
+
+    def _input_focus(self):
+        self.input_text.focus()
 
         self.winfo_toplevel().bind("<Button-1>", self._on_root_click, add="+")
         self.winfo_toplevel().bind("<Escape>", self._on_escape, add="+")
@@ -183,16 +203,6 @@ class Console(tk.Frame):
 
         self.register_command("help", self._cmd_help, "Show this help message")
         self.register_command("clear", self._cmd_clear, "Clear the console")
-
-        if self._font_size != 11:
-            self.after(0, self._apply_font_size)
-
-    def _apply_font_size(self):
-        new_font = (fonts.family(), self._font_size)
-        self.output_area.configure(font=new_font)
-        self.input_entry.configure(font=new_font)
-        self.prompt_label.configure(font=new_font)
-        self._spinner_label.configure(font=new_font)
 
     def register_command(self, name, handler, help_text=""):
         self.commands[name] = {"handler": handler, "help": help_text}
@@ -321,9 +331,15 @@ class Console(tk.Frame):
         self.writeln(f"[!] {text}", ERR_COLOR)
 
     def _on_enter(self, event):
+        if event.state & 0x0001:
+            self.input_text.insert("insert", "\n")
+            lines = self.input_text.get("1.0", "end-1c").count("\n") + 1
+            self.input_text.configure(height=lines)
+            return "break"
         self._close_autocomplete()
-        raw = self.input_var.get().strip()
-        self.input_var.set("")
+        raw = self._input_get().strip()
+        self._input_set("")
+        self.input_text.configure(height=1)
         if self._is_system:
             if raw == "stop":
                 self._is_system = False
@@ -358,11 +374,11 @@ class Console(tk.Frame):
         if not self._history:
             return "break"
         if self._history_index == len(self._history):
-            self._saved_input = self.input_var.get()
+            self._saved_input = self._input_get()
         if self._history_index > 0:
             self._history_index -= 1
-            self.input_var.set(self._history[self._history_index])
-            self.input_entry.icursor(tk.END)
+            self._input_set(self._history[self._history_index])
+            
         return "break"
 
     def _on_down(self, event):
@@ -370,17 +386,17 @@ class Console(tk.Frame):
             return "break"
         self._history_index += 1
         if self._history_index == len(self._history):
-            self.input_var.set(self._saved_input)
+            self._input_set(self._saved_input)
         else:
-            self.input_var.set(self._history[self._history_index])
-            self.input_entry.icursor(tk.END)
+            self._input_set(self._history[self._history_index])
+            
         return "break"
 
     def _adjust_font(self, delta):
         self._font_size = max(8, min(24, self._font_size + delta))
         new_font = (fonts.family(), self._font_size)
         self.output_area.configure(font=new_font)
-        self.input_entry.configure(font=new_font)
+        self.input_text.configure(font=new_font)
         self.prompt_label.configure(font=new_font)
         self._spinner_label.configure(font=new_font)
         if self._autocomplete_popup:
@@ -459,6 +475,8 @@ class Console(tk.Frame):
             self._skip_release = True
             self._close_autocomplete()
             return "break"
+        if event.keysym in ("BackSpace", "Delete"):
+            self.after_idle(self._sync_input_height)
         if event.keysym not in ("Tab", "Return", "Escape", "Up", "Down", "Shift_L", "Shift_R",
                                 "Control_L", "Control_R", "Alt_L", "Alt_R", "Meta_L", "Meta_R",
                                 "Command", "Caps_Lock", "BackSpace", "Delete"):
@@ -466,11 +484,15 @@ class Console(tk.Frame):
                 self.after_cancel(self._filter_id)
             self._filter_id = self.after(80, self._filter_autocomplete)
 
+    def _sync_input_height(self):
+        lines = self.input_text.get("1.0", "end-1c").count("\n") + 1
+        self.input_text.configure(height=max(1, lines))
+
     def _on_key_release(self, event):
         if self._skip_release:
             self._skip_release = False
             return
-        if self._is_system and not self.input_var.get() and event.keysym in ("BackSpace", "Delete"):
+        if self._is_system and not self._input_get() and event.keysym in ("BackSpace", "Delete"):
             self._is_system = False
             self.prompt_label.config(
                 text=f"{self._mode_label}> "
@@ -485,7 +507,7 @@ class Console(tk.Frame):
     def _on_tab(self, event):
         if self._is_system:
             return "break"
-        raw = self.input_var.get()
+        raw = self._input_get()
         prefix = raw.strip()
         if not prefix:
             if self._mode_cycle_cb:
@@ -511,8 +533,8 @@ class Console(tk.Frame):
                             a2 = p5[2] if len(p5) > 2 else ""
                             a3 = p5[3] if len(p5) > 3 else ""
                             a4 = p5[4] if len(p5) > 4 else ""
-                            self.input_var.set(f"{c} {a1} {a2} {a3} {a4} {insert} ")
-                            self.input_entry.icursor(tk.END)
+                            self._input_set(f"{c} {a1} {a2} {a3} {a4} {insert} ")
+                            
                             self._filter_autocomplete()
                         return "break"
                     inserts = [i for _, i in self._arg5_matches if i]
@@ -526,8 +548,8 @@ class Console(tk.Frame):
                             a2 = p5[2] if len(p5) > 2 else ""
                             a3 = p5[3] if len(p5) > 3 else ""
                             a4 = p5[4] if len(p5) > 4 else ""
-                            self.input_var.set(f"{c} {a1} {a2} {a3} {a4} {cp}")
-                            self.input_entry.icursor(tk.END)
+                            self._input_set(f"{c} {a1} {a2} {a3} {a4} {cp}")
+                            
                             self._filter_autocomplete()
                             return "break"
                     self._arg5_index = (self._arg5_index + 1) % len(self._arg5_matches)
@@ -544,8 +566,8 @@ class Console(tk.Frame):
                             a1 = p4[1] if len(p4) > 1 else ""
                             a2 = p4[2] if len(p4) > 2 else ""
                             a3 = p4[3] if len(p4) > 3 else ""
-                            self.input_var.set(f"{c} {a1} {a2} {a3} {insert} ")
-                            self.input_entry.icursor(tk.END)
+                            self._input_set(f"{c} {a1} {a2} {a3} {insert} ")
+                            
                             self._filter_autocomplete()
                         return "break"
                     inserts = [i for _, i in self._arg4_matches if i]
@@ -558,8 +580,8 @@ class Console(tk.Frame):
                             a1 = p4[1] if len(p4) > 1 else ""
                             a2 = p4[2] if len(p4) > 2 else ""
                             a3 = p4[3] if len(p4) > 3 else ""
-                            self.input_var.set(f"{c} {a1} {a2} {a3} {cp}")
-                            self.input_entry.icursor(tk.END)
+                            self._input_set(f"{c} {a1} {a2} {a3} {cp}")
+                            
                             self._filter_autocomplete()
                             return "break"
                     self._arg4_index = (self._arg4_index + 1) % len(self._arg4_matches)
@@ -575,8 +597,8 @@ class Console(tk.Frame):
                             c = p3[0] if len(p3) > 0 else ""
                             a1 = p3[1] if len(p3) > 1 else ""
                             a2 = p3[2] if len(p3) > 2 else ""
-                            self.input_var.set(f"{c} {a1} {a2} {insert} ")
-                            self.input_entry.icursor(tk.END)
+                            self._input_set(f"{c} {a1} {a2} {insert} ")
+                            
                             self._filter_autocomplete()
                         return "break"
                     inserts = [i for _, i in self._arg3_matches if i]
@@ -588,8 +610,8 @@ class Console(tk.Frame):
                             c = p3[0] if len(p3) > 0 else ""
                             a1 = p3[1] if len(p3) > 1 else ""
                             a2 = p3[2] if len(p3) > 2 else ""
-                            self.input_var.set(f"{c} {a1} {a2} {cp}")
-                            self.input_entry.icursor(tk.END)
+                            self._input_set(f"{c} {a1} {a2} {cp}")
+                            
                             self._filter_autocomplete()
                             return "break"
                     self._arg3_index = (self._arg3_index + 1) % len(self._arg3_matches)
@@ -601,8 +623,8 @@ class Console(tk.Frame):
                     if len(self._arg2_matches) == 1:
                         _, insert = self._arg2_matches[0]
                         if insert:
-                            self.input_var.set(f"{cmd_prefix} {arg1} {insert} ")
-                            self.input_entry.icursor(tk.END)
+                            self._input_set(f"{cmd_prefix} {arg1} {insert} ")
+                            
                             self._filter_autocomplete()
                         return "break"
                     inserts = [i for _, i in self._arg2_matches if i]
@@ -611,8 +633,8 @@ class Console(tk.Frame):
                         p2 = prefix.split(None, 2)
                         a2_text = p2[2] if len(p2) > 2 else ""
                         if len(cp) > len(a2_text):
-                            self.input_var.set(f"{cmd_prefix} {arg1} {cp}")
-                            self.input_entry.icursor(tk.END)
+                            self._input_set(f"{cmd_prefix} {arg1} {cp}")
+                            
                             self._filter_autocomplete()
                             return "break"
                     self._arg2_index = (self._arg2_index + 1) % len(self._arg2_matches)
@@ -621,15 +643,15 @@ class Console(tk.Frame):
                     self._arg2_listbox.activate(self._arg2_index)
                     return "break"
                 if len(sc_matches) == 1 and arg_prefix and arg_prefix != sc_matches[0]:
-                    self.input_var.set(f"{cmd_prefix} {sc_matches[0]} ")
-                    self.input_entry.icursor(tk.END)
+                    self._input_set(f"{cmd_prefix} {sc_matches[0]} ")
+                    
                     self._filter_autocomplete()
                     return "break"
                 if len(sc_matches) > 1 and self._arg_popup:
                     cp = self._common_prefix(sc_matches)
                     if len(cp) > len(arg1):
-                        self.input_var.set(f"{cmd_prefix} {cp}")
-                        self.input_entry.icursor(tk.END)
+                        self._input_set(f"{cmd_prefix} {cp}")
+                        
                         self._filter_autocomplete()
                         return "break"
                 if self._arg_popup:
@@ -645,15 +667,15 @@ class Console(tk.Frame):
         if not matches:
             return "break"
         if len(matches) == 1 and prefix:
-            self.input_var.set(matches[0][0] + " ")
-            self.input_entry.icursor(tk.END)
+            self._input_set(matches[0][0] + " ")
+            
             self._filter_autocomplete()
             return "break"
         if len(matches) > 1:
             cp = self._common_prefix([m[0] for m in matches])
             if len(cp) > len(prefix):
-                self.input_var.set(cp)
-                self.input_entry.icursor(tk.END)
+                self._input_set(cp)
+                
                 self._filter_autocomplete()
                 return "break"
 
@@ -690,7 +712,7 @@ class Console(tk.Frame):
         lb.selection_set(0)
         lb.activate(0)
         lb.bind("<ButtonRelease-1>", self._on_popup_click)
-        lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
+        lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self._input_focus()))
 
         popup_w = f.measure(" " * (longest + 3)) + 4
         h = len(matches) * line_h + 4 + len(matches)
@@ -733,7 +755,7 @@ class Console(tk.Frame):
     def _filter_autocomplete(self):
         if self._is_system:
             return
-        raw = self.input_var.get()
+        raw = self._input_get()
         prefix = raw.strip()
         if not prefix:
             all_cmds = [(n, info["help"]) for n, info in self.commands.items()]
@@ -950,7 +972,7 @@ class Console(tk.Frame):
             lb.selection_set(0)
             lb.activate(0)
             lb.bind("<ButtonRelease-1>", lambda e: self._on_arg_click())
-            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
+            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self._input_focus()))
 
             frame.place(x=cmd_x + cmd_w, y=bottom - h, width=popup_w, height=h)
             frame.lift()
@@ -1019,7 +1041,7 @@ class Console(tk.Frame):
             lb.selection_set(0)
             lb.activate(0)
             lb.bind("<ButtonRelease-1>", lambda e: self._on_arg2_click())
-            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
+            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self._input_focus()))
 
             frame.place(x=arg1_x + arg1_w, y=bottom - h, width=popup_w, height=h)
             frame.lift()
@@ -1039,16 +1061,16 @@ class Console(tk.Frame):
 
     def _on_arg2_click(self):
         if self._arg2_index >= 0 and self._arg2_matches:
-            current = self.input_var.get().strip()
+            current = self._input_get().strip()
             parts = current.split(None, 2)
             cmd = parts[0] if len(parts) > 0 else ""
             arg1_val = parts[1] if len(parts) > 1 else ""
             _, insert = self._arg2_matches[self._arg2_index]
             if insert:
-                self.input_var.set(f"{cmd} {arg1_val} {insert} ")
-                self.input_entry.icursor(tk.END)
+                self._input_set(f"{cmd} {arg1_val} {insert} ")
+                
         self._close_autocomplete()
-        self.input_entry.focus()
+        self._input_focus()
 
     def _show_arg3_popup(self, items):
         if not self._arg2_popup:
@@ -1101,7 +1123,7 @@ class Console(tk.Frame):
             lb.selection_set(0)
             lb.activate(0)
             lb.bind("<ButtonRelease-1>", lambda e: self._on_arg3_click())
-            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
+            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self._input_focus()))
 
             frame.place(x=arg2_x + arg2_w, y=bottom - h, width=popup_w, height=h)
             frame.lift()
@@ -1121,17 +1143,17 @@ class Console(tk.Frame):
 
     def _on_arg3_click(self):
         if self._arg3_index >= 0 and self._arg3_matches:
-            current = self.input_var.get().strip()
+            current = self._input_get().strip()
             parts = current.split(None, 3)
             cmd = parts[0] if len(parts) > 0 else ""
             arg1_val = parts[1] if len(parts) > 1 else ""
             arg2_val = parts[2] if len(parts) > 2 else ""
             _, insert = self._arg3_matches[self._arg3_index]
             if insert:
-                self.input_var.set(f"{cmd} {arg1_val} {arg2_val} {insert} ")
-                self.input_entry.icursor(tk.END)
+                self._input_set(f"{cmd} {arg1_val} {arg2_val} {insert} ")
+                
         self._close_autocomplete()
-        self.input_entry.focus()
+        self._input_focus()
 
     def _show_arg4_popup(self, items):
         if not self._arg3_popup:
@@ -1184,7 +1206,7 @@ class Console(tk.Frame):
             lb.selection_set(0)
             lb.activate(0)
             lb.bind("<ButtonRelease-1>", lambda e: self._on_arg4_click())
-            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
+            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self._input_focus()))
 
             frame.place(x=arg3_x + arg3_w, y=bottom - h, width=popup_w, height=h)
             frame.lift()
@@ -1204,7 +1226,7 @@ class Console(tk.Frame):
 
     def _on_arg4_click(self):
         if self._arg4_index >= 0 and self._arg4_matches:
-            current = self.input_var.get().strip()
+            current = self._input_get().strip()
             parts = current.split(None, 4)
             cmd = parts[0] if len(parts) > 0 else ""
             arg1_val = parts[1] if len(parts) > 1 else ""
@@ -1212,10 +1234,10 @@ class Console(tk.Frame):
             arg3_val = parts[3] if len(parts) > 3 else ""
             _, insert = self._arg4_matches[self._arg4_index]
             if insert:
-                self.input_var.set(f"{cmd} {arg1_val} {arg2_val} {arg3_val} {insert} ")
-                self.input_entry.icursor(tk.END)
+                self._input_set(f"{cmd} {arg1_val} {arg2_val} {arg3_val} {insert} ")
+                
         self._close_autocomplete()
-        self.input_entry.focus()
+        self._input_focus()
 
     def _show_arg5_popup(self, items):
         if not self._arg4_popup:
@@ -1267,7 +1289,7 @@ class Console(tk.Frame):
             lb.selection_set(0)
             lb.activate(0)
             lb.bind("<ButtonRelease-1>", lambda e: self._on_arg5_click())
-            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self.input_entry.focus()))
+            lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self._input_focus()))
             frame.place(x=arg4_x + arg4_w, y=bottom - h, width=popup_w, height=h)
             frame.lift()
             self._arg5_popup = frame
@@ -1285,7 +1307,7 @@ class Console(tk.Frame):
 
     def _on_arg5_click(self):
         if self._arg5_index >= 0 and self._arg5_matches:
-            current = self.input_var.get().strip()
+            current = self._input_get().strip()
             parts = current.split(None, 5)
             cmd = parts[0] if len(parts) > 0 else ""
             a1 = parts[1] if len(parts) > 1 else ""
@@ -1294,21 +1316,21 @@ class Console(tk.Frame):
             a4 = parts[4] if len(parts) > 4 else ""
             _, insert = self._arg5_matches[self._arg5_index]
             if insert:
-                self.input_var.set(f"{cmd} {a1} {a2} {a3} {a4} {insert} ")
-                self.input_entry.icursor(tk.END)
+                self._input_set(f"{cmd} {a1} {a2} {a3} {a4} {insert} ")
+                
         self._close_autocomplete()
-        self.input_entry.focus()
+        self._input_focus()
 
     def _on_arg_click(self):
         if self._arg_index >= 0 and self._arg_matches:
-            current = self.input_var.get().strip()
+            current = self._input_get().strip()
             parts = current.split(None, 1)
             cmd = parts[0]
             arg = self._arg_matches[self._arg_index]
-            self.input_var.set(f"{cmd} {arg} ")
-            self.input_entry.icursor(tk.END)
+            self._input_set(f"{cmd} {arg} ")
+            
         self._close_autocomplete()
-        self.input_entry.focus()
+        self._input_focus()
 
     def _on_focus_in(self, event):
         if not self._is_system:
@@ -1320,7 +1342,7 @@ class Console(tk.Frame):
     def _on_root_click(self, event):
         if not self._autocomplete_popup:
             return
-        if event.widget == self.input_entry:
+        if event.widget == self.input_text:
             return
         popup = self._autocomplete_popup
         if popup.winfo_containing(event.x_root, event.y_root) == popup:
@@ -1366,10 +1388,10 @@ class Console(tk.Frame):
 
     def _autocomplete_select(self):
         if self._autocomplete_index >= 0 and self._autocomplete_matches:
-            self.input_var.set(self._autocomplete_matches[self._autocomplete_index][0] + " ")
-            self.input_entry.icursor(tk.END)
+            self._input_set(self._autocomplete_matches[self._autocomplete_index][0] + " ")
+            
         self._close_autocomplete()
-        self.input_entry.focus()
+        self._input_focus()
 
     def _on_popup_click(self, event):
         idx = self._autocomplete_listbox.nearest(event.y)
