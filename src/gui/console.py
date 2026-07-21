@@ -180,17 +180,6 @@ class Console(tk.Frame):
         self.input_text.bind("<Control-equal>", lambda e: self._adjust_font(+1), add="+")
         self.input_text.bind("<Command-equal>", lambda e: self._adjust_font(+1), add="+")
 
-    def _input_get(self):
-        return self.input_text.get("1.0", "end-1c")
-
-    def _input_set(self, text):
-        self.input_text.delete("1.0", "end")
-        self.input_text.insert("1.0", text)
-        self.input_text.mark_set("insert", "end-1c")
-
-    def _input_focus(self):
-        self.input_text.focus()
-
         self.winfo_toplevel().bind("<Button-1>", self._on_root_click, add="+")
         self.winfo_toplevel().bind("<Escape>", self._on_escape, add="+")
 
@@ -203,6 +192,17 @@ class Console(tk.Frame):
 
         self.register_command("help", self._cmd_help, "Show this help message")
         self.register_command("clear", self._cmd_clear, "Clear the console")
+
+    def _input_get(self):
+        return self.input_text.get("1.0", "end-1c")
+
+    def _input_set(self, text):
+        self.input_text.delete("1.0", "end")
+        self.input_text.insert("1.0", text)
+        self.input_text.mark_set("insert", "end-1c")
+
+    def _input_focus(self):
+        self.input_text.focus()
 
     def register_command(self, name, handler, help_text=""):
         self.commands[name] = {"handler": handler, "help": help_text}
@@ -369,6 +369,7 @@ class Console(tk.Frame):
         self._history_index = len(self._history)
         self._saved_input = ""
         self._execute(raw)
+        return "break"
 
     def _on_up(self, event):
         if not self._history:
@@ -476,7 +477,7 @@ class Console(tk.Frame):
             self._close_autocomplete()
             return "break"
         if event.keysym in ("BackSpace", "Delete"):
-            self.after_idle(self._sync_input_height)
+            self.after(1, self._sync_input_height)
         if event.keysym not in ("Tab", "Return", "Escape", "Up", "Down", "Shift_L", "Shift_R",
                                 "Control_L", "Control_R", "Alt_L", "Alt_R", "Meta_L", "Meta_R",
                                 "Command", "Caps_Lock", "BackSpace", "Delete"):
