@@ -159,7 +159,7 @@ class Console(tk.Frame):
             highlightcolor="#222222",
             highlightbackground="#222222",
             height=1,
-            wrap=tk.NONE,
+            wrap=tk.WORD,
             undo=False,
         )
         self.input_text.grid(row=0, column=2, sticky="ew")
@@ -336,13 +336,17 @@ class Console(tk.Frame):
     def _on_enter(self, event):
         if event.state & 0x0001:
             self.input_text.insert("insert", "\n")
-            lines = self.input_text.get("1.0", "end-1c").count("\n") + 1
+            try:
+                result = self.input_text.count("1.0", "end", "displaylines")
+                lines = result[0] if isinstance(result, tuple) else result
+            except Exception:
+                lines = 1
             self.input_text.configure(height=lines)
             return "break"
         self._close_autocomplete()
         raw = self._input_get().strip()
         self._input_set("")
-        self.input_text.configure(height=1)
+        self.after(1, self._sync_input_height)
         if self._is_system:
             if raw == "stop":
                 self._is_system = False
@@ -479,17 +483,23 @@ class Console(tk.Frame):
             self._skip_release = True
             self._close_autocomplete()
             return "break"
-        if event.keysym in ("BackSpace", "Delete"):
-            self.after(1, self._sync_input_height)
         if event.keysym not in ("Tab", "Return", "Escape", "Up", "Down", "Shift_L", "Shift_R",
                                 "Control_L", "Control_R", "Alt_L", "Alt_R", "Meta_L", "Meta_R",
                                 "Command", "Caps_Lock", "BackSpace", "Delete"):
             if self._filter_id:
                 self.after_cancel(self._filter_id)
             self._filter_id = self.after(80, self._filter_autocomplete)
+        if event.keysym not in ("Shift_L", "Shift_R", "Control_L", "Control_R",
+                                "Alt_L", "Alt_R", "Meta_L", "Meta_R", "Command",
+                                "Caps_Lock"):
+            self.after(1, self._sync_input_height)
 
     def _sync_input_height(self):
-        lines = self.input_text.get("1.0", "end-1c").count("\n") + 1
+        try:
+            result = self.input_text.count("1.0", "end", "displaylines")
+            lines = result[0] if isinstance(result, tuple) else result
+        except Exception:
+            lines = 1
         self.input_text.configure(height=max(1, lines))
 
     def _on_key_release(self, event):
