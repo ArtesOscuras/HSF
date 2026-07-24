@@ -52,6 +52,7 @@ class Console(tk.Frame):
         self._mode_handler = None
         self._mode_label = ""
         self._mode_fg = FG
+        self._mode_commands = None
         self._mode_cycle_cb = None
         self._prompt_hovered = False
         self._focus_callback = None
@@ -249,12 +250,14 @@ class Console(tk.Frame):
     def set_system_stop_handler(self, handler):
         self._system_stop_handler = handler
 
-    def set_mode_handler(self, handler, label="", fg=FG):
+    def set_mode_handler(self, handler, label="", fg=FG, commands=None):
         self._mode_handler = handler
         self._mode_label = label
         self._mode_fg = fg
+        self._mode_commands = commands
         if handler:
             self.prompt_label.config(text=f"{self._mode_label}> ", fg=self._mode_fg)
+        self._filter_autocomplete()
 
     def set_mode_cycle_callback(self, callback):
         self._mode_cycle_cb = callback
@@ -695,7 +698,12 @@ class Console(tk.Frame):
                     self._arg_listbox.activate(self._arg_index)
                 return "break"
 
-        matches = [(n, info["help"]) for n, info in self.commands.items()
+        if self._mode_handler and self._mode_commands:
+            match_src = self._mode_commands
+        else:
+            match_src = self.commands
+        matches = [(n, match_src[n] if isinstance(match_src, dict) else match_src[n]["help"])
+                   for n in match_src
                    if n.startswith(prefix)]
         matches.sort(key=lambda x: x[0])
         if not matches:
@@ -792,7 +800,10 @@ class Console(tk.Frame):
         raw = self._input_get()
         prefix = raw.strip()
         if not prefix:
-            all_cmds = [(n, info["help"]) for n, info in self.commands.items()]
+            if self._mode_handler and self._mode_commands:
+                all_cmds = [(n, h) for n, h in self._mode_commands.items()]
+            else:
+                all_cmds = [(n, info["help"]) for n, info in self.commands.items()]
             all_cmds.sort(key=lambda x: x[0])
             self._close_arg_popup()
             self._close_arg2_popup()

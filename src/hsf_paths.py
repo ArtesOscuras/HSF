@@ -70,9 +70,19 @@ def pocs_dir() -> Path:
     p.mkdir(parents=True, exist_ok=True)
     return p
 
+def cache_dir() -> Path:
+    p = _get_data_home() / "cache"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
 def settings_file() -> Path:
     p = _get_data_home() / "settings.json"
     return p
 
 def logs_dir() -> Path:
     return _PKG / "logs"
+
+def runtime_logs_dir() -> Path:
+    p = _get_data_home() / "logs"
+    p.mkdir(parents=True, exist_ok=True)
+    return p

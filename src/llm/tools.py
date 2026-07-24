@@ -788,6 +788,33 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "list_cache",
+            "description": "List cached tool output files in the cache/ directory. These are truncated large tool outputs saved to disk. Use read_cache to read them.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_cache",
+            "description": "Read a cached tool output file from the cache/ directory. Large tool outputs are automatically saved here when they exceed size limits. Use offset/limit to paginate.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "Filename as shown by list_cache or the truncation marker"},
+                    "offset": {"type": "integer", "description": "Line number to start reading from (1-indexed, default 1)"},
+                    "limit": {"type": "integer", "description": "Max lines to read (default 2000)"},
+                },
+                "required": ["filename"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "delete_file",
             "description": "Delete a dictionary or rule file from the wordlist or rules directory.",
             "parameters": {
@@ -1075,7 +1102,8 @@ def execute(name, args_dict, tool_context=None):
     if not handler:
         return f"Unknown tool: {name}"
     try:
-        return handler(args_dict, tool_context)
+        result = handler(args_dict, tool_context)
+        return _bound_tool_output(result, name)
     except Exception as e:
         return f"Tool error: {e}"
 
@@ -1085,6 +1113,57 @@ def execute(name, args_dict, tool_context=None):
 # tool_context is the App instance (or None).
 
 MAX_SHELL_CHARS = 5000
+MAX_TOOL_LINES = 2000
+MAX_TOOL_BYTES = 50 * 1024
+TOOL_BYTE_LIMITS = {
+    "poc_exec": 1000,
+    "port_inspector": 2000,
+    "check_machine": 3000,
+}
+
+
+def _bound_tool_output(output, tool_name):
+    if not isinstance(output, str):
+        return output
+    byte_limit = TOOL_BYTE_LIMITS.get(tool_name, MAX_TOOL_BYTES)
+    lines = output.split("\n")
+    byte_len = len(output.encode("utf-8"))
+    if len(lines) <= MAX_TOOL_LINES and byte_len <= byte_limit:
+        return output
+    from src.hsf_paths import cache_dir
+    import time as _time
+    ts = int(_time.time())
+    filename = f"tool_{ts}_{tool_name}.txt"
+    path = os.path.join(str(cache_dir()), filename)
+    try:
+        with open(path, "w") as f:
+            f.write(output)
+    except (PermissionError, OSError):
+        return output
+    head = MAX_TOOL_LINES // 2
+    tail = max(0, MAX_TOOL_LINES // 2 - 1)
+    marker = f"\n... output truncated ({len(lines)} lines, {byte_len} bytes); full content saved to cache/{filename} ...\n"
+    preview = "\n".join(lines[:head])
+    if tail > 0 and len(lines) > head:
+        preview += marker + "\n".join(lines[-tail:])
+    else:
+        preview += marker
+    if len(preview.encode("utf-8")) > byte_limit:
+        marker_bytes = len(marker.encode("utf-8"))
+        content_limit = max(100, byte_limit - marker_bytes - 10)
+        preview = preview[:content_limit] + marker
+        if len(preview.encode("utf-8")) > byte_limit:
+            preview = preview[:byte_limit]
+    return preview
+
+
+def _resolve_cache_path(filename):
+    from src.hsf_paths import cache_dir
+    base = str(cache_dir())
+    resolved = os.path.normpath(os.path.join(base, filename))
+    if not resolved.startswith(os.path.normpath(base) + os.sep) and resolved != os.path.normpath(base):
+        return None
+    return resolved
 
 
 def _fmt_shell(prefix, combined):
@@ -2496,6 +2575,69 @@ def _list_pocs(args, ctx=None):
             size_str = f"{size} B"
         result += f"  {f} ({size_str})\n"
     return result
+
+
+    return result
+
+
+@register("list_cache")
+def _list_cache(args, ctx=None):
+    from src.hsf_paths import cache_dir
+    try:
+        d = str(cache_dir())
+        files = sorted(
+            f for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))
+        )
+    except OSError:
+        return "Could not read cache directory."
+    if not files:
+        return "No cached files."
+    result = f"Cached files in cache/:\n"
+    for f in files:
+        path = os.path.join(d, f)
+        size = os.path.getsize(path)
+        if size >= 1024 * 1024:
+            size_str = f"{size / (1024 * 1024):.1f} MB"
+        elif size >= 1024:
+            size_str = f"{size / 1024:.0f} KB"
+        else:
+            size_str = f"{size} B"
+        result += f"  {f} ({size_str})\n"
+    return result
+
+
+@register("read_cache")
+def _read_cache(args, ctx=None):
+    filename = args.get("filename", "").strip()
+    if not filename:
+        return "Missing filename."
+    path = _resolve_cache_path(filename)
+    if not path:
+        return f"Invalid filename: {filename}"
+    if not os.path.isfile(path):
+        return f"Cached file '{filename}' not found."
+    try:
+        with open(path, "r") as f:
+            content = f.read()
+    except (PermissionError, OSError) as e:
+        return f"Error reading {filename}: {e}"
+    offset = int(args.get("offset", 1))
+    limit = int(args.get("limit", 2000))
+    lines = content.splitlines(keepends=True)
+    total_lines = len(lines)
+    if offset < 1:
+        offset = 1
+    if offset > total_lines:
+        offset = total_lines
+    start = offset - 1
+    end = start + limit
+    sliced = lines[start:end]
+    result = "".join(sliced)
+    header = f"cache/{filename} ({total_lines} lines"
+    if len(sliced) < total_lines:
+        header += f", showing lines {offset}-{min(end, total_lines)}"
+    header += "):\n"
+    return header + result
 
 
 @register("delete_file")

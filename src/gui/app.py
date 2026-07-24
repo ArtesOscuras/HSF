@@ -29,10 +29,11 @@ import datetime as _datetime
 
 def _ctx_log(msg):
     try:
+        from src.hsf_paths import runtime_logs_dir
+        p = str(runtime_logs_dir())
         import os as _os
-        p = _os.path.expanduser("~/.local/share/hsf/log/ctx_debug.log")
-        _os.makedirs(_os.path.dirname(p), exist_ok=True)
-        with open(p, "a") as f:
+        _os.makedirs(p, exist_ok=True)
+        with open(_os.path.join(p, "ctx_debug.log"), "a") as f:
             f.write(f"{_datetime.datetime.now().isoformat()} {msg}\n")
     except Exception:
         pass
@@ -780,13 +781,15 @@ class App(tk.Tk):
         self.console.register_command("stop", self._cmd_stop, "Stop listeners")
         self.console.set_subcommands("stop", ["shells-listener", "mdns-listener", "scanner", "bruteforce", "fuzzer", "webrecorder", "tcpscan", "udpscan", "whatweb", "port-inspector", "bannergrab", "hashcat"])
         self.console.register_command("delete", self._cmd_delete, "Delete stored data")
-        self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell", "people", "dictionary", "rule", "poc"])
+        self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell", "people", "dictionary", "rule", "poc", "inventory", "cache"])
         self.console.register_command("add", self._cmd_add, "Add to inventory")
         self.console.set_subcommands("add", ["machine", "domain", "credential", "user", "password", "hash", "people", "dictionary", "rule"])
         self.console.register_command("init", self._cmd_init, "Re-run initialization checks")
         self.console.register_command("settings", self._cmd_settings, "Open settings dialog")
         self.console.register_command("consultor", self._cmd_consultor, "Enter LLM consultor mode")
         self.console.register_command("agent", self._cmd_agent, "Enter LLM agent mode")
+        self.console.register_command("debug", self._cmd_debug, "Debug utilities (ctx_screenshot)")
+        self.console.set_subcommands("debug", ["ctx_screenshot"])
         self.console.register_command("exit", self._cmd_exit, "Close the application")
 
         self.console.set_system_handler(self._run_system)
@@ -3738,6 +3741,44 @@ class App(tk.Tk):
         prompt = " ".join(args)
         self._agent_ask(prompt)
 
+    def _cmd_debug(self, args):
+        if not args:
+            self.console.info("Usage: debug ctx_screenshot")
+            return
+        sub = args[0].lower()
+        if sub == "ctx_screenshot":
+            self._cmd_debug_ctx_screenshot(args[1:])
+        else:
+            self.console.info(f"Unknown debug subcommand: {sub}. Use: ctx_screenshot")
+
+    def _cmd_debug_ctx_screenshot(self, args):
+        import json, os
+        from datetime import datetime
+        from src.hsf_paths import runtime_logs_dir
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"ctx_screenshot_{ts}.json"
+        path = os.path.join(str(runtime_logs_dir()), filename)
+
+        normalized = [self._normalize_msg(m) for m in self._llm_messages]
+
+        data = {
+            "timestamp": datetime.now().isoformat(),
+            "total_messages": len(normalized),
+            "context_limit": self._get_model_context_limit(),
+            "context_pct": self._get_context_percentage(),
+            "estimated_tokens": self._estimate_tokens(self._llm_messages),
+            "agent_mode": self._agent_mode,
+            "messages": normalized,
+        }
+
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2, default=str, ensure_ascii=False)
+
+        self.console.success(
+            f"Context saved to logs/{filename} "
+            f"({len(normalized)} messages, {os.path.getsize(path)} bytes)")
+
     def _cycle_mode(self):
         self._silent_mode_cycle = True
         try:
@@ -3754,8 +3795,13 @@ class App(tk.Tk):
     def _enter_consultor_mode(self):
         self._consultor_mode = True
         if not self._silent_mode_cycle:
-            self.console.info("Consultor mode. Type your prompt. Type 'exit' to quit.")
-        self.console.set_mode_handler(self._consultor_handler, "Consultor", "#e6b422")
+            self.console.info(
+                "Consultor mode. Commands: exit, stop, reset, compact, menu."
+            )
+        self.console.set_mode_handler(self._consultor_handler, "Consultor", "#e6b422",
+            commands={"exit": "Quit HSF", "stop": "Interrupt execution",
+                      "reset": "Clear conversation and cache", "compact": "Compact context",
+                      "menu": "Show help"})
         self._update_mode_prompt()
 
     def _consultor_handler(self, text):
@@ -3766,20 +3812,34 @@ class App(tk.Tk):
         if text.lower() == "menu":
             self.console.info(
                 "Consultor mode commands:\n"
-                "  exit  - Quit HSF\n"
-                "  reset - Clear conversation history and start fresh\n"
-                "  menu  - Show this help\n\n"
+                "  exit    - Quit HSF\n"
+                "  stop    - Interrupt the current consultor execution\n"
+                "  reset   - Clear conversation history, clear cache, start fresh\n"
+                "  compact - Manually compact the conversation context\n"
+                "  menu    - Show this help\n\n"
                 "Press Tab with empty input to cycle modes."
             )
+            return
+        if text.lower() == "stop":
+            if self._agent_stop_event:
+                self._agent_stop_event.set()
+            self.console.warning("Interrupting consultor execution...")
             return
         if text.lower() == "reset":
             self._llm_messages = []
             self._last_ctx_hash = None
             self._last_token_pct = None
             self._context_injected = False
-            self.console.success("Context reset. Conversation history cleared.")
+            self._clear_cache()
+            self.console.success("Context reset. Conversation history and cache cleared.")
             self._update_mode_prompt()
             return
+        if text.lower() == "compact":
+            import threading
+            threading.Thread(target=lambda: self._compact_if_needed(force=True), daemon=True).start()
+            return
+        import threading
+        self._agent_stop_event = threading.Event()
         self._consultor_ask(text)
 
     def _leave_consultor_mode(self):
@@ -3864,6 +3924,105 @@ class App(tk.Tk):
             _ctx_log(f"update_prompt ERROR: {e}")
             pass
 
+    def _clear_cache(self):
+        try:
+            from src.hsf_paths import cache_dir
+            d = str(cache_dir())
+            if os.path.isdir(d):
+                for f in os.listdir(d):
+                    p = os.path.join(d, f)
+                    if os.path.isfile(p):
+                        os.remove(p)
+                _ctx_log("cache cleared")
+        except Exception as e:
+            _ctx_log(f"cache clear ERROR: {e}")
+
+    @staticmethod
+    def _msg_attr(msg, key, default=None):
+        if isinstance(msg, dict):
+            return msg.get(key, default)
+        return getattr(msg, key, default)
+
+    def _repair_messages(self):
+        msgs = self._llm_messages
+        _ctx_log(f"repair start msgs={len(msgs)}")
+        removed = 0
+        steps = []
+        for i in range(len(msgs) - 1, -1, -1):
+            role = self._msg_attr(msgs[i], "role")
+            if role == "user":
+                self._llm_messages[:] = msgs[:i + 1]
+                removed = len(msgs) - (i + 1)
+                steps.append(f"i={i} user -> keep")
+                break
+            if role == "assistant":
+                tc = self._msg_attr(msgs[i], "tool_calls")
+                if tc:
+                    tc_count = len(tc) if isinstance(tc, (list, tuple)) else 0
+                    tool_count = 0
+                    j = i + 1
+                    while j < len(msgs) and self._msg_attr(msgs[j], "role") == "tool":
+                        tool_count += 1
+                        j += 1
+                    if tool_count >= tc_count:
+                        self._llm_messages[:] = msgs[:j]
+                        removed = len(msgs) - j
+                        steps.append(f"i={i} asst+{tc_count}tc tool_count={tool_count} ok -> keep to {j}")
+                        break
+                    else:
+                        self._llm_messages[:] = msgs[:i]
+                        removed = len(msgs) - i
+                        steps.append(f"i={i} asst+{tc_count}tc tool_count={tool_count} INCOMPLETE -> trunc at {i}")
+                        break
+                else:
+                    self._llm_messages[:] = msgs[:i + 1]
+                    removed = len(msgs) - (i + 1)
+                    steps.append(f"i={i} asst -> keep")
+                    break
+            if i >= len(msgs) - 15:
+                steps.append(f"i={i} {role} skip")
+        else:
+            system_msgs = [m for m in msgs if self._msg_attr(m, "role") == "system"]
+            self._llm_messages[:] = system_msgs
+            removed = len(msgs) - len(system_msgs)
+            steps.append("no_valid -> system_only")
+        for s in steps[-8:]:
+            _ctx_log(f"repair step: {s}")
+        _ctx_log(f"repair done removed={removed} msgs={len(self._llm_messages)}")
+
+    def _compact_if_needed(self, force=False):
+        from src.llm import compaction
+        limit = self._get_model_context_limit()
+        estimated = self._estimate_tokens(self._llm_messages)
+        overflow = compaction.is_overflow(estimated, limit)
+        _ctx_log(f"compact check msgs={len(self._llm_messages)} est={estimated} limit={limit} overflow={overflow} force={force}")
+        if not force and not overflow:
+            return False
+        before = len(self._llm_messages)
+        _ctx_log(f"compact start before={before} est={estimated} limit={limit}")
+        t0 = _datetime.datetime.now()
+        try:
+            from src.llm import LLMClient
+            client = LLMClient(purpose="agent")
+            self.console.after(0, lambda: self.console.warning("Compacting context..."))
+            ok = compaction.compact_messages(self._llm_messages, client, limit)
+            elapsed = (_datetime.datetime.now() - t0).total_seconds()
+            if ok:
+                after = len(self._llm_messages)
+                _ctx_log(f"compact done ok=True before={before} after={after} elapsed={elapsed:.2f}s")
+                self.console.after(0, lambda: self.console.success(
+                    f"Context compacted ({before} messages -> {after} messages)"))
+                return True
+            else:
+                _ctx_log(f"compact done ok=False before={before} elapsed={elapsed:.2f}s")
+                self.console.after(0, lambda: self.console.warning("Compaction skipped."))
+                return False
+        except Exception as e:
+            elapsed = (_datetime.datetime.now() - t0).total_seconds()
+            _ctx_log(f"compact error after={elapsed:.2f}s {type(e).__name__}: {e}")
+            self.console.after(0, lambda m=str(e): self.console.error(f"Compaction error: {m}"))
+            return False
+
     def _enter_agent_mode(self):
         self._agent_mode = True
         import threading
@@ -3872,9 +4031,12 @@ class App(tk.Tk):
         self._last_token_pct = None
         if not self._silent_mode_cycle:
             self.console.info(
-                "Agent mode. Commands: exit, stop, reset, menu."
+                "Agent mode. Commands: exit, stop, reset, compact, menu."
             )
-        self.console.set_mode_handler(self._agent_handler, "Agent", "#5ba3ec")
+        self.console.set_mode_handler(self._agent_handler, "Agent", "#5ba3ec",
+            commands={"exit": "Quit HSF", "stop": "Interrupt execution",
+                      "reset": "Clear conversation and cache", "compact": "Compact context",
+                      "menu": "Show help"})
         self._update_mode_prompt()
 
     def _agent_handler(self, text):
@@ -3892,17 +4054,23 @@ class App(tk.Tk):
             self._last_ctx_hash = None
             self._last_token_pct = None
             self._context_injected = False
-            self.console.success("Context reset. Conversation history cleared.")
+            self._clear_cache()
+            self.console.success("Context reset. Conversation history and cache cleared.")
             self._update_mode_prompt()
             return
         if text.lower() == "menu":
             self.console.info(
                 "Agent mode commands:\n"
-                "  exit  - Quit HSF\n"
-                "  stop  - Interrupt the current agent execution\n"
-                "  reset - Clear conversation history and start fresh\n"
-                "  menu  - Show this help"
+                "  exit    - Quit HSF\n"
+                "  stop    - Interrupt the current agent execution\n"
+                "  reset   - Clear conversation history, clear cache, start fresh\n"
+                "  compact - Manually compact the conversation context\n"
+                "  menu    - Show this help"
             )
+            return
+        if text.lower() == "compact":
+            import threading
+            threading.Thread(target=lambda: self._compact_if_needed(force=True), daemon=True).start()
             return
         import threading
         self._agent_stop_event = threading.Event()
@@ -3925,6 +4093,7 @@ class App(tk.Tk):
             self.console.start_thinking()
             stop = self._agent_stop_event
             if not _retry:
+                self._compact_if_needed()
                 msg_before = len(self._llm_messages)
                 self._llm_messages.append({"role": "user", "content": prompt})
             else:
@@ -4018,6 +4187,18 @@ class App(tk.Tk):
                     _ctx_log(f"agent_ask success msgs={len(self._llm_messages)} pct={self._get_context_percentage()}")
             except Exception as e:
                 _ctx_log(f"agent_ask ERROR: {e}")
+                err_str = str(e).lower()
+                if "tool_calls" in err_str or "tool_call_id" in err_str:
+                    tail = self._llm_messages[-30:]
+                    roles = []
+                    for m in tail:
+                        r = self._msg_attr(m, "role")
+                        tc = self._msg_attr(m, "tool_calls")
+                        if r == "assistant" and tc:
+                            r += "+tc"
+                        roles.append(r)
+                    _ctx_log(f"repair pre_dump msgs={len(self._llm_messages)} roles={' '.join(roles)}")
+                    self._repair_messages()
                 if stop is not None and not stop.is_set():
                     try:
                         self.console.after(0, lambda m=str(e): self.console.error(f"Agent error: {m}"))
@@ -4042,6 +4223,8 @@ class App(tk.Tk):
         self._inject_context()
         def _run():
             self.console.start_thinking()
+            stop = self._agent_stop_event
+            self._compact_if_needed()
             self._llm_messages.append({"role": "user", "content": prompt})
             succeeded = False
             try:
@@ -4051,6 +4234,9 @@ class App(tk.Tk):
                 full = ""
                 buf = ""
                 for chunk in stream:
+                    if stop is not None and stop.is_set():
+                        self.console.after(0, lambda: self.console.warning("Consultor stopped."))
+                        return
                     if chunk.choices and chunk.choices[0].delta.content:
                         full += chunk.choices[0].delta.content
                         buf += chunk.choices[0].delta.content
@@ -4103,6 +4289,48 @@ class App(tk.Tk):
             "role": "system", "content": ctx, "_is_context": True})
         self._context_injected = True
         _ctx_log(f"inject_context len={len(ctx)} msgs={len(self._llm_messages)}")
+
+    @staticmethod
+    def _normalize_msg(msg):
+        def _a(obj, key, default=None):
+            if isinstance(obj, dict):
+                return obj.get(key, default)
+            return getattr(obj, key, default)
+
+        if isinstance(msg, dict):
+            r = dict(msg)
+            r["_type"] = "dict"
+            tc = r.get("tool_calls")
+            if tc:
+                r["tool_calls"] = [
+                    {
+                        "id": _a(t, "id"),
+                        "function": {
+                            "name": _a(_a(t, "function", {}), "name", "?"),
+                            "arguments": _a(_a(t, "function", {}), "arguments", ""),
+                        },
+                    }
+                    for t in tc
+                ]
+            return r
+        r = {
+            "role": _a(msg, "role", "?"),
+            "content": _a(msg, "content", None),
+            "_type": type(msg).__name__,
+        }
+        tc = _a(msg, "tool_calls", None)
+        if tc:
+            r["tool_calls"] = [
+                {
+                    "id": _a(t, "id"),
+                    "function": {
+                        "name": _a(_a(t, "function", None), "name", "?"),
+                        "arguments": _a(_a(t, "function", None), "arguments", ""),
+                    },
+                }
+                for t in tc
+            ]
+        return r
 
     def _cmd_exit(self, args):
         self.destroy()
@@ -4773,6 +5001,10 @@ class App(tk.Tk):
             self._cmd_delete_rule(args[1:])
         elif sub == "poc":
             self._cmd_delete_poc(args[1:])
+        elif sub == "inventory":
+            self._cmd_delete_inventory(args[1:])
+        elif sub == "cache":
+            self._cmd_delete_cache(args[1:])
         else:
             self.console.error(f"Unknown delete target: {sub}.")
 
@@ -5062,6 +5294,65 @@ class App(tk.Tk):
             self.console.info("All evidence data cleared")
         else:
             self.console.info("Evidence directory not found")
+
+    def _cmd_delete_inventory(self, args):
+        from src.machines.credential_db import (
+            load_users, delete_user, load_passwords, delete_password,
+            load_credentials, delete_credential, load_hashes, load_tickets,
+        )
+        from src.machines.people_db import load_people
+        from src.hsf_paths import pocs_dir
+
+        deleted = 0
+
+        for u in list(load_users()):
+            delete_user(u["username"])
+            deleted += 1
+
+        for p in list(load_passwords()):
+            delete_password(p)
+            deleted += 1
+
+        for c in list(load_credentials()):
+            delete_credential(c["id"])
+            deleted += 1
+
+        for h in list(load_hashes()):
+            from src.machines.credential_db import delete_hash_entry
+            delete_hash_entry(h["id"])
+            deleted += 1
+
+        for t in list(load_tickets()):
+            from src.machines.credential_db import delete_ticket
+            delete_ticket(t["id"])
+            deleted += 1
+
+        for person in list(load_people()):
+            from src.machines.people_db import delete_person
+            delete_person(person["id"])
+            deleted += 1
+
+        pocs = str(pocs_dir())
+        if os.path.isdir(pocs):
+            for f in os.listdir(pocs):
+                p = os.path.join(pocs, f)
+                if os.path.isfile(p):
+                    os.remove(p)
+                    deleted += 1
+
+        self.console.success(f"Inventory cleared ({deleted} items). Machines, domains, rules and dictionaries preserved.")
+
+    def _cmd_delete_cache(self, args):
+        from src.hsf_paths import cache_dir
+        d = str(cache_dir())
+        deleted = 0
+        if os.path.isdir(d):
+            for f in os.listdir(d):
+                p = os.path.join(d, f)
+                if os.path.isfile(p):
+                    os.remove(p)
+                    deleted += 1
+        self.console.success(f"Cache cleared ({deleted} files).")
 
     def _cmd_delete_dbs(self, args):
         store.clear()

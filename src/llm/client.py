@@ -122,6 +122,12 @@ class LLMClient:
                         "content": result,
                     })
                 self._safe_len = len(messages)
+                if tool_context and hasattr(tool_context, '_compact_if_needed'):
+                    try:
+                        if tool_context._compact_if_needed():
+                            self._safe_len = len(messages)
+                    except Exception:
+                        pass
                 continue
             if choice.message.content:
                 if _XML_TOOL_PATTERN.search(choice.message.content):
