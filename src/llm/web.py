@@ -62,6 +62,73 @@ def _html_to_markdown(html):
     return h.handle(html)
 
 
+_SKIP_TAGS = {"nav", "footer", "aside", "script", "style", "noscript", "iframe", "object", "embed"}
+_SKIP_CLASSES = {"cookie", "cookies", "consent", "gdpr", "banner", "popup", "sidebar", "cookie-banner", "cookie-consent", "cookie-notice"}
+
+
+class _HTMLCleaner(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self._out = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if self._skip_depth > 0:
+            self._skip_depth += 1
+            return
+        if tag in _SKIP_TAGS:
+            self._skip_depth = 1
+            return
+        cls = dict(attrs).get("class", "").lower()
+        if cls:
+            for sc in _SKIP_CLASSES:
+                if sc in cls:
+                    self._skip_depth = 1
+                    return
+        if dict(attrs).get("id", "").lower() in {"sidebar", "cookie-banner", "cookie-consent"}:
+            self._skip_depth = 1
+            return
+        if attrs:
+            attr_str = "".join(f' {k}="{v}"' for k, v in attrs)
+            self._out.append(f"<{tag}{attr_str}>")
+        else:
+            self._out.append(f"<{tag}>")
+
+    def handle_endtag(self, tag):
+        if self._skip_depth > 0:
+            self._skip_depth -= 1
+            return
+        self._out.append(f"</{tag}>")
+
+    def handle_data(self, data):
+        if self._skip_depth > 0:
+            return
+        self._out.append(data)
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+    def handle_entityref(self, name):
+        if self._skip_depth > 0:
+            return
+        self._out.append(f"&{name};")
+
+    def handle_charref(self, name):
+        if self._skip_depth > 0:
+            return
+        self._out.append(f"&#{name};")
+
+    def get_html(self):
+        return "".join(self._out)
+
+
+def _strip_html_non_content(html):
+    parser = _HTMLCleaner()
+    parser.feed(html)
+    parser.close()
+    return parser.get_html()
+
+
 def _fetch_raw(url, timeout):
     headers = {"User-Agent": _CHROME_UA}
     resp = requests.get(url, headers=headers, timeout=timeout, stream=True, verify=False)
@@ -110,9 +177,11 @@ def fetch_url(url, format="markdown", timeout=DEFAULT_TIMEOUT, offset=1, limit=N
 
     if format == "text":
         if is_html:
+            content = _strip_html_non_content(content)
             content = _extract_text(content)
     elif format == "markdown":
         if is_html:
+            content = _strip_html_non_content(content)
             content = _html_to_markdown(content)
     else:
         pass
@@ -151,6 +220,45 @@ def web_search(query, num_results=10):
     return "\n".join(lines)
 
 
+def _parse_exa_results(text):
+    results = []
+    for block in text.split("\n---"):
+        block = block.strip()
+        if not block:
+            continue
+        title = ""
+        url = ""
+        snippet_parts = []
+        in_highlights = False
+        for line in block.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("Title:"):
+                title = stripped[6:].strip()
+            elif stripped.startswith("URL:"):
+                url = stripped[4:].strip()
+            elif stripped.startswith("Published:") or stripped.startswith("Author:"):
+                continue
+            elif stripped.startswith("Highlights:"):
+                in_highlights = True
+            elif in_highlights:
+                hl = stripped
+                if hl.startswith(">"):
+                    hl = hl[1:].strip()
+                if hl == "...":
+                    continue
+                if hl:
+                    snippet_parts.append(hl)
+        if not title or not url:
+            continue
+        snippet = " ".join(snippet_parts[:3])
+        snippet = snippet.replace("--", " ").replace("#", " ")
+        if snippet.lower().startswith(title.lower()):
+            snippet = snippet[len(title):].strip()
+        snippet = " ".join(snippet.split())[:150].strip()
+        results.append({"title": title, "url": url, "snippet": snippet})
+    return results
+
+
 def _exa_search(query, num_results):
     text = _mcp_call(_EXA_MCP, _EXA_TOOL, {
         "query": query,
@@ -160,7 +268,17 @@ def _exa_search(query, num_results):
     })
     if not text:
         return None
-    return f"Web search results for '{query}':\n\n{text}"
+    results = _parse_exa_results(text)
+    if not results:
+        return None
+    lines = [f"Web search results for '{query}':\n"]
+    for i, r in enumerate(results, 1):
+        if r["snippet"]:
+            lines.append(f"{i}. {r['title']}\n   {r['snippet']}\n   {r['url']}\n")
+        else:
+            lines.append(f"{i}. {r['title']}\n   {r['url']}\n")
+            lines.append(f"\n{i}. {r['title']}\n   {r['url']}")
+    return "\n".join(lines)
 
 
 def _ddg_search(query, retries=2):

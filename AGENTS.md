@@ -400,7 +400,7 @@ HSF integrates with LLMs via an extensible provider system supporting any OpenAI
 
 ### Agent Tool-Calling (`src/llm/client.py` → `chat_with_tools()`)
 
-The agent mode gives the LLM the ability to call **64 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
+The agent mode gives the LLM the ability to call **57 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
 
 **Tool-calling loop**:
 ...
@@ -423,7 +423,7 @@ def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None,
 
 Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` variable. Each entry follows the `{"type": "function", "function": {...}}` format with `name`, `description`, and `parameters` (JSON Schema).
 
-**64 tools** in seven categories:
+**57 tools** in seven categories:
 
 **Data tools** (23) — query and manipulate inventory, no `tool_context` needed:
 
@@ -460,7 +460,7 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 | `add_person` | Add a person to the people inventory (`first_name`, `last_name`, `company`, `domain`, `username`, `role`, `linkedin_url`, `source`, `interests`) |
 | `delete_person` | Delete a person by ID |
 
-**Network tools** (11) — trigger operations, require `tool_context` (App instance):
+**Network tools** (10) — trigger operations, require `tool_context` (App instance):
 
 | Tool | Description |
 |---|---|
@@ -468,20 +468,20 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 | `scan_interface` | Scan local network on an interface (`iface`). Long-running async — results arrive via event bus |
 | `scan_ip` | Scan a specific IP for OS/device identification. Synchronous — returns result directly |
 | `stop_scan` | Stop the active network scan |
-| `tcp_scan` | Scan TCP ports on an IP. Returns common ports immediately; full 65535 scan continues in background (results via `check_machine`) |
-| `udp_scan` | Scan UDP ports on an IP. Returns common ports immediately; full 65535 scan continues in background (results via `check_machine`) |
+| `port_scan` | Scan TCP or UDP ports on an IP (method: "tcp" or "udp"). Returns common ports immediately; full 65535 scan continues in background (results via `check_machine`) |
 | `ping` | Ping an IP address. Synchronous — returns time + TTL directly |
 | `nslookup` | DNS lookup on a hostname. Synchronous — returns resolved addresses directly |
 | `port_inspector` | Inspect a TCP port by sending service-specific probes. Synchronous — returns identified service banners directly |
 | `bannergrab` | Open a raw TCP connection to an IP:port and wait up to 2s for a banner/response. Synchronous — returns received data directly |
 | `nmap` | Run custom nmap scan with arbitrary arguments against a target. Returns raw output and auto-saves open ports to machine inventory. |
 
-**Web tools** (2) — fetch URLs and search the web, no `tool_context` needed:
+**Web tools** (3) — fetch URLs, search the web, and browse GitHub repos, no `tool_context` needed:
 
 | Tool | Description |
 |---|---|
 | `webfetch` | Fetch content from a URL and return as text or markdown (`url`, optional `format`). Ignores self-signed TLS certificates. Auto-saves the URL path to `directories` table if the host matches a known machine or domain. |
 | `websearch` | Search the web via Exa MCP (primary) or DuckDuckGo Lite (fallback) and return results with title, URL, and snippet (`query`, optional `num_results`) |
+| `list_repo` | List files and directories in a public GitHub repository using the GitHub REST API (`owner`, `repo`, optional `path`). Returns file names, sizes, and raw download URLs. No authentication needed. |
 
 **DICMA tools** (4) — generate wordlists and rules, no `tool_context` needed:
 
@@ -500,26 +500,20 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 | `bruteforce_start` | Start a brute force attack (`protocol`, `target`, optional `port`) |
 | `fuzz_start` | Start directory/vhost/DNS fuzzing (`method`, `target`, `wordlist`, optional `port`, `scheme`, `skip_codes`, `hide_size`, `workers`). Performs wildcard detection before scanning — aborts if catch-all found. Runs asynchronously — results are saved to the `directories` and `subdomains` tables. Use `check_fuzz_results` to retrieve them. |
 
-**Infrastructure tools** (15) — manage services, files, evidence, and shell sessions:
+**Infrastructure tools** (10) — manage services, files, evidence, and shell sessions:
 
 | Tool | Description |
 |---|---|
-| `start_listener` | Start a background service (`shells-listener` or `mdns-listener`). Requires `tool_context` |
-| `stop_listener` | Stop a running background service. Requires `tool_context` |
-| `list_dictionaries` | List all wordlist files in the wordlist directory |
-| `list_rules` | List all hashcat rule files in the rules directory |
-| `delete_file` | Delete a dictionary, rule, or POC file (`file_type`, `filename`) |
+| `listener` | Start or stop a background service (action: "start" or "stop", service: "shells-listener" or "mdns-listener"). Requires `tool_context` |
+| `list_files` | List available files by type: dictionary, rule, poc, or cache |
+| `delete_file` | Delete a dictionary, rule, POC, or cache file (`file_type`, `filename`) |
+| `read_cache` | Read a cached tool output file from `cache/` with optional offset/limit |
 | `delete_evidence` | Delete an evidence session by name, or `"all"` |
 | `delete_shell` | Delete a shell session by ID, or `"all"` |
-| `shell_list` | List all active shell sessions with IDs, types, and statuses |
 | `shell_exec` | Send a command to a shell session and wait for output |
 | `shell_wait` | Wait for more output from a running shell command |
 | `shell_interrupt` | Interrupt a running shell command (sends Ctrl+C) |
-| `connect_ssh` | Connect to a remote machine via SSH using stored credentials |
-| `connect_sftp` | Connect to a remote machine via SFTP using stored credentials |
-| `connect_ftp` | Connect to a remote machine via FTP using stored credentials |
-| `connect_winrm` | Connect to a remote Windows machine via WinRM using stored credentials |
-| `list_pocs` | List all POC Python files in the pocs/ directory |
+| `connect` | Connect to a remote machine via SSH, SFTP, FTP, or WinRM using stored credentials (protocol arg) |
 
 **POC tools** (4) — create, read, edit, and execute proof-of-concept scripts in the `pocs/` directory, no `tool_context` needed:
 
@@ -581,6 +575,83 @@ POCs (Proof of Concept) are Python scripts generated by the LLM agent to demonst
 - Both handlers are synchronous (blocking HTTP calls) — they run inside the agent's daemon thread.
 - `webfetch` automatically saves the URL path to the `directories` table when the host matches a known machine or domain in the inventory.
 
+### Context Management & Compaction
+
+HSF automatically manages LLM context to prevent overflow during long agent or consultor sessions.
+
+**Automatic Compaction:**
+- Triggers when estimated tokens exceed `context_limit - 20,000` (configurable buffer via `DEFAULT_BUFFER` in `src/llm/compaction.py`)
+- Calls the LLM to generate an incremental summary of old messages using a structured template
+- Replaces summarized messages with a single compaction message (`_is_compaction: true`) that includes the summary text and recent verbatim messages
+- Recent messages (~8K tokens worth, configurable via `DEFAULT_KEEP_TOKENS`) are preserved intact
+- Subsequent compactions update the existing summary (anchored incremental summarization)
+- Limits summary output to 4,096 tokens (`SUMMARY_OUTPUT_TOKENS`)
+- Manual compaction available via `compact` command in Agent and Consultor modes (forces compaction regardless of overflow)
+
+**Compaction Summary Template** (sections preserved across all compactions):
+```
+## Goal
+## Constraints & Preferences
+## Targets Discovered
+## Credentials & Access
+## Progress (Done, In Progress, Blocked)
+## Key Findings
+## Previously Fetched URLs
+## Search Queries Made
+## Cache Files Available
+## Next Steps
+```
+
+The summarizer receives the current cache file listing (with associated URLs where available) to ensure the model knows what resources are available after compaction.
+
+**Tool Output Bounding (`_bound_tool_output`):**
+- All tool results pass through `_bound_tool_output()` in `src/llm/tools.py` before entering context
+- Checks two thresholds: byte limit and line limit
+- Per-tool byte limits in `TOOL_BYTE_LIMITS`; per-tool line limits in `TOOL_LINE_LIMITS`
+- If output exceeds limits, full content is saved to `~/.local/share/hsf/cache/` and a truncated preview is returned
+- The truncation marker includes the exact `read_cache("filename")` command to expand
+- Preview format: first half of lines (head) + truncation marker + last half of lines (tail)
+
+**Current Tool Limits:**
+
+| Tool | Byte Limit | Line Limit | Rationale |
+|------|:---:|:---:|---|
+| poc_exec | 1,000 | default (2,000) | POC output is often repetitive; full file available in `pocs/` |
+| port_inspector | 2,000 | default | Service probes return verbose protocol banners |
+| websearch | 8,000 | default | ~25 results at ~300 bytes each; larger searches cache automatically |
+| check_machine | 3,000 | default | Machine info with banners; full data via `check_machine` again |
+| webfetch | 3,000 | 60 | Pages after HTML cleaning are compact; 30 head + 29 tail lines |
+| Other tools | 50,000 | 2,000 | Default; most tool outputs fit comfortably |
+
+**Tool Output Truncation in Compaction:**
+- During compaction serialization, tool outputs are truncated to 2,000 chars (`TOOL_OUTPUT_MAX_CHARS`) to keep the summary prompt manageable
+- This is compression for summarization only — the original tool results in current messages are preserved
+
+**Cache System:**
+- Directory: `~/.local/share/hsf/cache/` (created lazily)
+- Files named `tool_{timestamp}_{tool_name}.txt`
+- Cleaned on `reset` command or `delete cache`
+- Tools: `list_files(cache)` to list, `read_cache(filename, offset, limit)` to read, `delete cache` or `delete_file(cache, filename)` to remove
+
+**Webfetch HTML Cleaning:**
+- Before HTML-to-markdown conversion, non-content elements are stripped via `_strip_html_non_content()` in `src/llm/web.py`
+- Removed: `<nav>`, `<footer>`, `<aside>`, and elements with cookie-consent classes (`cookie`, `consent`, `gdpr`, `banner`, `popup`, `sidebar`)
+- Preserved: `<header>` (may contain business/title info), `<main>`, `<article>`, `<section>`, and all text content
+- The cleaned markdown focuses on page content without navigation noise, menus, or cookie banners
+- If the full original page is needed, the uncached raw response is not available (design tradeoff for cleaner context)
+
+**Websearch Exa Response Cleaning:**
+- Exa MCP returns raw highlight text that includes verbose metadata and formatting artifacts
+- `_parse_exa_results()` in `src/llm/web.py` extracts only title, URL, and compact snippets
+- Strips `Published: N/A`, `Author: N/A`, `>` prefix, and `...` separators from highlights
+- Snippet duplicates of the page title are removed from snippet text
+- Snippets capped at 150 chars; `--` and `#` artifacts cleaned
+
+**Context Repair:**
+- When the API returns a 400 error about `tool_calls`/`tool_call_id` mismatch, `_repair_messages()` automatically cleans orphaned tool messages
+- Walks backwards through messages to find the last structurally valid conversation boundary
+- Logs the repair operation for debugging via `ctx_debug.log`
+
 **Registration pattern** — decorator-based with a `_HANDLERS` dict:
 
 ```python
@@ -616,7 +687,7 @@ def _add_user(args, ctx=None):
 4. Data tools use `origin="agent"` to mark agent-created records.
 5. Network tools check `if not ctx: return "Cannot X: no tool context available."` — this guards against usage outside agent mode.
 6. Network tools call existing App methods (`ctx._scan_interface(iface)`, `ctx._cmd_tcpscan([ip])`, etc.) — do not duplicate scan logic in tool handlers.
-7. Tools that are inherently slow (full port scan, network scanning, fuzzing) should run asynchronously and store results in the database for later retrieval via query tools. Tools that complete quickly (<5s) may run synchronously and return results directly to the LLM (e.g., `ping`, `nslookup`, `port_inspector`, `scan_ip`). Mixed-mode tools (e.g., `tcp_scan`, `udp_scan`) return common-port results immediately and continue full scan in background.
+7. Tools that are inherently slow (full port scan, network scanning, fuzzing) should run asynchronously and store results in the database for later retrieval via query tools. Tools that complete quickly (<5s) may run synchronously and return results directly to the LLM (e.g., `ping`, `nslookup`, `port_inspector`, `scan_ip`). Mixed-mode tools (e.g., `port_scan`) return common-port results immediately and continue full scan in background.
 
 ### Agent Mode in `app.py`
 

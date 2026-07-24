@@ -82,13 +82,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "check_machine",
-            "description": (
-                "Get all known information about a machine in the inventory. "
-                "Returns IP, hostname, IPv6, MAC, model, device type, OS, domain, "
-                "first/last seen timestamps, discovery methods, "
-                "open TCP/UDP ports, service banners, web services, associated domains, "
-                "directories, and local users."
-            ),
+            "description": "Get all known inventory info about a machine (IP, hostname, OS, ports, banners, web services, users, etc.).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -105,11 +99,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "check_domain",
-            "description": (
-                "Get all known information about a domain in the inventory. "
-                "Returns first/last seen timestamps, subdomains, directories, "
-                "web services (port + output), and associated machines with IPs."
-            ),
+            "description": "Get all known info about a domain (subdomains, directories, web services, associated machines).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -126,12 +116,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "check_inventory",
-            "description": (
-                "Get all inventory data: users, credentials, passwords, hashes, "
-                "people, tickets, dictionaries (filenames only), and hashcat rules "
-                "(filenames only). Does NOT include machine or domain details — use "
-                "check_machine or check_domain for those."
-            ),
+            "description": "List all inventory: users, credentials, passwords, hashes, people, tickets, dictionaries, rules, POCs. Not machines/domains — use check_machine/check_domain for those.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -142,13 +127,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "check_status",
-            "description": (
-                "Get current HSF state summary: all machine IPs with hostname, "
-                "device type, domain, and port counts; all domain names; plus "
-                "counts of users, credentials, passwords, hashes, evidence "
-                "sessions, shell sessions. Use this to see what targets are "
-                "available."
-            ),
+            "description": "Show current HSF state: all machines, domains, and inventory counts (users, credentials, hashes, shells, evidence).",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -176,11 +155,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "check_shells",
-            "description": (
-                "List all shell sessions (reverse shells, SSH, SFTP, FTP, WinRM). "
-                "Returns ID, type, status, active flag, IP, source port, "
-                "listener port, OS, connected time, and last activity."
-            ),
+            "description": "List all shell sessions with ID, type, status, IP, ports, OS, and timestamps.",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -191,11 +166,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "check_evidences",
-            "description": (
-                "List all evidence sessions with metadata. Returns session names, "
-                "target URL, browser, start/end timestamps, request counts, and "
-                "filenames in each session directory. Does NOT return file contents."
-            ),
+            "description": "List all evidence sessions with metadata, filenames, and request directories (no file contents).",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -207,11 +178,8 @@ TOOLS = [
         "function": {
             "name": "check_fuzz_results",
             "description": (
-                "Retrieve fuzzing results for a specific machine (by IP or ID). "
-                "Returns saved directories and subdomains discovered via "
-                "fuzzing for the machine's associated domain. "
-                "Use offset/limit to paginate through large result sets "
-                "(default: first 60 entries per section)."
+                "Retrieve fuzz results for a machine (by IP or ID). "
+                "Returns saved directories and subdomains. Use offset/limit to paginate."
             ),
             "parameters": {
                 "type": "object",
@@ -231,12 +199,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "add_credential",
-            "description": (
-                "Add a credential (username + password or NT hash). "
-                "Auto-detects 32-character NT hashes vs plaintext passwords. "
-                "For plaintext passwords, the NTLM hash is computed and stored automatically. "
-                "Also adds the username to the user inventory."
-            ),
+            "description": "Add credential (username + password or NT hash). Auto-detects NT hash vs plaintext; computes NTLM for plaintext.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -346,36 +309,18 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "tcp_scan",
+            "name": "port_scan",
             "description": (
-                "Scan TCP ports on an IP. Common ports (~97) are scanned and returned "
-                "immediately. A full scan of all 65535 ports then continues in the "
-                "background — remaining results will later appear via check_machine inventory."
+                "Scan TCP or UDP ports on an IP. Returns common ports immediately, "
+                "then continues full scan in background — results via check_machine."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "method": {"type": "string", "enum": ["tcp", "udp"], "description": "TCP or UDP scan"},
                     "ip": {"type": "string", "description": "IPv4 address"},
                 },
-                "required": ["ip"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "udp_scan",
-            "description": (
-                "Scan UDP ports on an IP. Common ports (~30) are scanned and returned "
-                "immediately. A full scan of all 65535 ports then continues in the "
-                "background — remaining results will later appear via check_machine inventory."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "ip": {"type": "string", "description": "IPv4 address"},
-                },
-                "required": ["ip"],
+                "required": ["method", "ip"],
             },
         },
     },
@@ -411,7 +356,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "port_inspector",
-            "description": "Inspect a TCP port on an IP by sending service-specific probes and returning any responses. Use this tool only if needed to identify what service is running on a port.",
+            "description": "Inspect a TCP port by sending service-specific probes and returning identified banners.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -446,12 +391,9 @@ TOOLS = [
         "function": {
             "name": "nmap",
             "description": (
-                "Run an nmap scan against a target with custom arguments. "
-                "Use this for port scanning, service detection, OS fingerprinting, "
-                "or any nmap-based reconnaissance. Provide nmap flags and options "
-                "as arguments (do NOT include the target in arguments). "
-                "Open ports found in the output are automatically saved to the "
-                "machine inventory if the target matches a known machine."
+                "Run nmap with custom arguments against a target. "
+                "Do NOT include the target in arguments. Open ports are automatically "
+                "saved to the machine inventory for known machines."
             ),
             "parameters": {
                 "type": "object",
@@ -535,7 +477,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "webfetch",
-            "description": "Fetch content from a URL and return as text or markdown. Use offset/limit to read large pages progressively (default: first 500 lines).",
+            "description": "Fetch a URL as text or markdown. Navigation, footers, sidebars, and cookie banners are automatically stripped from HTML pages to show only main content. Use offset/limit to paginate.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -557,9 +499,25 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "The search query"},
-                    "num_results": {"type": "integer", "description": "Number of results to return (default: 10)"},
+                    "num_results": {"type": "integer", "description": "Number of results (default: 25)"},
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_repo",
+            "description": "List files and directories in a public GitHub repository using the GitHub REST API. No authentication needed for public repos.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "owner": {"type": "string", "description": "GitHub username or organization (e.g. 'torvalds')"},
+                    "repo": {"type": "string", "description": "Repository name (e.g. 'linux')"},
+                    "path": {"type": "string", "description": "Directory path inside the repo (default: root). Use to navigate subdirectories."},
+                },
+                "required": ["owner", "repo"],
             },
         },
     },
@@ -700,12 +658,9 @@ TOOLS = [
         "function": {
             "name": "fuzz_start",
             "description": (
-                "Start a directory, vhost or DNS subdomain fuzzing scan against a target. "
-                "Runs asynchronously — returns immediately. Results are saved to the "
-                "directories and subdomains tables. Use check_fuzz_results to retrieve them "
-                "once the scan finishes. Automatically checks for wildcard/catch-all before "
-                "starting — aborts with a warning if detected. Directory mode fuzzes HTTP "
-                "paths, vhost mode fuzzes virtual host subdomains, dns mode fuzzes DNS subdomains."
+                "Start an async fuzzing scan (directory, vhost, or DNS). "
+                "Returns immediately — results are saved and can be retrieved with check_fuzz_results. "
+                "Aborts if wildcard/catch-all is detected."
             ),
             "parameters": {
                 "type": "object",
@@ -726,73 +681,33 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "start_listener",
-            "description": "Start a background service listener (shell listener or mDNS listener).",
+            "name": "listener",
+            "description": "Start or stop a background service listener (reverse shell or mDNS).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "service": {"type": "string", "enum": ["shells-listener", "mdns-listener"], "description": "Service to start"},
+                    "action": {"type": "string", "enum": ["start", "stop"], "description": "Start or stop the listener"},
+                    "service": {"type": "string", "enum": ["shells-listener", "mdns-listener"], "description": "Service to manage"},
                 },
-                "required": ["service"],
+                "required": ["action", "service"],
             },
         },
     },
     {
         "type": "function",
         "function": {
-            "name": "stop_listener",
-            "description": "Stop a running background service listener.",
+            "name": "list_files",
+            "description": "List available files by type: wordlist dictionaries, hashcat rules, POC scripts, or cached tool outputs.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "service": {"type": "string", "enum": ["shells-listener", "mdns-listener"], "description": "Service to stop"},
+                    "file_type": {
+                        "type": "string",
+                        "enum": ["dictionary", "rule", "poc", "cache"],
+                        "description": "Type of files: dictionary (wordlists), rule (hashcat), poc (Python scripts), cache (truncated tool outputs)",
+                    },
                 },
-                "required": ["service"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_dictionaries",
-            "description": "List all dictionary wordlist files available in the wordlist directory.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_rules",
-            "description": "List all hashcat rule files in the rules directory.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_pocs",
-            "description": "List all POC (proof of concept) Python files in the pocs/ directory.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_cache",
-            "description": "List cached tool output files in the cache/ directory. These are truncated large tool outputs saved to disk. Use read_cache to read them.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
+                "required": ["file_type"],
             },
         },
     },
@@ -804,7 +719,7 @@ TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "filename": {"type": "string", "description": "Filename as shown by list_cache or the truncation marker"},
+                    "filename": {"type": "string", "description": "Filename from list_files(cache) or the truncation marker"},
                     "offset": {"type": "integer", "description": "Line number to start reading from (1-indexed, default 1)"},
                     "limit": {"type": "integer", "description": "Max lines to read (default 2000)"},
                 },
@@ -816,11 +731,11 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "delete_file",
-            "description": "Delete a dictionary or rule file from the wordlist or rules directory.",
+            "description": "Delete a file by type: dictionary, rule, poc, or cache.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "file_type": {"type": "string", "enum": ["dictionary", "rule", "poc"], "description": "Type of file to delete"},
+                    "file_type": {"type": "string", "enum": ["dictionary", "rule", "poc", "cache"], "description": "Type of file to delete"},
                     "filename": {"type": "string", "description": "The filename to delete"},
                 },
                 "required": ["file_type", "filename"],
@@ -858,31 +773,15 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "shell_list",
-            "description": "List all active shell sessions with their IDs, types, and statuses.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "shell_exec",
             "description": (
-                "Send a command to a shell session and wait briefly for initial output. "
-                "The command may still be running when this returns. Check the result status: "
-                "'finished' means a shell prompt was detected (command completed). "
-                "'password' means a password prompt appeared (command auto-interrupted). "
-                "'running' means the command is still producing output — use shell_wait to "
-                "get more output, and shell_interrupt to stop it if it seems stuck."
+                "Send a command to a shell session. The command may still be running when this returns. "
+                "Use shell_wait for more output, shell_interrupt to stop it."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "shell_id": {"type": "integer", "description": "Shell session ID from shell_list"},
+                    "shell_id": {"type": "integer", "description": "Shell session ID from check_shells"},
                     "command": {"type": "string", "description": "Command to execute (e.g. 'whoami', 'ls -la', 'find /')"},
                 },
                 "required": ["shell_id", "command"],
@@ -893,17 +792,11 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "shell_wait",
-            "description": (
-                "Wait for more output from a running shell command. Call this after "
-                "shell_exec returned status 'running' to get more output. Returns new output "
-                "plus a status: 'finished' (prompt detected), 'running' (still producing), "
-                "'paused' (no new output for 2s, might be waiting for input). "
-                "Do NOT call this unless a command is actually running."
-            ),
+            "description": "Wait for more output from a running shell command. Call after shell_exec returned status 'running'.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "shell_id": {"type": "integer", "description": "Shell session ID from shell_list"},
+                    "shell_id": {"type": "integer", "description": "Shell session ID from check_shells"},
                 },
                 "required": ["shell_id"],
             },
@@ -913,16 +806,11 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "shell_interrupt",
-            "description": (
-                "Interrupt the currently running command in a shell by sending Ctrl+C. "
-                "Use this when a command seems stuck, is taking too long, shows a password "
-                "prompt, or is an infinite command like 'ping' without a count limit. "
-                "Returns any remaining output after the interrupt plus the new shell prompt."
-            ),
+            "description": "Send Ctrl+C to interrupt the running command in a shell. Returns any remaining output.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "shell_id": {"type": "integer", "description": "Shell session ID from shell_list"},
+                    "shell_id": {"type": "integer", "description": "Shell session ID from check_shells"},
                 },
                 "required": ["shell_id"],
             },
@@ -931,78 +819,21 @@ TOOLS = [
     {
         "type": "function",
         "function": {
-            "name": "connect_ssh",
-            "description": (
-                "Connect to a remote machine via SSH using stored credentials. "
-                "Use this to open an interactive shell session. The host can be "
-                "a machine ID (from inventory) or an IP address. The username "
-                "must match an existing credential in the inventory."
-            ),
+            "name": "connect",
+            "description": "Connect to a remote machine via SSH, SFTP, FTP, or WinRM using stored credentials.",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "protocol": {
+                        "type": "string",
+                        "enum": ["ssh", "sftp", "ftp", "winrm"],
+                        "description": "Connection protocol (ssh:22, sftp:22, ftp:21, winrm:5985 as default ports)",
+                    },
                     "host": {"type": "string", "description": "Machine ID or IP address"},
-                    "username": {"type": "string", "description": "Username for authentication (must exist in credentials)"},
-                    "port": {"type": "integer", "description": "SSH port (default 22)"},
+                    "username": {"type": "string", "description": "Username (must exist in credentials, use 'anonymous' for anonymous FTP)"},
+                    "port": {"type": "integer", "description": "Port number (if different from default)"},
                 },
-                "required": ["host", "username"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "connect_sftp",
-            "description": (
-                "Connect to a remote machine via SFTP using stored credentials. "
-                "Use this for file transfer operations over SSH."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "host": {"type": "string", "description": "Machine ID or IP address"},
-                    "username": {"type": "string", "description": "Username for authentication"},
-                    "port": {"type": "integer", "description": "SFTP port (default 22)"},
-                },
-                "required": ["host", "username"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "connect_ftp",
-            "description": (
-                "Connect to a remote machine via FTP using stored credentials. "
-                "Use this for file transfer operations over FTP."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "host": {"type": "string", "description": "Machine ID or IP address"},
-                    "username": {"type": "string", "description": "Username for authentication (use 'anonymous' for anonymous FTP)"},
-                    "port": {"type": "integer", "description": "FTP port (default 21)"},
-                },
-                "required": ["host", "username"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "connect_winrm",
-            "description": (
-                "Connect to a remote Windows machine via WinRM using stored credentials. "
-                "Use this to open an interactive PowerShell session."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "host": {"type": "string", "description": "Machine ID or IP address"},
-                    "username": {"type": "string", "description": "Username for authentication"},
-                    "port": {"type": "integer", "description": "WinRM port (default 5985)"},
-                },
-                "required": ["host", "username"],
+                "required": ["protocol", "host", "username"],
             },
         },
     },
@@ -1047,12 +878,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "poc_edit",
-            "description": (
-                "Edit a proof-of-concept Python file in the pocs/ directory by replacing "
-                "an exact string with a new string. The old_string must match the file content "
-                "exactly, including whitespace and indentation. If replace_all is true, "
-                "all occurrences are replaced; otherwise only the first match is replaced."
-            ),
+            "description": "Edit a POC file by replacing an exact string match in the pocs/ directory.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1119,6 +945,11 @@ TOOL_BYTE_LIMITS = {
     "poc_exec": 1000,
     "port_inspector": 2000,
     "check_machine": 3000,
+    "websearch": 8000,
+    "webfetch": 3000,
+}
+TOOL_LINE_LIMITS = {
+    "webfetch": 60,
 }
 
 
@@ -1126,9 +957,10 @@ def _bound_tool_output(output, tool_name):
     if not isinstance(output, str):
         return output
     byte_limit = TOOL_BYTE_LIMITS.get(tool_name, MAX_TOOL_BYTES)
+    line_limit = TOOL_LINE_LIMITS.get(tool_name, MAX_TOOL_LINES)
     lines = output.split("\n")
     byte_len = len(output.encode("utf-8"))
-    if len(lines) <= MAX_TOOL_LINES and byte_len <= byte_limit:
+    if len(lines) <= line_limit and byte_len <= byte_limit:
         return output
     from src.hsf_paths import cache_dir
     import time as _time
@@ -1140,9 +972,9 @@ def _bound_tool_output(output, tool_name):
             f.write(output)
     except (PermissionError, OSError):
         return output
-    head = MAX_TOOL_LINES // 2
-    tail = max(0, MAX_TOOL_LINES // 2 - 1)
-    marker = f"\n... output truncated ({len(lines)} lines, {byte_len} bytes); full content saved to cache/{filename} ...\n"
+    head = line_limit // 2
+    tail = max(0, line_limit // 2 - 1)
+    marker = f"\n... output truncated ({len(lines)} lines, {byte_len} bytes). To read the rest: read_cache(\"{filename}\")\n"
     preview = "\n".join(lines[:head])
     if tail > 0 and len(lines) > head:
         preview += marker + "\n".join(lines[-tail:])
@@ -1919,11 +1751,18 @@ def _stop_scan(args, ctx=None):
     return "Active scan stopped."
 
 
-@register("tcp_scan")
-def _tcp_scan(args, ctx=None):
+@register("port_scan")
+def _port_scan(args, ctx=None):
+    method = args.get("method", "tcp").lower()
     ip = args.get("ip", "")
     if not ctx:
         return "Cannot scan: no tool context available."
+    if method == "udp":
+        return _do_udp_scan(ip, ctx)
+    return _do_tcp_scan(ip, ctx)
+
+
+def _do_tcp_scan(ip, ctx):
     from src.gui.app import _do_tcp_scan_common, _TCP_SCAN_PORTS
     from src.machines import store, machine_db
     import threading
@@ -1934,16 +1773,12 @@ def _tcp_scan(args, ctx=None):
             machine_db.save_tcp_port(machine.id, p)
     threading.Thread(target=ctx._run_tcpscan, args=(ip, "connect", True), daemon=True).start()
     if not open_ports:
-        return f"No common ports open on {ip} (scanned {len(_TCP_SCAN_PORTS)} ports). Full scan running in background."
+        return f"No common TCP ports open on {ip} (scanned {len(_TCP_SCAN_PORTS)} ports). Full scan running in background."
     ports_str = ', '.join(str(p) for p in open_ports)
     return f"TCP ports open on {ip}: {ports_str}\nFull scan of remaining 65535 ports running in background."
 
 
-@register("udp_scan")
-def _udp_scan(args, ctx=None):
-    ip = args.get("ip", "")
-    if not ctx:
-        return "Cannot scan: no tool context available."
+def _do_udp_scan(ip, ctx):
     from src.gui.app import _do_udp_scan_common, _UDP_SCAN_PORTS
     from src.machines import store, machine_db
     import threading
@@ -2162,8 +1997,61 @@ def _websearch(args, ctx=None):
     from src.llm.web import web_search
     return web_search(
         args.get("query", ""),
-        num_results=args.get("num_results", 10),
+        num_results=args.get("num_results", 25),
     )
+
+
+@register("list_repo")
+def _list_repo(args, ctx=None):
+    owner = args.get("owner", "").strip()
+    repo = args.get("repo", "").strip()
+    path = args.get("path", "").strip() or ""
+    if not owner or not repo:
+        return "Missing owner or repo."
+    import requests
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents"
+    if path:
+        url += f"/{path}"
+    headers = {"Accept": "application/vnd.github+json"}
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+    except Exception as e:
+        return f"GitHub API error: {e}"
+    if resp.status_code == 404:
+        return f"Repo or path not found: {owner}/{repo}/{path}".rstrip("/")
+    if resp.status_code == 403:
+        return f"GitHub API rate limited (60 req/hour unauthenticated). Wait and retry."
+    if resp.status_code != 200:
+        return f"GitHub API returned {resp.status_code}: {resp.text[:300]}"
+    try:
+        data = resp.json()
+    except Exception:
+        return f"Invalid JSON from GitHub API."
+    if not isinstance(data, list):
+        return f"Not a directory: {data.get('name', path)} is a file ({data.get('size', 0)} bytes). Use webfetch with: {data.get('download_url', '')}"
+    lines = [f"Contents of {owner}/{repo}/{path}:".rstrip("/").rstrip(":") + ":"]
+    dirs = []
+    files = []
+    for item in data:
+        name = item.get("name", "?")
+        if item.get("type") == "dir":
+            dirs.append(f"  [DIR]  {name}/")
+        else:
+            size = item.get("size", 0)
+            dl = item.get("download_url", "")
+            if size >= 1024:
+                size_str = f"{size / 1024:.1f} KB"
+            else:
+                size_str = f"{size} B"
+            if dl:
+                files.append(f"  [{size_str}] {name} — {dl}")
+            else:
+                files.append(f"  [{size_str}] {name}")
+    lines.extend(dirs)
+    lines.extend(files)
+    if not dirs and not files:
+        lines.append("  (empty)")
+    return "\n".join(lines)
 
 
 @register("add_person")
@@ -2467,44 +2355,34 @@ def _fuzz_start(args, ctx=None):
     return f"Fuzzing ({method}) started against {target} with {wordlist}. Results will be saved to directories and subdomains. Use check_fuzz_results to retrieve them."
 
 
-@register("start_listener")
-def _start_listener(args, ctx=None):
+@register("listener")
+def _listener(args, ctx=None):
     if not ctx:
-        return "Cannot start listener: no tool context available."
+        return "Cannot manage listener: no tool context available."
+    action = args.get("action", "")
     service = args.get("service", "")
-    if service == "shells-listener":
-        ctx._cmd_start(["shells-listener"])
-    elif service == "mdns-listener":
-        ctx._cmd_start(["mdns-listener"])
-    else:
+    if service not in ("shells-listener", "mdns-listener"):
         return f"Unknown service: {service}"
-    return f"{service} started."
-
-
-@register("stop_listener")
-def _stop_listener(args, ctx=None):
-    if not ctx:
-        return "Cannot stop listener: no tool context available."
-    service = args.get("service", "")
-    if service in ("shells-listener", "mdns-listener"):
+    if action == "start":
+        ctx._cmd_start([service])
+    elif action == "stop":
         ctx._cmd_stop([service])
     else:
-        return f"Unknown service: {service}"
-    return f"{service} stopped."
+        return f"Unknown action: {action}. Use 'start' or 'stop'."
+    return f"{service} {action}ed."
 
 
-@register("list_dictionaries")
-def _list_dictionaries(args, ctx=None):
-    from src.hsf_paths import lst_dir
+def _list_files_common(directory_func, empty_msg, type_label):
     try:
-        d = str(lst_dir())
-        files = sorted(f for f in os.listdir(d)
-                      if os.path.isfile(os.path.join(d, f)))
+        d = str(directory_func())
+        files = sorted(
+            f for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))
+        )
     except OSError:
-        return "Could not read wordlist directory."
+        return f"Could not read directory."
     if not files:
-        return "No dictionary files found."
-    result = f"Dictionary files in {d}:\n"
+        return empty_msg
+    result = f"{type_label} in {d}:\n"
     for f in files:
         path = os.path.join(d, f)
         size = os.path.getsize(path)
@@ -2518,29 +2396,19 @@ def _list_dictionaries(args, ctx=None):
     return result
 
 
-@register("list_rules")
-def _list_rules(args, ctx=None):
-    from src.hsf_paths import rules_dir
-    try:
-        d = str(rules_dir())
-        files = sorted(f for f in os.listdir(d)
-                      if os.path.isfile(os.path.join(d, f)))
-    except OSError:
-        return "Could not read rules directory."
-    if not files:
-        return "No rule files found."
-    result = f"Rule files in {d}:\n"
-    for f in files:
-        path = os.path.join(d, f)
-        size = os.path.getsize(path)
-        if size >= 1024 * 1024:
-            size_str = f"{size / (1024 * 1024):.1f} MB"
-        elif size >= 1024:
-            size_str = f"{size / 1024:.0f} KB"
-        else:
-            size_str = f"{size} B"
-        result += f"  {f} ({size_str})\n"
-    return result
+@register("list_files")
+def _list_files(args, ctx=None):
+    ft = args.get("file_type", "")
+    from src.hsf_paths import lst_dir, rules_dir, pocs_dir, cache_dir
+    if ft == "dictionary":
+        return _list_files_common(lst_dir, "No dictionary files found.", "Dictionary files")
+    if ft == "rule":
+        return _list_files_common(rules_dir, "No rule files found.", "Rule files")
+    if ft == "poc":
+        return _list_files_common(pocs_dir, "No POC files found.", "POC files")
+    if ft == "cache":
+        return _list_files_common(cache_dir, "No cached files.", "Cached files")
+    return f"Unknown file_type: {ft}. Use dictionary, rule, poc, or cache."
 
 
 def _resolve_poc_path(filename):
@@ -2550,60 +2418,6 @@ def _resolve_poc_path(filename):
     if not resolved.startswith(os.path.normpath(base) + os.sep) and resolved != os.path.normpath(base):
         return None
     return resolved
-
-
-@register("list_pocs")
-def _list_pocs(args, ctx=None):
-    from src.hsf_paths import pocs_dir
-    try:
-        d = str(pocs_dir())
-        files = sorted(f for f in os.listdir(d)
-                      if os.path.isfile(os.path.join(d, f)))
-    except OSError:
-        return "Could not read pocs directory."
-    if not files:
-        return "No POC files found."
-    result = f"POC files in {d}:\n"
-    for f in files:
-        path = os.path.join(d, f)
-        size = os.path.getsize(path)
-        if size >= 1024 * 1024:
-            size_str = f"{size / (1024 * 1024):.1f} MB"
-        elif size >= 1024:
-            size_str = f"{size / 1024:.0f} KB"
-        else:
-            size_str = f"{size} B"
-        result += f"  {f} ({size_str})\n"
-    return result
-
-
-    return result
-
-
-@register("list_cache")
-def _list_cache(args, ctx=None):
-    from src.hsf_paths import cache_dir
-    try:
-        d = str(cache_dir())
-        files = sorted(
-            f for f in os.listdir(d) if os.path.isfile(os.path.join(d, f))
-        )
-    except OSError:
-        return "Could not read cache directory."
-    if not files:
-        return "No cached files."
-    result = f"Cached files in cache/:\n"
-    for f in files:
-        path = os.path.join(d, f)
-        size = os.path.getsize(path)
-        if size >= 1024 * 1024:
-            size_str = f"{size / (1024 * 1024):.1f} MB"
-        elif size >= 1024:
-            size_str = f"{size / 1024:.0f} KB"
-        else:
-            size_str = f"{size} B"
-        result += f"  {f} ({size_str})\n"
-    return result
 
 
 @register("read_cache")
@@ -2642,7 +2456,7 @@ def _read_cache(args, ctx=None):
 
 @register("delete_file")
 def _delete_file(args, ctx=None):
-    from src.hsf_paths import lst_dir, rules_dir, pocs_dir
+    from src.hsf_paths import lst_dir, rules_dir, pocs_dir, cache_dir
     ftype = args.get("file_type", "")
     fname = args.get("filename", "")
     if not ftype or not fname:
@@ -2651,6 +2465,8 @@ def _delete_file(args, ctx=None):
         base = str(rules_dir())
     elif ftype == "poc":
         base = str(pocs_dir())
+    elif ftype == "cache":
+        base = str(cache_dir())
     else:
         base = str(lst_dir())
     path = os.path.join(base, fname)
@@ -2697,21 +2513,6 @@ def _delete_shell(args, ctx=None):
         return f"Shell session #{sid} deleted."
     except Exception:
         return f"Shell session #{sid} not found."
-
-
-@register("shell_list")
-def _shell_list(args, ctx=None):
-    from src.shells import shell_db
-    sessions = shell_db.get_all()
-    if not sessions:
-        return "No active shell sessions."
-    result = []
-    for s in sessions:
-        stype = s.get("type", "?")
-        status = s.get("status", "disconnected")
-        ip = s.get("ip", "")
-        result.append(f"  #{s['id']} {stype} {ip} ({status})")
-    return "Shell sessions:\n" + "\n".join(result)
 
 
 @register("shell_exec")
@@ -3069,83 +2870,60 @@ def _wait_connect(thread, timeout=15):
     return f"Connection failed: {result.get('error', 'unknown error')}"
 
 
-@register("connect_ssh")
-def _connect_ssh(args, ctx=None):
+@register("connect")
+def _connect(args, ctx=None):
     if not ctx:
         return "Cannot connect: no tool context available."
+    protocol = args.get("protocol", "").lower()
     host = args.get("host", "")
     username = args.get("username", "")
-    port = int(args.get("port", 22))
+    port = int(args.get("port", 0))
     if not host or not username:
         return "Missing host or username."
     ip = _resolve_target(ctx, host)
     if not ip:
         return f"Could not resolve target: {host}"
-    password, _ = _find_credential(username)
-    if password is None:
-        return f"No credential found for username: {username}"
-    from src.shells.ssh_shell import SSHConnectionThread
-    t = SSHConnectionThread(ip, port, username, password)
-    return f"SSH {ip}:{port} as {username}: {_wait_connect(t)}"
 
-
-@register("connect_sftp")
-def _connect_sftp(args, ctx=None):
-    if not ctx:
-        return "Cannot connect: no tool context available."
-    host = args.get("host", "")
-    username = args.get("username", "")
-    port = int(args.get("port", 22))
-    if not host or not username:
-        return "Missing host or username."
-    ip = _resolve_target(ctx, host)
-    if not ip:
-        return f"Could not resolve target: {host}"
-    password, _ = _find_credential(username)
-    if password is None:
-        return f"No credential found for username: {username}"
-    from src.shells.sftp_shell import SFTPConnectionThread
-    t = SFTPConnectionThread(ip, port, username, password)
-    return f"SFTP {ip}:{port} as {username}: {_wait_connect(t)}"
-
-
-@register("connect_ftp")
-def _connect_ftp(args, ctx=None):
-    if not ctx:
-        return "Cannot connect: no tool context available."
-    host = args.get("host", "")
-    username = args.get("username", "")
-    port = int(args.get("port", 21))
-    if not host or not username:
-        return "Missing host or username."
-    ip = _resolve_target(ctx, host)
-    if not ip:
-        return f"Could not resolve target: {host}"
-    password = ""
-    if username.lower() != "anonymous":
+    if protocol == "ssh":
+        if not port:
+            port = 22
         password, _ = _find_credential(username)
         if password is None:
             return f"No credential found for username: {username}"
-    from src.shells.ftp_shell import FTPConnectionThread
-    t = FTPConnectionThread(ip, port, username, password)
-    return f"FTP {ip}:{port} as {username}: {_wait_connect(t)}"
+        from src.shells.ssh_shell import SSHConnectionThread
+        t = SSHConnectionThread(ip, port, username, password)
+        return f"SSH {ip}:{port} as {username}: {_wait_connect(t)}"
 
+    if protocol == "sftp":
+        if not port:
+            port = 22
+        password, _ = _find_credential(username)
+        if password is None:
+            return f"No credential found for username: {username}"
+        from src.shells.sftp_shell import SFTPConnectionThread
+        t = SFTPConnectionThread(ip, port, username, password)
+        return f"SFTP {ip}:{port} as {username}: {_wait_connect(t)}"
 
-@register("connect_winrm")
-def _connect_winrm(args, ctx=None):
-    if not ctx:
-        return "Cannot connect: no tool context available."
-    host = args.get("host", "")
-    username = args.get("username", "")
-    port = int(args.get("port", 5985))
-    if not host or not username:
-        return "Missing host or username."
-    ip = _resolve_target(ctx, host)
-    if not ip:
-        return f"Could not resolve target: {host}"
-    _, hash_nt = _find_credential(username)
-    if hash_nt is None:
-        hash_nt = ""
-    from src.shells.winrm_shell import WinRMConnectionThread
-    t = WinRMConnectionThread(ip, port, username, "", hash_nt=hash_nt)
-    return f"WinRM {ip}:{port} as {username}: {_wait_connect(t, timeout=15)}"
+    if protocol == "ftp":
+        if not port:
+            port = 21
+        password = ""
+        if username.lower() != "anonymous":
+            password, _ = _find_credential(username)
+            if password is None:
+                return f"No credential found for username: {username}"
+        from src.shells.ftp_shell import FTPConnectionThread
+        t = FTPConnectionThread(ip, port, username, password)
+        return f"FTP {ip}:{port} as {username}: {_wait_connect(t)}"
+
+    if protocol == "winrm":
+        if not port:
+            port = 5985
+        _, hash_nt = _find_credential(username)
+        if hash_nt is None:
+            hash_nt = ""
+        from src.shells.winrm_shell import WinRMConnectionThread
+        t = WinRMConnectionThread(ip, port, username, "", hash_nt=hash_nt)
+        return f"WinRM {ip}:{port} as {username}: {_wait_connect(t, timeout=15)}"
+
+    return f"Unknown protocol: {protocol}. Use ssh, sftp, ftp, or winrm."

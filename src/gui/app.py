@@ -4108,12 +4108,12 @@ class App(tk.Tk):
                     if stop is not None and stop.is_set():
                         return
                     display = result
-                    if name in ("check_machine", "check_status", "check_inventory", "check_domain"):
+                    if name in ("check_machine", "check_status", "check_inventory", "check_domain", "list_repo"):
                         display = result.split("\n")[0] + "..."
                     elif name == "webfetch":
                         display = f"fetched {len(result)} chars"
                     elif name == "websearch":
-                        display = f"searched ({len(result)} chars"
+                        display = f"searched ({len(result)} chars)"
                     elif name == "port_inspector":
                         display = "inventoried"
                     elif len(result) > 120:

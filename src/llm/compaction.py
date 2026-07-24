@@ -52,6 +52,15 @@ SUMMARY_TEMPLATE = """Output exactly the Markdown structure inside <template> an
 ## Key Findings
 - [vulnerabilities, interesting services, versions, or "(none)"]
 
+## Previously Fetched URLs
+- [list webfetch'd URLs and why they were fetched, or "(none)"]
+
+## Search Queries Made
+- [list websearch queries and what was found, or "(none)"]
+
+## Cache Files Available
+- [list caché filenames from the context below if a cache/ listing is provided, or "(none)"]
+
 ## Next Steps
 - [ordered next actions or "(none)"]
 </template>
@@ -59,7 +68,7 @@ SUMMARY_TEMPLATE = """Output exactly the Markdown structure inside <template> an
 Rules:
 - Keep every section, even when empty.
 - Use terse bullets, not prose paragraphs.
-- Preserve exact IPs, usernames, file paths, error strings, and identifiers when known.
+- Preserve exact IPs, usernames, URLs, file paths, error strings, and identifiers when known.
 - Do not mention the summary process or that context was compacted."""
 
 COMPACTION_SYSTEM = (
@@ -237,6 +246,87 @@ def is_overflow(tokens_used, model_context_limit, buffer=None):
     return tokens_used >= model_context_limit - buf
 
 
+def _list_cache_files(messages):
+    cache_map = {}
+    for i, m in enumerate(messages):
+        tc_id = _msg_attr(m, "tool_call_id")
+        content = _msg_attr(m, "content") or ""
+        if not isinstance(content, str):
+            continue
+        if tc_id and "read_cache" in content:
+            import re
+            match = re.search(r'read_cache\("([^"]+)"\)', content)
+            if match:
+                fname = match.group(1)
+                if fname not in cache_map:
+                    cache_map[fname] = _find_tool_url(messages, i, tc_id)
+    try:
+        import os as _os
+        from src.hsf_paths import cache_dir
+        d = str(cache_dir())
+        if not _os.path.isdir(d):
+            return None
+        files = sorted(
+            f for f in _os.listdir(d) if _os.path.isfile(_os.path.join(d, f))
+        )[:30]
+        result = []
+        for f in files:
+            size = _os.path.getsize(_os.path.join(d, f))
+            url = cache_map.get(f, "")
+            if url:
+                result.append((f, f"{f} — {url} ({size} bytes)"))
+            else:
+                result.append((f, f"{f} ({size} bytes)"))
+        return result
+    except Exception:
+        return None
+
+
+def _find_tool_url(messages, tool_idx, tool_call_id):
+    for i in range(max(0, tool_idx - 20), min(len(messages), tool_idx + 1)):
+        m = messages[i]
+        role = _msg_attr(m, "role")
+        if role != "assistant":
+            continue
+        tc = _msg_attr(m, "tool_calls")
+        if not tc:
+            continue
+        for t in tc:
+            tid = _msg_attr(t, "id")
+            if tid == tool_call_id:
+                fn = _msg_attr(_msg_attr(t, "function", {}), "name", "")
+                args = _msg_attr(_msg_attr(t, "function", {}), "arguments", "")
+                if fn == "webfetch":
+                    return _extract_url(args)
+                if fn == "websearch":
+                    return f'search: {_extract_query(args)}'
+    return ""
+
+
+def _extract_url(args_str):
+    try:
+        import json as _json
+        if isinstance(args_str, str):
+            args = _json.loads(args_str)
+        else:
+            args = args_str
+        return args.get("url", "")[:120]
+    except Exception:
+        return ""
+
+
+def _extract_query(args_str):
+    try:
+        import json as _json
+        if isinstance(args_str, str):
+            args = _json.loads(args_str)
+        else:
+            args = args_str
+        return args.get("query", "")[:100]
+    except Exception:
+        return ""
+
+
 def compact_messages(
     messages,
     client,
@@ -274,6 +364,13 @@ def compact_messages(
         previous_summary=previous_summary,
         head_messages="\n\n".join(context_parts),
     )
+
+    cache_files = _list_cache_files(messages)
+    if cache_files:
+        cache_list = "Cache files currently available:\n" + "\n".join(
+            label for _, label in cache_files)
+        summary_prompt += "\n\n" + cache_list
+        _cdbg(f"compact_msgs cache_list={len(cache_files)} files")
 
     usable = usable_context(model_context_limit, SUMMARY_OUTPUT_TOKENS, buffer)
     prompt_tokens = estimate_tokens(summary_prompt)
