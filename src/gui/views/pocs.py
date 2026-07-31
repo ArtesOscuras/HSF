@@ -27,6 +27,9 @@ class PocsView(BaseView):
 
         header = tk.Frame(self, bg="#000000")
         header.grid(row=0, column=0, sticky="ew", pady=(15, 5))
+        nav_frame = tk.Frame(header, bg="#000000")
+        nav_frame.pack(pady=(0, 10))
+
         build_nav(header, "pocs", self.master)
 
         self._title_label = tk.Label(

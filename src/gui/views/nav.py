@@ -1,5 +1,5 @@
 import tkinter as tk
-from src.gui import fonts
+from src.gui import fonts, icons
 
 _ORDER = [
     ("Tools", "tools"),
@@ -14,6 +14,7 @@ _ORDER = [
 _frame = None
 _btns = []
 _zoom_label = None
+_settings_callback = None
 
 
 def build(parent, active_view, navigator):
@@ -52,8 +53,20 @@ def build(parent, active_view, navigator):
     plus_btn.bind("<Enter>", lambda e: plus_btn.config(bg="#333333"))
     plus_btn.bind("<Leave>", lambda e: plus_btn.config(bg="#222222"))
 
-    # Phantom left spacer matching zoom width for symmetry
-    tk.Frame(_frame, bg="#000000", width=75).pack(side=tk.LEFT)
+    settings_frame = tk.Frame(_frame, bg="#000000")
+    settings_frame.pack(side=tk.LEFT, padx=(15, 0))
+    settings_img = icons.icon("settings.png", size=34)
+    settings_btn = tk.Label(
+        settings_frame, image=settings_img, bg="#000000",
+        cursor="",
+    )
+    settings_btn.image = settings_img
+    settings_btn.pack()
+    settings_btn.bind("<Button-1>", lambda e: _settings_callback and _settings_callback())
+    settings_btn.bind("<Enter>", lambda e: settings_btn.config(bg="#222222"))
+    settings_btn.bind("<Leave>", lambda e: settings_btn.config(bg="#000000"))
+
+    tk.Frame(_frame, bg="#000000", width=40).pack(side=tk.LEFT)
     tk.Frame(_frame, bg="#000000").pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
     inner = tk.Frame(_frame, bg="#000000")
@@ -84,6 +97,11 @@ def _zoom(delta):
     _update_label()
     _set_setting("view_scale", fonts.view_scale())
     _save_settings()
+
+
+def set_settings_callback(fn):
+    global _settings_callback
+    _settings_callback = fn
 
 
 def set_initial_zoom(scale):

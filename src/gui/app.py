@@ -625,6 +625,10 @@ class App(tk.Tk):
         self._port_inspector_running = False
         self._shell_listener = None
 
+        from src.gui.views.nav import set_settings_callback as _nav_set_settings
+        from .dialogs.settings import SettingsDialog
+        _nav_set_settings(lambda: SettingsDialog(self))
+
         self._register_views()
         self.visualizer.activate_view("tools")
         self._register_commands()
