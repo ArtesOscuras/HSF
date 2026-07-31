@@ -3836,7 +3836,11 @@ class App(tk.Tk):
             return
         if text.lower() == "compact":
             import threading
-            threading.Thread(target=lambda: self._compact_if_needed(force=True), daemon=True).start()
+            self.console._start_thinking_ui()
+            def _compact():
+                self._compact_if_needed(force=True)
+                self.console.stop_thinking()
+            threading.Thread(target=_compact, daemon=True).start()
             return
         import threading
         self._agent_stop_event = threading.Event()
@@ -4001,6 +4005,8 @@ class App(tk.Tk):
         before = len(self._llm_messages)
         _ctx_log(f"compact start before={before} est={estimated} limit={limit}")
         t0 = _datetime.datetime.now()
+        self.console.after(0, self.console.block_input)
+        self.console.after(0, lambda: self.console._set_spinner_color("#ce9178"))
         try:
             from src.llm import LLMClient
             client = LLMClient(purpose="agent")
@@ -4010,8 +4016,10 @@ class App(tk.Tk):
             if ok:
                 after = len(self._llm_messages)
                 _ctx_log(f"compact done ok=True before={before} after={after} elapsed={elapsed:.2f}s")
-                self.console.after(0, lambda: self.console.success(
-                    f"Context compacted ({before} messages -> {after} messages)"))
+                self._total_api_tokens = 0
+                self.console.after(0, lambda: self.console.info(
+                    f"Context compacted ({before} → {after} messages)"))
+                self.console.after(0, self._update_mode_prompt)
                 return True
             else:
                 _ctx_log(f"compact done ok=False before={before} elapsed={elapsed:.2f}s")
@@ -4022,6 +4030,9 @@ class App(tk.Tk):
             _ctx_log(f"compact error after={elapsed:.2f}s {type(e).__name__}: {e}")
             self.console.after(0, lambda m=str(e): self.console.error(f"Compaction error: {m}"))
             return False
+        finally:
+            self.console.after(0, self.console.unblock_input)
+            self.console.after(0, lambda: self.console._set_spinner_color("#5ba3ec"))
 
     def _enter_agent_mode(self):
         self._agent_mode = True
@@ -4070,7 +4081,11 @@ class App(tk.Tk):
             return
         if text.lower() == "compact":
             import threading
-            threading.Thread(target=lambda: self._compact_if_needed(force=True), daemon=True).start()
+            self.console._start_thinking_ui()
+            def _compact():
+                self._compact_if_needed(force=True)
+                self.console.stop_thinking()
+            threading.Thread(target=_compact, daemon=True).start()
             return
         import threading
         self._agent_stop_event = threading.Event()
@@ -4114,13 +4129,17 @@ class App(tk.Tk):
                         display = f"fetched {len(result)} chars"
                     elif name == "websearch":
                         display = f"searched ({len(result)} chars)"
+                    elif name == "read_cache":
+                        display = f"read {len(result.split(chr(10)))} lines"
+                    elif name in ("poc_exec", "poc_read", "poc_write", "poc_edit"):
+                        display = f"poc {len(result)} chars"
                     elif name == "port_inspector":
                         display = "inventoried"
                     elif len(result) > 120:
                         display = result[:117] + "..."
                     try:
                         self.console.after(0, lambda d=display: self.console.info(
-                            f"  [tool] {name} {str(args)[:60]} → {d}"))
+                            f"  [tool] {name} {str(args)[:60]} → {d} (~{len(result)//4} tokens)"))
                     except RuntimeError:
                         pass
                 stream = client.chat_with_tools(

@@ -25,35 +25,6 @@ _HSF_UA = "opencode/HSF"
 _DDG_URL = "https://lite.duckduckgo.com/lite/"
 
 
-class _TextExtractor(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self._text = []
-        self._skip = 0
-        self._skip_tags = {"script", "style", "noscript", "iframe", "object", "embed"}
-
-    def handle_starttag(self, tag, attrs):
-        if self._skip > 0 or tag in self._skip_tags:
-            self._skip += 1
-
-    def handle_endtag(self, tag):
-        if self._skip > 0:
-            self._skip -= 1
-
-    def handle_data(self, data):
-        if self._skip == 0:
-            self._text.append(data)
-
-    def get_text(self):
-        return " ".join(self._text).strip()
-
-
-def _extract_text(html):
-    parser = _TextExtractor()
-    parser.feed(html)
-    return parser.get_text()
-
-
 def _html_to_markdown(html):
     h = html2text.HTML2Text()
     h.ignore_links = False
@@ -129,22 +100,29 @@ def _strip_html_non_content(html):
     return parser.get_html()
 
 
-def _fetch_raw(url, timeout):
-    headers = {"User-Agent": _CHROME_UA}
-    resp = requests.get(url, headers=headers, timeout=timeout, stream=True, verify=False)
+def _fetch_raw(url, timeout, method="GET", body=None, content_type=None, headers=None):
+    req_headers = {"User-Agent": _CHROME_UA}
+    if headers:
+        req_headers.update({str(k): str(v) for k, v in headers.items()})
+    if body and method == "POST":
+        req_headers["Content-Type"] = content_type or "application/x-www-form-urlencoded"
+    resp = requests.request(method, url, headers=req_headers, data=body,
+                            timeout=timeout, stream=True, verify=False)
     if resp.status_code == 403 and resp.headers.get("cf-mitigated") == "challenge":
         resp.close()
-        headers = {"User-Agent": _HSF_UA}
-        resp = requests.get(url, headers=headers, timeout=timeout, stream=True, verify=False)
+        req_headers["User-Agent"] = _HSF_UA
+        resp = requests.request(method, url, headers=req_headers, data=body,
+                                timeout=timeout, stream=True, verify=False)
 
     content_type = resp.headers.get("content-type", "").lower()
+    resp_headers = dict(resp.headers)
     _text_types = ("text/", "application/json", "application/xml",
                    "application/javascript", "application/xhtml+xml",
                    "application/ld+json", "application/rss+xml",
                    "application/atom+xml")
     if not any(content_type.startswith(t) for t in _text_types):
         resp.close()
-        return f"[non-text content skipped: {content_type}]", content_type
+        return f"[non-text content skipped: {content_type}]", content_type, resp_headers
 
     chunks = []
     total = 0
@@ -156,38 +134,82 @@ def _fetch_raw(url, timeout):
                 raise RuntimeError(f"Response too large (exceeds {MAX_RESPONSE_SIZE // (1024*1024)}MB limit)")
             chunks.append(chunk)
     resp.close()
-    body = b"".join(chunks)
+    rbody = b"".join(chunks)
     try:
-        text = body.decode("utf-8")
+        text = rbody.decode("utf-8")
     except UnicodeDecodeError:
-        text = body.decode("latin-1", errors="replace")
-    return text, content_type
+        text = rbody.decode("latin-1", errors="replace")
+    return text, content_type, resp_headers
 
 
-def fetch_url(url, format="markdown", timeout=DEFAULT_TIMEOUT, offset=1, limit=None):
+def fetch_raw(url, timeout=DEFAULT_TIMEOUT, method="GET", body=None, content_type=None, headers=None):
+    req_headers = {"User-Agent": _CHROME_UA}
+    if headers:
+        req_headers.update({str(k): str(v) for k, v in headers.items()})
+    if body and method == "POST":
+        req_headers["Content-Type"] = content_type or "application/x-www-form-urlencoded"
+    resp = requests.request(method, url, headers=req_headers, data=body,
+                            timeout=timeout, stream=True, verify=False)
+    if resp.status_code == 403 and resp.headers.get("cf-mitigated") == "challenge":
+        resp.close()
+        req_headers["User-Agent"] = _HSF_UA
+        resp = requests.request(method, url, headers=req_headers, data=body,
+                                timeout=timeout, stream=True, verify=False)
+
+    status_code = resp.status_code
+    resp_headers = dict(resp.headers)
+    content_type = resp_headers.get("content-type", "").lower()
+    _text_types = ("text/", "application/json", "application/xml",
+                   "application/javascript", "application/xhtml+xml",
+                   "application/ld+json", "application/rss+xml",
+                   "application/atom+xml")
+    if not any(content_type.startswith(t) for t in _text_types):
+        resp.close()
+        return status_code, resp_headers, f"[non-text content skipped: {content_type}]", content_type
+
+    chunks = []
+    total = 0
+    for chunk in resp.iter_content(chunk_size=8192):
+        if chunk:
+            total += len(chunk)
+            if total > MAX_RESPONSE_SIZE:
+                resp.close()
+                raise RuntimeError(f"Response too large (exceeds {MAX_RESPONSE_SIZE // (1024*1024)}MB limit)")
+            chunks.append(chunk)
+    resp.close()
+    rbody = b"".join(chunks)
+    try:
+        text = rbody.decode("utf-8")
+    except UnicodeDecodeError:
+        text = rbody.decode("latin-1", errors="replace")
+    return status_code, resp_headers, text, content_type
+
+
+def fetch_url(url, format="markdown", timeout=DEFAULT_TIMEOUT, offset=1, limit=None,
+              method="GET", body=None, content_type=None, headers=None):
     if not url.startswith("http://") and not url.startswith("https://"):
         url = "https://" + url
 
     try:
-        content, content_type = _fetch_raw(url, timeout)
+        raw_content, raw_ct, resp_headers = _fetch_raw(url, timeout, method=method, body=body, content_type=content_type, headers=headers)
     except Exception as e:
         return f"Error fetching URL: {e}"
 
-    is_html = "text/html" in content_type or "<html" in content[:200].lower()
+    cookies = resp_headers.get("Set-Cookie", resp_headers.get("set-cookie", "")).strip()
+    if cookies:
+        raw_content = f"Cookies: {cookies}\n\n{raw_content}"
 
-    if format == "text":
+    is_html = "text/html" in raw_ct or "<html" in raw_content[:200].lower()
+
+    if format == "markdown":
         if is_html:
-            content = _strip_html_non_content(content)
-            content = _extract_text(content)
-    elif format == "markdown":
-        if is_html:
-            content = _strip_html_non_content(content)
-            content = _html_to_markdown(content)
+            raw_content = _strip_html_non_content(raw_content)
+            raw_content = _html_to_markdown(raw_content)
     else:
         pass
 
     if offset > 1 or limit is not None:
-        lines = content.splitlines(keepends=True)
+        lines = raw_content.splitlines(keepends=True)
         total = len(lines)
         start = max(0, offset - 1)
         end = start + limit if limit else total
@@ -197,7 +219,7 @@ def fetch_url(url, format="markdown", timeout=DEFAULT_TIMEOUT, offset=1, limit=N
         header = f"[{total} lines total, showing lines {offset}-{shown_end}]"
         return header + "\n" + "".join(sliced)
 
-    return content
+    return raw_content
 
 
 def web_search(query, num_results=10):

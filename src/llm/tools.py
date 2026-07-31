@@ -477,14 +477,18 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "webfetch",
-            "description": "Fetch a URL as text or markdown. Navigation, footers, sidebars, and cookie banners are automatically stripped from HTML pages to show only main content. Use offset/limit to paginate.",
+            "description": "Fetch a URL as markdown or raw. Default GET; use POST only with body+content_type. Markdown strips navigation/footers. Raw returns status, headers, and first 60 lines (full body in cache). Paginate with offset/limit.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "The URL to fetch (http:// or https://)"},
-                    "format": {"type": "string", "enum": ["text", "markdown"], "description": "Output format (default: markdown)"},
-                    "offset": {"type": "integer", "description": "1-indexed line number to start reading from (default: 1)"},
-                    "limit": {"type": "integer", "description": "Maximum number of lines to return (default: 500)"},
+                    "url": {"type": "string", "description": "The URL to fetch"},
+                    "format": {"type": "string", "enum": ["markdown", "raw"], "description": "Output format (default: markdown). Raw: see status, headers, and raw HTML."},
+                    "method": {"type": "string", "enum": ["GET", "POST"], "description": "HTTP method (default: GET). Use POST only when submitting form/JSON data."},
+                    "body": {"type": "string", "description": "Request body for POST (form-encoded or JSON). Ignored if method is GET."},
+                    "content_type": {"type": "string", "description": "Content-Type header for POST body (default: application/x-www-form-urlencoded). E.g. 'application/json'. Ignored for GET."},
+                    "headers": {"type": "object", "description": "Extra HTTP headers as key:value pairs for GET or POST. E.g. {'Cookie': 'session=abc', 'Authorization': 'Bearer xyz'}. Optional."},
+                    "offset": {"type": "integer", "description": "Line to start from (default: 1). Ignored for raw."},
+                    "limit": {"type": "integer", "description": "Max lines to return (default: 500). Ignored for raw."},
                 },
                 "required": ["url"],
             },
@@ -499,7 +503,7 @@ TOOLS = [
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "The search query"},
-                    "num_results": {"type": "integer", "description": "Number of results (default: 25)"},
+                    "num_results": {"type": "integer", "description": "Number of results (default: 20)"},
                 },
                 "required": ["query"],
             },
@@ -715,13 +719,16 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "read_cache",
-            "description": "Read a cached tool output file from the cache/ directory. Large tool outputs are automatically saved here when they exceed size limits. Use offset/limit to paginate.",
+            "description": "Read a cached tool output file from cache/. Use offset/limit to paginate, or regex with context_before/context_after to search for specific content.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "filename": {"type": "string", "description": "Filename from list_files(cache) or the truncation marker"},
-                    "offset": {"type": "integer", "description": "Line number to start reading from (1-indexed, default 1)"},
-                    "limit": {"type": "integer", "description": "Max lines to read (default 2000)"},
+                    "offset": {"type": "integer", "description": "Line number to start reading from (1-indexed, default 1). Ignored if regex is set."},
+                    "limit": {"type": "integer", "description": "Max lines to read (default 500). Ignored if regex is set."},
+                    "regex": {"type": "string", "description": "Optional regex pattern to search within the file. When set, returns matching lines with surrounding context instead of offset/limit pagination."},
+                    "context_before": {"type": "integer", "description": "Lines to show before each regex match (default: 2)"},
+                    "context_after": {"type": "integer", "description": "Lines to show after each regex match (default: 10)"},
                 },
                 "required": ["filename"],
             },
@@ -898,7 +905,7 @@ TOOLS = [
             "name": "poc_exec",
             "description": (
                 "Execute a POC Python script and return its output. "
-                "Output is truncated to last 5000 chars if too large."
+                "Output is truncated to last 10 lines or last 2000 bytes."
             ),
             "parameters": {
                 "type": "object",
@@ -942,7 +949,7 @@ MAX_SHELL_CHARS = 5000
 MAX_TOOL_LINES = 2000
 MAX_TOOL_BYTES = 50 * 1024
 TOOL_BYTE_LIMITS = {
-    "poc_exec": 1000,
+    "poc_exec": 2000,
     "port_inspector": 2000,
     "check_machine": 3000,
     "websearch": 8000,
@@ -1967,14 +1974,70 @@ def _delete_password(args, ctx=None):
 
 @register("webfetch")
 def _webfetch(args, ctx=None):
-    from src.llm.web import fetch_url
+    from src.llm.web import fetch_url, fetch_raw
     from urllib.parse import urlparse
     url = args.get("url", "")
+    fmt = args.get("format", "markdown")
+    method = args.get("method", "GET").upper()
+    body = args.get("body") or None
+    content_type = args.get("content_type") or None
+    headers = args.get("headers")
+    if isinstance(headers, dict):
+        headers = {str(k): str(v) for k, v in headers.items()}
+    else:
+        headers = None
+
+    if fmt == "raw":
+        try:
+            status, resp_headers, resp_body, ct = fetch_raw(url, method=method, body=body, content_type=content_type, headers=headers)
+        except Exception as e:
+            return f"Error fetching URL: {e}"
+        lines = [f"HTTP {status}"]
+        for k, v in resp_headers.items():
+            lines.append(f"  {k}: {v}")
+        lines.append("")
+        if isinstance(resp_body, str) and resp_body.startswith("[non-text"):
+            return "\n".join(lines) + resp_body
+        body_lines = resp_body.split("\n")
+        preview = "\n".join(body_lines[:60])
+        byte_len = len(resp_body.encode("utf-8"))
+        from src.hsf_paths import cache_dir
+        import time as _time
+        ts = int(_time.time())
+        filename = f"tool_{ts}_webfetch_raw.raw"
+        path = os.path.join(str(cache_dir()), filename)
+        try:
+            with open(path, "w") as f:
+                f.write(resp_body)
+        except (PermissionError, OSError):
+            pass
+        lines.append(preview)
+        lines.append(f"\n... output truncated ({len(body_lines)} lines, {byte_len} bytes). To read the rest: read_cache(\"{filename}\")")
+        result = "\n".join(lines)
+        if not result.startswith("Error"):
+            try:
+                parsed = urlparse(url)
+                host = parsed.hostname
+                path = parsed.path or "/"
+                from src.machines import store, machine_db, domain_db
+                machine = store.get(host)
+                if machine:
+                    machine_db.save_directory(machine.id, path)
+                elif domain_db.exists(host):
+                    domain_db.save_directory(host, path)
+            except Exception:
+                pass
+        return result
+
     result = fetch_url(
         url,
-        format=args.get("format", "markdown"),
+        format=fmt,
         offset=int(args.get("offset", 1)),
         limit=int(args.get("limit", 0)) or None,
+        method=method,
+        body=body,
+        content_type=content_type,
+        headers=headers,
     )
     if not result.startswith("Error"):
         try:
@@ -1997,7 +2060,7 @@ def _websearch(args, ctx=None):
     from src.llm.web import web_search
     return web_search(
         args.get("query", ""),
-        num_results=args.get("num_results", 25),
+        num_results=args.get("num_results", 20),
     )
 
 
@@ -2435,10 +2498,43 @@ def _read_cache(args, ctx=None):
             content = f.read()
     except (PermissionError, OSError) as e:
         return f"Error reading {filename}: {e}"
-    offset = int(args.get("offset", 1))
-    limit = int(args.get("limit", 2000))
+
     lines = content.splitlines(keepends=True)
     total_lines = len(lines)
+    regex = args.get("regex", "").strip()
+
+    if regex:
+        import re
+        try:
+            pattern = re.compile(regex, re.IGNORECASE)
+        except re.error as e:
+            return f"Invalid regex: {e}"
+        ctx_before = max(0, int(args.get("context_before", 2)))
+        ctx_after = max(0, int(args.get("context_after", 10)))
+        matches = [i for i, line in enumerate(lines) if pattern.search(line)]
+        if not matches:
+            return f"cache/{filename} ({total_lines} lines, 0 matches for '{regex}')"
+        result = [f"cache/{filename} ({total_lines} lines, {len(matches)} matches for '{regex}'):"]
+        shown_until = -1
+        shown_count = 0
+        for m in matches:
+            start = max(0, m - ctx_before)
+            end = min(total_lines, m + ctx_after + 1)
+            if start <= shown_until:
+                start = shown_until + 1
+            if start >= end:
+                continue
+            shown_count += 1
+            result.append("---")
+            for j in range(start, end):
+                marker = ">" if j == m else " "
+                result.append(f"{marker} Line {j+1}: {lines[j].rstrip()}")
+            shown_until = end - 1
+        result.append(f"---\n({shown_count} match groups, {len(matches)} total matches)")
+        return "\n".join(result)
+
+    offset = int(args.get("offset", 1))
+    limit = int(args.get("limit", 500))
     if offset < 1:
         offset = 1
     if offset > total_lines:
@@ -2807,14 +2903,14 @@ def _poc_exec(args, ctx=None):
     output = proc.stdout
     if proc.stderr:
         output += "\n" + proc.stderr
-    total = len(output)
-    if total > MAX_SHELL_CHARS:
-        output = output[-MAX_SHELL_CHARS:]
-        header = (f"POC '{filename}' (exit {proc.returncode})"
-                  f"[{total} chars total, last {MAX_SHELL_CHARS}]\n")
-    else:
-        header = f"POC '{filename}' (exit {proc.returncode})\n"
-    return header + output if output.strip() else f"POC '{filename}' executed (exit {proc.returncode}) with no output."
+    if not output.strip():
+        return f"POC '{filename}' executed (exit {proc.returncode}) with no output."
+    lines = output.splitlines()
+    if len(lines) > 10:
+        output = "\n".join(lines[-10:])
+        return (f"POC '{filename}' (exit {proc.returncode})"
+                f"[{len(lines)} lines total, last 10]:\n{output}")
+    return f"POC '{filename}' (exit {proc.returncode}):\n{output.strip()}"
 
 
 def _resolve_target(ctx, target):

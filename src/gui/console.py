@@ -294,7 +294,17 @@ class Console(tk.Frame):
         if getattr(self, '_spinner_timer', None):
             self.after_cancel(self._spinner_timer)
             self._spinner_timer = None
-        self._spinner_label.config(text="\u2800")
+        self._spinner_label.config(text="\u2800", fg="#5ba3ec")
+
+    def _set_spinner_color(self, color):
+        self._spinner_label.config(fg=color)
+
+    def block_input(self):
+        self.input_text.configure(state="disabled")
+
+    def unblock_input(self):
+        self.input_text.configure(state="normal")
+        self.input_text.focus()
 
     def add_help_section(self, title, items):
         self.help_sections.append((title, items))
@@ -818,7 +828,12 @@ class Console(tk.Frame):
         arg_prefix = parts[1] if len(parts) > 1 else ""
         in_arg_mode = " " in raw.lstrip()
 
-        cmd_matches = [(n, info["help"]) for n, info in self.commands.items()
+        if self._mode_handler and self._mode_commands:
+            match_src = self._mode_commands
+        else:
+            match_src = self.commands
+        cmd_matches = [(n, match_src[n] if isinstance(match_src, dict) else match_src[n]["help"])
+                       for n in match_src
                        if n.startswith(cmd_prefix)]
         cmd_matches.sort(key=lambda x: x[0])
 

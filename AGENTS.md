@@ -479,7 +479,7 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 
 | Tool | Description |
 |---|---|
-| `webfetch` | Fetch content from a URL and return as text or markdown (`url`, optional `format`). Ignores self-signed TLS certificates. Auto-saves the URL path to `directories` table if the host matches a known machine or domain. |
+| `webfetch` | Fetch a URL as markdown or raw (`url`, optional `format`, `method`, `body`, `content_type`, `headers`). Default GET; use POST only when submitting data with explicit content_type. Use headers for custom HTTP headers (Cookie, Authorization, etc.). Ignores self-signed TLS certificates. Markdown auto-strips navigation, footers, and cookie banners. Raw format returns HTTP status, all headers, and first 60 lines of untouched body (full body saved to cache). Auto-saves URL path to `directories` table if the host matches a known machine or domain. |
 | `websearch` | Search the web via Exa MCP (primary) or DuckDuckGo Lite (fallback) and return results with title, URL, and snippet (`query`, optional `num_results`) |
 | `list_repo` | List files and directories in a public GitHub repository using the GitHub REST API (`owner`, `repo`, optional `path`). Returns file names, sizes, and raw download URLs. No authentication needed. |
 
@@ -507,7 +507,7 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 | `listener` | Start or stop a background service (action: "start" or "stop", service: "shells-listener" or "mdns-listener"). Requires `tool_context` |
 | `list_files` | List available files by type: dictionary, rule, poc, or cache |
 | `delete_file` | Delete a dictionary, rule, POC, or cache file (`file_type`, `filename`) |
-| `read_cache` | Read a cached tool output file from `cache/` with optional offset/limit |
+| `read_cache` | Read a cached tool output file from `cache/` with optional offset/limit pagination, or regex search with context lines (`regex`, `context_before`, `context_after`) |
 | `delete_evidence` | Delete an evidence session by name, or `"all"` |
 | `delete_shell` | Delete a shell session by ID, or `"all"` |
 | `shell_exec` | Send a command to a shell session and wait for output |
@@ -618,7 +618,7 @@ The summarizer receives the current cache file listing (with associated URLs whe
 |------|:---:|:---:|---|
 | poc_exec | 1,000 | default (2,000) | POC output is often repetitive; full file available in `pocs/` |
 | port_inspector | 2,000 | default | Service probes return verbose protocol banners |
-| websearch | 8,000 | default | ~25 results at ~300 bytes each; larger searches cache automatically |
+| websearch | 8,000 | default | ~20 results at ~300 bytes each; larger searches cache automatically |
 | check_machine | 3,000 | default | Machine info with banners; full data via `check_machine` again |
 | webfetch | 3,000 | 60 | Pages after HTML cleaning are compact; 30 head + 29 tail lines |
 | Other tools | 50,000 | 2,000 | Default; most tool outputs fit comfortably |
@@ -631,12 +631,13 @@ The summarizer receives the current cache file listing (with associated URLs whe
 - Directory: `~/.local/share/hsf/cache/` (created lazily)
 - Files named `tool_{timestamp}_{tool_name}.txt`
 - Cleaned on `reset` command or `delete cache`
-- Tools: `list_files(cache)` to list, `read_cache(filename, offset, limit)` to read, `delete cache` or `delete_file(cache, filename)` to remove
+- Tools: `list_files(cache)` to list, `read_cache(filename, offset=1, limit=500)` to read, or `read_cache(filename, regex="pattern", context_before=2, context_after=10)` to search within cached files. Use `delete cache` or `delete_file(cache, filename)` to remove.
 
 **Webfetch HTML Cleaning:**
 - Before HTML-to-markdown conversion, non-content elements are stripped via `_strip_html_non_content()` in `src/llm/web.py`
 - Removed: `<nav>`, `<footer>`, `<aside>`, and elements with cookie-consent classes (`cookie`, `consent`, `gdpr`, `banner`, `popup`, `sidebar`)
 - Preserved: `<header>` (may contain business/title info), `<main>`, `<article>`, `<section>`, and all text content
+- If the server responds with a `Set-Cookie` header, the cookie is shown to the model at the top of the output in markdown mode (already visible in raw mode headers)
 - The cleaned markdown focuses on page content without navigation noise, menus, or cookie banners
 - If the full original page is needed, the uncached raw response is not available (design tradeoff for cleaner context)
 
