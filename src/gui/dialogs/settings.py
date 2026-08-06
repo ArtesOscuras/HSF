@@ -31,8 +31,7 @@ class SettingsDialog(tk.Toplevel):
         self.grab_set()
 
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(0, weight=0)
-        self.rowconfigure(1, weight=1)
+        self.rowconfigure(0, weight=1)
 
         style = ttk.Style()
         style.theme_use("default")
@@ -44,7 +43,7 @@ class SettingsDialog(tk.Toplevel):
                   foreground=[("selected", FG)])
 
         self._nb = ttk.Notebook(self)
-        self._nb.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
+        self._nb.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 10))
 
         self._tab_models = tk.Frame(self._nb, bg=BG)
         self._nb.add(self._tab_models, text="  Models  ")
@@ -384,14 +383,20 @@ class SettingsDialog(tk.Toplevel):
     def _open_provider_dialog(self, is_new=False, preselected=None):
         dialog = tk.Toplevel(self)
         dialog.title("New Provider" if is_new else "Edit Provider")
-        dialog.geometry("540x520")
         dialog.configure(bg=BG)
         dialog.transient(self)
-        dialog.wait_visibility()
-        dialog.grab_set()
 
         dialog.columnconfigure(0, weight=0)
         dialog.columnconfigure(1, weight=1)
+
+        style = ttk.Style()
+        style.configure("TCombobox",
+                         fieldbackground=BG_WIDGET,
+                         foreground=FG,
+                         insertcolor=FG,
+                         selectbackground=SEL_BG,
+                         selectforeground=FG,
+                         arrowsize=12)
 
         providers = self._config.get("providers", {})
         active = self._config.get("active_provider", "")
@@ -404,33 +409,24 @@ class SettingsDialog(tk.Toplevel):
                 dialog, text="Provider:", font=fonts.view_font(11),
                 fg=FG_DIM, bg=BG,
             ).grid(row=row, column=0, sticky="w", padx=15, pady=(10, 3))
-            pid_var = tk.StringVar(value=active)
             pids = list(providers.keys())
-            combo = ttk.Combobox(
-                dialog, textvariable=pid_var, values=pids,
-                state="readonly", font=fonts.view_font(11),
-            )
-            combo.grid(row=row, column=1, sticky="ew", padx=15, pady=(10, 3))
             sel = preselected or active
-            if pids:
-                idx = pids.index(sel) if sel in pids else 0
-                pid_var.set(pids[idx])
-                combo.current(idx)
+            if not pids:
+                pid_var = tk.StringVar(value="")
+            else:
+                init = sel if sel in pids else pids[0]
+                pid_var = tk.StringVar(value=init)
+            option = tk.OptionMenu(dialog, pid_var, pid_var.get(),
+                                    *([p for p in pids if p != pid_var.get()] if pids else []))
+            option.config(bg=BG_WIDGET, fg=FG, font=fonts.view_font(11),
+                           borderwidth=0, highlightthickness=1,
+                           highlightcolor="#333333", highlightbackground="#333333",
+                           activebackground=SEL_BG, activeforeground=FG)
+            option["menu"].config(bg=BG_WIDGET, fg=FG, font=fonts.view_font(11))
+            option.grid(row=row, column=1, sticky="ew", padx=15, pady=(10, 3))
             row += 1
         else:
-            tk.Label(
-                dialog, text="ID:", font=fonts.view_font(11),
-                fg=FG_DIM, bg=BG,
-            ).grid(row=row, column=0, sticky="w", padx=15, pady=(10, 3))
-            pid_var = tk.StringVar()
-            tk.Entry(
-                dialog, textvariable=pid_var, bg=BG_WIDGET, fg=FG,
-                insertbackground=FG, font=fonts.view_font(11),
-                borderwidth=1, relief=tk.FLAT,
-                highlightthickness=1, highlightcolor="#333333",
-                highlightbackground="#333333",
-            ).grid(row=row, column=1, sticky="ew", padx=15, pady=(10, 3))
-            row += 1
+            pid_var = None
 
         tk.Label(
             dialog, text="Name:", font=fonts.view_font(11),
@@ -451,13 +447,14 @@ class SettingsDialog(tk.Toplevel):
             fg=FG_DIM, bg=BG,
         ).grid(row=row, column=0, sticky="w", padx=15, pady=(5, 3))
         url_var = tk.StringVar()
-        tk.Entry(
+        url_entry = tk.Entry(
             dialog, textvariable=url_var, bg=BG_WIDGET, fg=FG,
             insertbackground=FG, font=fonts.view_font(11),
             borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333",
             highlightbackground="#333333",
-        ).grid(row=row, column=1, sticky="ew", padx=15, pady=(5, 3))
+        )
+        url_entry.grid(row=row, column=1, sticky="ew", padx=15, pady=(5, 3))
         row += 1
 
         tk.Label(
@@ -465,27 +462,27 @@ class SettingsDialog(tk.Toplevel):
             fg=FG_DIM, bg=BG,
         ).grid(row=row, column=0, sticky="w", padx=15, pady=(5, 3))
         key_var = tk.StringVar()
-        tk.Entry(
+        key_entry = tk.Entry(
             dialog, textvariable=key_var, show="*",
             bg=BG_WIDGET, fg=FG, insertbackground=FG,
             font=fonts.view_font(11), borderwidth=1, relief=tk.FLAT,
             highlightthickness=1, highlightcolor="#333333",
             highlightbackground="#333333",
-        ).grid(row=row, column=1, sticky="ew", padx=15, pady=(5, 3))
+        )
+        key_entry.grid(row=row, column=1, sticky="ew", padx=15, pady=(5, 3))
         row += 1
 
         tk.Label(
             dialog, text="Models:", font=fonts.view_font(11),
             fg=FG_DIM, bg=BG,
         ).grid(row=row, column=0, sticky="w", padx=15, pady=(5, 3))
-        models_var = tk.StringVar()
-        tk.Entry(
-            dialog, textvariable=models_var, bg=BG_WIDGET, fg=FG,
-            insertbackground=FG, font=fonts.view_font(11),
-            borderwidth=1, relief=tk.FLAT,
-            highlightthickness=1, highlightcolor="#333333",
-            highlightbackground="#333333",
-        ).grid(row=row, column=1, sticky="ew", padx=15, pady=(5, 3))
+
+        model_var = tk.StringVar()
+        model_combo = ttk.Combobox(
+            dialog, textvariable=model_var,
+            font=fonts.view_font(11),
+        )
+        model_combo.grid(row=row, column=1, sticky="ew", padx=15, pady=(5, 3))
 
         detect_btn = tk.Label(
             dialog, text=" Detect ", bg="#222222", fg=FG,
@@ -496,42 +493,51 @@ class SettingsDialog(tk.Toplevel):
         detect_btn.bind("<Enter>", lambda e: detect_btn.config(bg="#333333"))
         detect_btn.bind("<Leave>", lambda e: detect_btn.config(bg="#222222"))
 
-        def _detect_models():
+        def _run_detect():
             url = url_var.get().strip()
             key = key_var.get().strip()
             if not url:
-                feedback.config(text="Set a Base URL first.")
-                dialog.after(1500, lambda: feedback.config(text=""))
                 return
-            try:
-                from openai import OpenAI
-                client = OpenAI(base_url=url, api_key=key or "none")
-                models = client.models.list()
-                ids = [m.id for m in models.data]
-                models_var.set(", ".join(ids))
-                feedback.config(
-                    text=f"Found {len(ids)} model(s).")
-            except Exception as e:
-                feedback.config(text=f"Error: {e}")
-            dialog.after(3000, lambda: feedback.config(text=""))
+            feedback.config(text="Detecting models...", fg=SUCCESS)
+            detect_btn.config(text=" ... ", fg=FG_DIM)
+            def _run():
+                try:
+                    from openai import OpenAI
+                    client = OpenAI(base_url=url, api_key=key or "none")
+                    api_models = client.models.list()
+                    ids = [m.id for m in api_models.data]
+                    dialog.after(0, lambda: _on_detect(ids))
+                except Exception as e:
+                    dialog.after(0, lambda err=str(e): _on_error(err))
+            def _on_detect(ids):
+                try:
+                    model_combo['values'] = ids
+                    if ids and model_var.get() not in ids:
+                        model_var.set(ids[0])
+                    feedback.config(text=f"Found {len(ids)} model(s).", fg=SUCCESS)
+                    detect_btn.config(text=" Detect ", fg=FG)
+                except tk.TclError:
+                    pass
+            def _on_error(err):
+                try:
+                    feedback.config(text=f"Detection failed: {err}", fg=ERR)
+                    detect_btn.config(text=" Detect ", fg=FG)
+                    dialog.after(4000, lambda: feedback.config(text="", fg=SUCCESS))
+                except tk.TclError:
+                    pass
+            import threading
+            threading.Thread(target=_run, daemon=True).start()
 
-        detect_btn.bind("<Button-1>", lambda e: _detect_models())
+        def _on_focus_out(event):
+            if event.widget is url_entry or event.widget is key_entry:
+                _run_detect()
+
+        url_entry.bind("<FocusOut>", _on_focus_out)
+        key_entry.bind("<FocusOut>", _on_focus_out)
+
+        detect_btn.bind("<Button-1>", lambda e: _run_detect())
+
         row += 1
-
-        if not is_new:
-            tk.Label(
-                dialog, text="Active model:", font=fonts.view_font(11),
-                fg=FG_DIM, bg=BG,
-            ).grid(row=row, column=0, sticky="w", padx=15, pady=(5, 3))
-            model_var = tk.StringVar(value=active_models.get(active, ""))
-            tk.Entry(
-                dialog, textvariable=model_var, bg=BG_WIDGET, fg=FG,
-                insertbackground=FG, font=fonts.view_font(11),
-                borderwidth=1, relief=tk.FLAT,
-                highlightthickness=1, highlightcolor="#333333",
-                highlightbackground="#333333",
-            ).grid(row=row, column=1, sticky="ew", padx=15, pady=(5, 3))
-            row += 1
 
         feedback = tk.Label(
             dialog, text="", font=fonts.view_font(9),
@@ -585,7 +591,9 @@ class SettingsDialog(tk.Toplevel):
                 if self._config["active_provider"] == pid:
                     remaining = list(providers.keys())
                     self._config["active_provider"] = remaining[0]
-                    self._config["active_model"] = ""
+                    am = self._config.get("active_models", {})
+                    if pid in am:
+                        del am[pid]
                 self._config["providers"] = providers
                 llm.config.save(self._config)
                 self._refresh_providers()
@@ -595,50 +603,84 @@ class SettingsDialog(tk.Toplevel):
             del_btn.bind("<Button-1>", lambda e: _delete())
 
         def _load_provider():
-            pid = pid_var.get().strip()
             if is_new:
                 name_var.set("")
                 url_var.set("")
                 key_var.set("")
-                models_var.set("")
+                model_var.set("")
+                model_combo['values'] = []
                 return
+            pid = pid_var.get().strip()
             p = providers.get(pid, {})
-            name_var.set(p.get("name", pid))
+            name_var.set(pid)
             url_var.set(p.get("base_url", ""))
             key_var.set(p.get("api_key", ""))
-            models_var.set(", ".join(p.get("models", [])))
-            if not is_new:
-                model_var.set(active_models.get(pid, ""))
+            model_list = p.get("models", [])
+            model_combo['values'] = model_list
+            am = active_models.get(pid, "")
+            if am:
+                model_var.set(am)
+            elif model_list:
+                model_var.set(model_list[0])
+            else:
+                model_var.set("")
 
         def _save():
-            pid = pid_var.get().strip()
-            if not pid:
+            name = name_var.get().strip()
+            if not name:
                 return
-            if is_new and pid in providers:
-                feedback.config(text="ID already exists.")
-                dialog.after(1500, lambda: feedback.config(text=""))
-                return
-            models = [m.strip() for m in models_var.get().split(",")
-                      if m.strip()]
-            providers[pid] = {
-                "name": name_var.get().strip() or pid,
+            if is_new:
+                if name in providers:
+                    feedback.config(text="Name already exists.")
+                    dialog.after(1500, lambda: feedback.config(text=""))
+                    return
+                new_key = name
+            else:
+                old_key = pid_var.get().strip()
+                new_key = name
+                if new_key != old_key:
+                    if new_key in providers:
+                        feedback.config(text="Name already exists.")
+                        dialog.after(1500, lambda: feedback.config(text=""))
+                        return
+                    providers[new_key] = providers.pop(old_key)
+                    if self._config["active_provider"] == old_key:
+                        self._config["active_provider"] = new_key
+                    am = active_models
+                    if old_key in am:
+                        am[new_key] = am.pop(old_key)
+                        self._config["active_models"] = am
+            combo_models = list(model_combo['values'])
+            selected = model_var.get().strip()
+            if selected and selected not in combo_models:
+                combo_models.append(selected)
+            providers[new_key] = {
                 "base_url": url_var.get().strip(),
                 "api_key": key_var.get().strip(),
-                "models": models,
+                "models": combo_models,
             }
-            if not is_new:
-                active_models[pid] = model_var.get().strip()
+            if selected:
+                active_models[new_key] = selected
                 self._config["active_models"] = active_models
             self._config["providers"] = providers
-            if not is_new:
-                self._config["active_provider"] = pid
+            if is_new:
+                self._config.setdefault("active_provider", new_key)
+            else:
+                self._config["active_provider"] = new_key
             llm.config.save(self._config)
             self._refresh_providers()
             feedback.config(text="Saved.")
             dialog.after(800, dialog.destroy)
 
         if not is_new:
-            combo.bind("<<ComboboxSelected>>", lambda e: _load_provider())
+            pid_var.trace_add("write", lambda *_: _load_provider())
             _load_provider()
+            if url_var.get().strip():
+                _run_detect()
 
         save_btn.bind("<Button-1>", lambda e: _save())
+
+        dialog.minsize(540, 1)
+        dialog.update_idletasks()
+        dialog.wait_visibility()
+        dialog.grab_set()

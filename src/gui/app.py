@@ -3811,7 +3811,7 @@ class App(tk.Tk):
     def _consultor_handler(self, text):
         text = text.strip()
         if text.lower() == "exit" or not text:
-            self.destroy()
+            self._on_close()
             return
         if text.lower() == "menu":
             self.console.info(
@@ -4057,7 +4057,7 @@ class App(tk.Tk):
     def _agent_handler(self, text):
         text = text.strip()
         if text.lower() == "exit" or not text:
-            self.destroy()
+            self._on_close()
             return
         if text.lower() == "stop":
             if self._agent_stop_event:
@@ -4148,24 +4148,24 @@ class App(tk.Tk):
                         pass
                 stream = client.chat_with_tools(
                     self._llm_messages, on_tool=_on_tool, tool_context=self,
-                    on_text=lambda text: self.console.after(
-                        0, lambda t=text: self.console.agent(_clean(t).rstrip())),
-                    on_warning=lambda msg: self.console.after(
-                        0, lambda m=msg: self.console.warning(m)),
+                    on_text=lambda text: self._safe_after(
+                        lambda t=text: self.console.agent(_clean(t).rstrip())),
+                    on_warning=lambda msg: self._safe_after(
+                        lambda m=msg: self.console.warning(m)),
                     stop_event=stop)
                 if stop is not None and stop.is_set():
-                    self.console.after(0, lambda: self.console.warning("Agent stopped."))
+                    self._safe_after(lambda: self.console.warning("Agent stopped."))
                     return
-                self.console.after(0, lambda: setattr(self, '_total_api_tokens', client.last_prompt_tokens))
+                self._safe_after(lambda: setattr(self, '_total_api_tokens', client.last_prompt_tokens))
                 _ctx_log(f"agent_ask tokens={client.last_prompt_tokens} msgs={len(self._llm_messages)} after_stream")
                 if stream is None:
-                    self.console.after(0, lambda: self.console.info("  (no response)"))
+                    self._safe_after(lambda: self.console.info("  (no response)"))
                     return
                 full = ""
                 buf = ""
                 for chunk in stream:
                     if stop is not None and stop.is_set():
-                        self.console.after(0, lambda: self.console.warning("Agent stopped."))
+                        self._safe_after(lambda: self.console.warning("Agent stopped."))
                         return
                     if chunk.choices and chunk.choices[0].delta.content:
                         full += chunk.choices[0].delta.content
@@ -4175,18 +4175,18 @@ class App(tk.Tk):
                             for line in lines[:-1]:
                                 clean = _clean(line)
                                 if clean.strip():
-                                    self.console.after(0, lambda l=clean: self.console.agent(l.rstrip()))
+                                    self._safe_after(lambda l=clean: self.console.agent(l.rstrip()))
                             buf = lines[-1]
                 clean = _clean(buf)
                 if clean.strip():
-                    self.console.after(0, lambda c=clean: self.console.agent(c.rstrip()))
+                    self._safe_after(lambda c=clean: self.console.agent(c.rstrip()))
                 if _tool_xml_re.search(full):
                     self._agent_consecutive_xml_errors += 1
-                    self.console.after(0, lambda: self.console.warning("Tool calling error"))
+                    self._safe_after(lambda: self.console.warning("Tool calling error"))
                     if self._agent_consecutive_xml_errors >= 5:
                         self._llm_messages.append({"role": "assistant", "content": _clean(full)})
-                        self.console.after(0, lambda: self.console.info("---"))
-                        self.console.after(0, self._update_mode_prompt)
+                        self._safe_after(lambda: self.console.info("---"))
+                        self._safe_after(self._update_mode_prompt)
                         succeeded = True
                     else:
                         self._llm_messages.append({"role": "assistant", "content": full})
@@ -4200,12 +4200,14 @@ class App(tk.Tk):
                             ),
                         })
                         succeeded = True
-                        self.console.after(0, lambda p=prompt: self._agent_ask(p, _retry=True))
+                        if stop is not None and stop.is_set():
+                            return
+                        self._safe_after(lambda p=prompt: self._agent_ask(p, _retry=True))
                 else:
                     self._agent_consecutive_xml_errors = 0
                     self._llm_messages.append({"role": "assistant", "content": _clean(full)})
-                    self.console.after(0, lambda: self.console.info("---"))
-                    self.console.after(0, self._update_mode_prompt)
+                    self._safe_after(lambda: self.console.info("---"))
+                    self._safe_after(self._update_mode_prompt)
                     succeeded = True
                     _ctx_log(f"agent_ask success msgs={len(self._llm_messages)} pct={self._get_context_percentage()}")
             except Exception as e:
@@ -4258,7 +4260,7 @@ class App(tk.Tk):
                 buf = ""
                 for chunk in stream:
                     if stop is not None and stop.is_set():
-                        self.console.after(0, lambda: self.console.warning("Consultor stopped."))
+                        self._safe_after(lambda: self.console.warning("Consultor stopped."))
                         return
                     if chunk.choices and chunk.choices[0].delta.content:
                         full += chunk.choices[0].delta.content
@@ -4267,16 +4269,16 @@ class App(tk.Tk):
                             lines = buf.split("\n")
                             for line in lines[:-1]:
                                 if line.strip():
-                                    self.console.after(0, lambda l=line: self.console.consultor(l.rstrip()))
+                                    self._safe_after(lambda l=line: self.console.consultor(l.rstrip()))
                             buf = lines[-1]
                 if buf.strip():
-                    self.console.after(0, lambda b=buf: self.console.consultor(b.rstrip()))
+                    self._safe_after(lambda b=buf: self.console.consultor(b.rstrip()))
                 self._llm_messages.append({"role": "assistant", "content": full})
-                self.console.after(0, lambda: self.console.info("---"))
-                self.console.after(0, self._update_mode_prompt)
+                self._safe_after(lambda: self.console.info("---"))
+                self._safe_after(self._update_mode_prompt)
                 succeeded = True
             except Exception as e:
-                self.console.after(0, lambda m=str(e): self.console.error(f"Consultor error: {m}"))
+                self._safe_after(lambda m=str(e): self.console.error(f"Consultor error: {m}"))
             finally:
                 self.console.stop_thinking()
                 if not succeeded:
@@ -5399,7 +5401,21 @@ class App(tk.Tk):
         self.console.input_text.focus()
         return "break"
 
+    def _safe_after(self, callback, *args):
+        try:
+            if args:
+                self.after(0, callback, *args)
+            else:
+                self.after(0, callback)
+        except RuntimeError:
+            pass
+
     def _on_close(self):
+        self._agent_mode = False
+        self._consultor_mode = False
+        if self._agent_stop_event:
+            self._agent_stop_event.set()
+        self.console.stop_thinking()
         if self._passive_scanner:
             self._passive_scanner.stop()
         if self._active_scanner:
@@ -5413,4 +5429,5 @@ class App(tk.Tk):
         save_mdns_cache()
         hsf_settings.save()
         event_bus.stop()
+        self.update()
         self.destroy()

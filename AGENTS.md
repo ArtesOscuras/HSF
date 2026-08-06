@@ -57,6 +57,8 @@ src/gui/views/nav.py
 
 It is located at the top of the views section.
 
+The nav bar includes a **settings gear icon** (`settings.png`, 34px) on the far left that opens `SettingsDialog` via a callback (`set_settings_callback(fn)`) registered by `App.__init__` **before** `_register_views()` so the callback is available when views construct their nav bars. The icon follows the same hover pattern as buttons (`bg="#000000"` → `bg="#222222"`, no cursor change).
+
 When modifying navigation behavior:
 
 * Preserve consistency across all views.
@@ -201,9 +203,14 @@ When opening a `tk.Toplevel` dialog that uses `grab_set()` (modal behavior), alw
 
 ```python
 self.transient(parent)
-self.wait_visibility()   # must precede grab_set on Linux
+# Build ALL widgets here (labels, entries, buttons, etc.)
+self.minsize(width, 1)      # minimum width, let height be natural
+self.update_idletasks()     # force layout calculation
+self.wait_visibility()      # must precede grab_set on Linux
 self.grab_set()
 ```
+
+**Important:** Build all widgets **before** `wait_visibility()` so the dialog sizes to its natural content height. Avoid fixed `geometry("WxH")` — prefer `minsize(width, 1)` for minimum width and let the grid/pack layout determine the height. This prevents empty wasted space at the bottom of the dialog.
 
 This pattern is already used in `HashcatDialog`, `InitDialog`, `_CredentialGenerator`, `SettingsDialog`, `_AddUserDialog`, `_AddPersonDialog`, `_UserEditDialog`, `_PersonEditDialog`, and others. New dialogs must follow it.
 
@@ -378,7 +385,7 @@ HSF integrates with LLMs via an extensible provider system supporting any OpenAI
 
 **Architecture:**
 
-* `config.py` — Persists provider configs to `~/.local/share/hsf/llm.json`. Per-provider `base_url`, `api_key`, `models`. Active model is per-provider (`active_models` dict, not global — avoids cross-provider model confusion). System prompts stored in `prompts` dict (deep-merged from defaults on load).
+* `config.py` — Persists provider configs to `~/.local/share/hsf/llm.json`. Each provider key doubles as its display name (no separate `name` field). Per-provider `base_url`, `api_key`, `models`. Active model is per-provider (`active_models` dict, not global — avoids cross-provider model confusion). System prompts stored in `prompts` dict (deep-merged from defaults on load).
 * `client.py` — `LLMClient` wraps `openai.OpenAI`. `chat()` / `chat_stream()`. Prepends purpose-specific system prompt unless messages already contain a `system` role. Timeout: 300s.
 * `settings.py` — Settings dialog: **Models** tab (provider cards, click to edit/set active) + **Prompts** tab (editable system prompts per purpose).
 
@@ -397,6 +404,14 @@ HSF integrates with LLMs via an extensible provider system supporting any OpenAI
 * All LLM calls run in daemon threads. Output dispatched to main thread via `self.after(0, ...)`.
 * The `openai` library is used for all providers by setting a custom `base_url`.
 * System prompts are configurable per purpose (`consultor`, `evidence_analysis`, `agent`).
+
+**Provider Edit Dialog:**
+
+The provider editor (`_open_provider_dialog` in `src/gui/dialogs/settings.py`) uses these design patterns:
+
+* **Single "Name" field** — the provider key doubles as its display name. Changing the name renames the provider (updates `active_provider` and `active_models` references automatically).
+* **Models** — an editable `ttk.Combobox`. Auto-detection triggers on `<FocusOut>` of the Base URL or API Key fields, running the OpenAI `models.list()` API call in a daemon thread. A "Detect" button provides manual fallback. Callbacks catch `tk.TclError` to avoid crashes if the dialog is closed before detection completes.
+* **Provider selector** — uses `tk.OptionMenu` (not `ttk.Combobox` with `state="readonly"`) because macOS Aqua ignores ttk dark theme styling on readonly comboboxes, displaying a bright white background.
 
 ### Agent Tool-Calling (`src/llm/client.py` → `chat_with_tools()`)
 
@@ -802,6 +817,8 @@ This mechanism is **shared** between agent and consultor modes via the shared `s
 - When the LLM outputs invalid XML tool call syntax (e.g. `<invoke>`, `<function_calls>`) instead of proper function calling, the system detects it via regex (`<[^>]*DSML`), warns the model, and retries. A consecutive error counter (`_agent_consecutive_xml_errors`, max 5 followed by abort) prevents infinite loops.
 - Pressing Tab with empty input cycles through Normal → Consultor → Agent without interrupting the currently running agent thread. A braille spinner (⠋⠙⠹...) appears next to the prompt while the LLM is processing, visible in all modes.
 - The prompt shows context usage percentage for both agent and consultor (e.g. `Agent (45%)>`, `Consultor (45%)>`), updated via `_update_mode_prompt()`.
+- All GUI updates from agent/consultor daemon threads must use `app._safe_after(callback, *args)` instead of bare `self.after(0, ...)`. This wrapper catches `RuntimeError` if the widget has been destroyed between scheduling and execution.
+- `_on_close()` sets `_agent_stop_event` and calls `console.stop_thinking()` before `destroy()` to prevent agent/consultor threads from accessing dead widgets. The `exit` command handlers in both modes call `_on_close()` to ensure proper cleanup.
 
 ---
 
