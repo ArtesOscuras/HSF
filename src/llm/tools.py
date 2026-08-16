@@ -489,6 +489,7 @@ TOOLS = [
                     "headers": {"type": "object", "description": "Extra HTTP headers as key:value pairs for GET or POST. E.g. {'Cookie': 'session=abc', 'Authorization': 'Bearer xyz'}. Optional."},
                     "offset": {"type": "integer", "description": "Line to start from (default: 1). Ignored for raw."},
                     "limit": {"type": "integer", "description": "Max lines to return (default: 500). Ignored for raw."},
+                    "antibot": {"type": "boolean", "description": "If true, attempt to bypass anti-bot challenges (Akamai, Cloudflare) by solving them in a real browser."},
                 },
                 "required": ["url"],
             },
@@ -1981,6 +1982,7 @@ def _webfetch(args, ctx=None):
     method = args.get("method", "GET").upper()
     body = args.get("body") or None
     content_type = args.get("content_type") or None
+    antibot = bool(args.get("antibot", False))
     headers = args.get("headers")
     if isinstance(headers, dict):
         headers = {str(k): str(v) for k, v in headers.items()}
@@ -1989,7 +1991,7 @@ def _webfetch(args, ctx=None):
 
     if fmt == "raw":
         try:
-            status, resp_headers, resp_body, ct = fetch_raw(url, method=method, body=body, content_type=content_type, headers=headers)
+            status, resp_headers, resp_body, ct = fetch_raw(url, method=method, body=body, content_type=content_type, headers=headers, antibot=antibot)
         except Exception as e:
             return f"Error fetching URL: {e}"
         lines = [f"HTTP {status}"]
@@ -2038,6 +2040,7 @@ def _webfetch(args, ctx=None):
         body=body,
         content_type=content_type,
         headers=headers,
+        antibot=antibot,
     )
     if not result.startswith("Error"):
         try:

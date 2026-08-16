@@ -35,6 +35,8 @@ def _html_to_markdown(html):
 
 _SKIP_TAGS = {"nav", "footer", "aside", "script", "style", "noscript", "iframe", "object", "embed"}
 _SKIP_CLASSES = {"cookie", "cookies", "consent", "gdpr", "banner", "popup", "sidebar", "cookie-banner", "cookie-consent", "cookie-notice"}
+_SKIP_IDS = {"sidebar", "cookie-banner", "cookie-consent"}
+_VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
 
 
 class _HTMLCleaner(HTMLParser):
@@ -43,20 +45,25 @@ class _HTMLCleaner(HTMLParser):
         self._out = []
         self._skip_depth = 0
 
-    def handle_starttag(self, tag, attrs):
-        if self._skip_depth > 0:
-            self._skip_depth += 1
-            return
+    def _should_skip(self, tag, attrs):
         if tag in _SKIP_TAGS:
-            self._skip_depth = 1
-            return
-        cls = dict(attrs).get("class", "").lower()
+            return True
+        d = dict(attrs)
+        cls = d.get("class", "").lower()
         if cls:
             for sc in _SKIP_CLASSES:
                 if sc in cls:
-                    self._skip_depth = 1
-                    return
-        if dict(attrs).get("id", "").lower() in {"sidebar", "cookie-banner", "cookie-consent"}:
+                    return True
+        if d.get("id", "").lower() in _SKIP_IDS:
+            return True
+        return False
+
+    def handle_starttag(self, tag, attrs):
+        if self._skip_depth > 0:
+            if tag not in _VOID_TAGS:
+                self._skip_depth += 1
+            return
+        if self._should_skip(tag, attrs):
             self._skip_depth = 1
             return
         if attrs:
@@ -77,7 +84,15 @@ class _HTMLCleaner(HTMLParser):
         self._out.append(data)
 
     def handle_startendtag(self, tag, attrs):
-        self.handle_starttag(tag, attrs)
+        if self._skip_depth > 0:
+            return
+        if self._should_skip(tag, attrs):
+            return
+        if attrs:
+            attr_str = "".join(f' {k}="{v}"' for k, v in attrs)
+            self._out.append(f"<{tag}{attr_str}/>")
+        else:
+            self._out.append(f"<{tag}/>")
 
     def handle_entityref(self, name):
         if self._skip_depth > 0:
@@ -100,98 +115,99 @@ def _strip_html_non_content(html):
     return parser.get_html()
 
 
-def _fetch_raw(url, timeout, method="GET", body=None, content_type=None, headers=None):
+_TEXT_TYPES = (
+    "text/", "application/json", "application/xml",
+    "application/javascript", "application/xhtml+xml",
+    "application/ld+json", "application/rss+xml",
+    "application/atom+xml",
+)
+
+
+def _curl_request(url, timeout, method, body, content_type, headers, cookies=None):
+    from curl_cffi import requests as curl_requests
     req_headers = {"User-Agent": _CHROME_UA}
     if headers:
         req_headers.update({str(k): str(v) for k, v in headers.items()})
     if body and method == "POST":
         req_headers["Content-Type"] = content_type or "application/x-www-form-urlencoded"
-    resp = requests.request(method, url, headers=req_headers, data=body,
-                            timeout=timeout, stream=True, verify=False)
+    session = curl_requests.Session(impersonate="chrome")
+    if cookies:
+        for k, v in cookies.items():
+            try:
+                session.cookies.set(str(k), str(v))
+            except Exception:
+                pass
+    resp = session.request(method, url, headers=req_headers, data=body,
+                           timeout=timeout, verify=False)
     if resp.status_code == 403 and resp.headers.get("cf-mitigated") == "challenge":
-        resp.close()
         req_headers["User-Agent"] = _HSF_UA
-        resp = requests.request(method, url, headers=req_headers, data=body,
-                                timeout=timeout, stream=True, verify=False)
-
-    content_type = resp.headers.get("content-type", "").lower()
-    resp_headers = dict(resp.headers)
-    _text_types = ("text/", "application/json", "application/xml",
-                   "application/javascript", "application/xhtml+xml",
-                   "application/ld+json", "application/rss+xml",
-                   "application/atom+xml")
-    if not any(content_type.startswith(t) for t in _text_types):
-        resp.close()
-        return f"[non-text content skipped: {content_type}]", content_type, resp_headers
-
-    chunks = []
-    total = 0
-    for chunk in resp.iter_content(chunk_size=8192):
-        if chunk:
-            total += len(chunk)
-            if total > MAX_RESPONSE_SIZE:
-                resp.close()
-                raise RuntimeError(f"Response too large (exceeds {MAX_RESPONSE_SIZE // (1024*1024)}MB limit)")
-            chunks.append(chunk)
-    resp.close()
-    rbody = b"".join(chunks)
-    try:
-        text = rbody.decode("utf-8")
-    except UnicodeDecodeError:
-        text = rbody.decode("latin-1", errors="replace")
-    return text, content_type, resp_headers
+        resp = session.request(method, url, headers=req_headers, data=body,
+                               timeout=timeout, verify=False)
+    return resp, session
 
 
-def fetch_raw(url, timeout=DEFAULT_TIMEOUT, method="GET", body=None, content_type=None, headers=None):
-    req_headers = {"User-Agent": _CHROME_UA}
-    if headers:
-        req_headers.update({str(k): str(v) for k, v in headers.items()})
-    if body and method == "POST":
-        req_headers["Content-Type"] = content_type or "application/x-www-form-urlencoded"
-    resp = requests.request(method, url, headers=req_headers, data=body,
-                            timeout=timeout, stream=True, verify=False)
-    if resp.status_code == 403 and resp.headers.get("cf-mitigated") == "challenge":
-        resp.close()
-        req_headers["User-Agent"] = _HSF_UA
-        resp = requests.request(method, url, headers=req_headers, data=body,
-                                timeout=timeout, stream=True, verify=False)
+def _curl_resolve(url, timeout, method, body, content_type, headers, antibot=False):
+    """Perform the request, applying anti-bot solving when requested.
 
+    Returns (status_code, resp_headers, text, content_type, note).
+    """
+    from urllib.parse import urlparse
+    resp, session = _curl_request(url, timeout, method, body, content_type, headers)
+    note = ""
+    if antibot:
+        from src.llm.browser_solver import detect_protection, solve, cookie_bank, browser_fetch
+        host = urlparse(url).hostname
+        challenge = detect_protection(resp.status_code, dict(resp.headers), dict(session.cookies))
+        if challenge:
+            cookies = cookie_bank.get(host) or solve(url, challenge)
+            if cookies:
+                cookie_bank.set(host, cookies)
+                resp, session = _curl_request(url, timeout, method, body, content_type, headers, cookies=cookies)
+                challenge = detect_protection(resp.status_code, dict(resp.headers), dict(session.cookies))
+            if challenge:
+                rendered = browser_fetch(url)
+                if rendered:
+                    return resp.status_code, dict(resp.headers), rendered, "text/html", f"[rendered via browser: {challenge} challenge]"
     status_code = resp.status_code
     resp_headers = dict(resp.headers)
     content_type = resp_headers.get("content-type", "").lower()
-    _text_types = ("text/", "application/json", "application/xml",
-                   "application/javascript", "application/xhtml+xml",
-                   "application/ld+json", "application/rss+xml",
-                   "application/atom+xml")
-    if not any(content_type.startswith(t) for t in _text_types):
-        resp.close()
-        return status_code, resp_headers, f"[non-text content skipped: {content_type}]", content_type
-
-    chunks = []
-    total = 0
-    for chunk in resp.iter_content(chunk_size=8192):
-        if chunk:
-            total += len(chunk)
-            if total > MAX_RESPONSE_SIZE:
-                resp.close()
-                raise RuntimeError(f"Response too large (exceeds {MAX_RESPONSE_SIZE // (1024*1024)}MB limit)")
-            chunks.append(chunk)
-    resp.close()
-    rbody = b"".join(chunks)
+    if not any(content_type.startswith(t) for t in _TEXT_TYPES):
+        return status_code, resp_headers, f"[non-text content skipped: {content_type}]", content_type, note
+    rbody = resp.content
+    if len(rbody) > MAX_RESPONSE_SIZE:
+        raise RuntimeError(f"Response too large (exceeds {MAX_RESPONSE_SIZE // (1024*1024)}MB limit)")
     try:
         text = rbody.decode("utf-8")
     except UnicodeDecodeError:
         text = rbody.decode("latin-1", errors="replace")
-    return status_code, resp_headers, text, content_type
+    return status_code, resp_headers, text, content_type, note
+
+
+def _fetch_raw(url, timeout=DEFAULT_TIMEOUT, method="GET", body=None, content_type=None, headers=None, antibot=False):
+    _status, resp_headers, text, ct, note = _curl_resolve(url, timeout, method, body, content_type, headers, antibot)
+    if isinstance(text, str) and text.startswith("[non-text"):
+        return text, ct, resp_headers
+    if note:
+        text = f"{note}\n\n{text}"
+    return text, ct, resp_headers
+
+
+def fetch_raw(url, timeout=DEFAULT_TIMEOUT, method="GET", body=None, content_type=None, headers=None, antibot=False):
+    status_code, resp_headers, text, ct, note = _curl_resolve(url, timeout, method, body, content_type, headers, antibot)
+    if isinstance(text, str) and text.startswith("[non-text"):
+        return status_code, resp_headers, text, ct
+    if note:
+        text = f"{note}\n\n{text}"
+    return status_code, resp_headers, text, ct
 
 
 def fetch_url(url, format="markdown", timeout=DEFAULT_TIMEOUT, offset=1, limit=None,
-              method="GET", body=None, content_type=None, headers=None):
+              method="GET", body=None, content_type=None, headers=None, antibot=False):
     if not url.startswith("http://") and not url.startswith("https://"):
         url = "https://" + url
 
     try:
-        raw_content, raw_ct, resp_headers = _fetch_raw(url, timeout, method=method, body=body, content_type=content_type, headers=headers)
+        raw_content, raw_ct, resp_headers = _fetch_raw(url, timeout, method=method, body=body, content_type=content_type, headers=headers, antibot=antibot)
     except Exception as e:
         return f"Error fetching URL: {e}"
 

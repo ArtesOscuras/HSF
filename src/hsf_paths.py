@@ -39,6 +39,11 @@ def chrome_profile_dir() -> Path:
     p.mkdir(parents=True, exist_ok=True)
     return p
 
+def antibot_profile_dir() -> Path:
+    p = _get_data_home() / "antibot_profile"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
 def lst_dir() -> Path:
     p = _get_data_home() / "lst"
     p.mkdir(parents=True, exist_ok=True)
