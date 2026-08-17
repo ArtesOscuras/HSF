@@ -122,6 +122,25 @@ _TEXT_TYPES = (
     "application/atom+xml",
 )
 
+_COOKIE_VALUE_MAX = 80
+_SESSION_COOKIE_HINTS = ("session", "sess", "sid", "token", "csrf", "xsrf", "auth", "jwt", "connect.sid")
+_LONG_COOKIE_RE = re.compile(r"([A-Za-z0-9_\-]+)=([^\s;,]{%d,})" % (_COOKIE_VALUE_MAX + 1))
+
+
+def _is_session_cookie(name):
+    n = name.lower()
+    return any(h in n for h in _SESSION_COOKIE_HINTS)
+
+
+def _truncate_cookies(header):
+    """Truncate extremely long cookie values, keeping session cookies intact."""
+    def _trunc(m):
+        name, value = m.group(1), m.group(2)
+        if _is_session_cookie(name):
+            return m.group(0)
+        return f"{name}={value[:32]}…({len(value)} chars)"
+    return _LONG_COOKIE_RE.sub(_trunc, header)
+
 
 def _curl_request(url, timeout, method, body, content_type, headers, cookies=None):
     from curl_cffi import requests as curl_requests
@@ -139,10 +158,6 @@ def _curl_request(url, timeout, method, body, content_type, headers, cookies=Non
                 pass
     resp = session.request(method, url, headers=req_headers, data=body,
                            timeout=timeout, verify=False)
-    if resp.status_code == 403 and resp.headers.get("cf-mitigated") == "challenge":
-        req_headers["User-Agent"] = _HSF_UA
-        resp = session.request(method, url, headers=req_headers, data=body,
-                               timeout=timeout, verify=False)
     return resp, session
 
 
@@ -211,7 +226,7 @@ def fetch_url(url, format="markdown", timeout=DEFAULT_TIMEOUT, offset=1, limit=N
     except Exception as e:
         return f"Error fetching URL: {e}"
 
-    cookies = resp_headers.get("Set-Cookie", resp_headers.get("set-cookie", "")).strip()
+    cookies = _truncate_cookies(resp_headers.get("Set-Cookie", resp_headers.get("set-cookie", "")).strip())
     if cookies:
         raw_content = f"Cookies: {cookies}\n\n{raw_content}"
 

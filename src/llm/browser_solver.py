@@ -23,7 +23,7 @@ from src.tools.webrecorder.cdp import CDPClient
 
 _SOLVER_PORT = 9333
 _COOKIE_TTL = 40 * 60
-_SOLVE_TIMEOUT = 25
+_SOLVE_TIMEOUT = 15
 
 
 # ─── Detection ──────────────────────────────────────────────
@@ -36,18 +36,34 @@ def detect_protection(status_code, headers=None, cookies=None):
     """
     h = {str(k).lower(): str(v) for k, v in (headers or {}).items()}
     ck = {str(k): str(v) for k, v in (cookies or {}).items()}
-    server = h.get("server", "")
+    server = h.get("server", "").lower()
 
-    if "akamaighost" in server.lower():
-        return "akamai"
+    # Akamai Bot Manager — unsolved `_abck` cookie (sensor). The `AkamaiGHost`
+    # server header alone means a hard "Access Denied" edge block (IP/UA/geo),
+    # which is not solvable by a browser, so it is intentionally not detected.
     abck = ck.get("_abck", "")
     if abck:
         parts = abck.split("~")
         if len(parts) < 2 or parts[1] != "0":
             return "akamai"
-    if "cloudflare" in server.lower():
+
+    # PerimeterX (_pxhd/_px3 cookies, x-px-* headers).
+    if any(name.startswith("_px") for name in ck) or any(name.startswith("x-px-") for name in h):
+        return "perimeterx"
+
+    # DataDome (x-datadome header or datadome* cookies).
+    if "x-datadome" in h or any(name.startswith("datadome") for name in ck):
+        return "datadome"
+
+    # Cloudflare — only flag explicit challenge signals, not any Cloudflare
+    # front (avoid false positives on sites that serve content with __cf_bm).
+    if "challenge" in h.get("cf-mitigated", "").lower():
         if not ck.get("cf_clearance"):
             return "cloudflare"
+    if "cloudflare" in server and status_code in (403, 503):
+        if not ck.get("cf_clearance"):
+            return "cloudflare"
+
     return None
 
 
@@ -212,6 +228,8 @@ def solve(url, challenge_type=None, timeout=_SOLVE_TIMEOUT, headless=True):
     host = urlparse(url).hostname
     if not host:
         return None
+    if challenge_type and challenge_type not in SOLVED_PREDICATES:
+        return None
     predicate = SOLVED_PREDICATES.get(challenge_type) if challenge_type else None
     browsers = find_browsers()
     if not browsers:
@@ -253,10 +271,13 @@ def _eval(cdp, expression):
     return None
 
 
-def _wait_ready(cdp, timeout):
+def _wait_navigation(cdp, timeout):
+    """Wait until the navigation has left about:blank and finished loading."""
     deadline = time.time() + timeout
     while time.time() < deadline:
-        if _eval(cdp, "document.readyState") == "complete":
+        href = _eval(cdp, "location.href")
+        state = _eval(cdp, "document.readyState")
+        if href and not href.startswith("about:") and state == "complete":
             return True
         time.sleep(0.3)
     return False
@@ -274,6 +295,26 @@ def _wait_network_idle(cdp, timeout):
     return False
 
 
+def _wait_body_content(cdp, timeout, min_chars=200):
+    """Best-effort wait until the rendered body has visible text.
+
+    Returns when the body text reaches `min_chars`, or when it stops growing
+    (a short, server-rendered page), or when the timeout expires.
+    """
+    deadline = time.time() + timeout
+    prev = None
+    while time.time() < deadline:
+        n = _eval(cdp, "document.body ? document.body.innerText.trim().length : 0")
+        if n is not None and n >= min_chars:
+            return True
+        if n is not None and n > 0:
+            if prev is not None and n == prev:
+                return True
+            prev = n
+        time.sleep(0.5)
+    return False
+
+
 def _browser_fetch_once(browser_path, url, host, timeout, headless):
     _kill_on_port(_SOLVER_PORT)
     proc = _launch_browser(browser_path, headless)
@@ -286,8 +327,9 @@ def _browser_fetch_once(browser_path, url, host, timeout, headless):
             cdp.send("Page.enable", {})
             cdp.send("Network.enable", {})
             cdp.send("Page.navigate", {"url": url})
-            _wait_ready(cdp, timeout)
+            _wait_navigation(cdp, timeout)
             _wait_network_idle(cdp, timeout)
+            _wait_body_content(cdp, min(timeout, 10))
             time.sleep(1.0)
             text = _eval(cdp, (
                 "document.documentElement ? document.documentElement.outerHTML "
