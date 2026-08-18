@@ -84,6 +84,9 @@ def settings_file() -> Path:
     p = _get_data_home() / "settings.json"
     return p
 
+def session_file() -> Path:
+    return _get_data_home() / "session.json"
+
 def logs_dir() -> Path:
     return _PKG / "logs"
 

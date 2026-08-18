@@ -921,6 +921,16 @@ TOOLS = [
 
 _HANDLERS = {}
 
+CONSULTOR_TOOLS = frozenset({
+    "check_status", "check_machine", "check_domain", "check_inventory",
+    "check_hash", "check_shells", "check_evidences", "check_fuzz_results",
+    "webfetch", "websearch", "list_repo",
+    "read_cache", "list_files", "poc_read",
+    "nslookup", "list_interfaces", "ping",
+    "dicma_generate_users", "dicma_find_related",
+    "dicma_generate_passwords", "dicma_generate_rules",
+})
+
 
 def register(name):
     def decorator(fn):

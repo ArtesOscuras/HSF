@@ -618,6 +618,7 @@ class App(tk.Tk):
         self._last_ctx_hash = None
         self._context_injected = False
         self._last_token_pct = None
+        self._total_api_tokens = 0
         self._fuzz_dlg = None
         self._tcpscan_running = False
         self._tcpscan_process = None
@@ -652,6 +653,19 @@ class App(tk.Tk):
         event_bus.start(self, self._process_scanner_events)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        mode = self._load_session()
+        if mode in ("agent", "consultor"):
+            self._silent_mode_cycle = True
+            try:
+                if mode == "agent":
+                    self._enter_agent_mode()
+                else:
+                    self._enter_consultor_mode()
+            finally:
+                self._silent_mode_cycle = False
+            self.console.info(
+                f"Session restored ({len(self._llm_messages)} messages)")
 
         self.bind_all("<Control-f>", self._toggle_focus)
         self.bind_all("<Command-f>",  self._toggle_focus)
@@ -3833,8 +3847,10 @@ class App(tk.Tk):
             self._llm_messages = []
             self._last_ctx_hash = None
             self._last_token_pct = None
+            self._total_api_tokens = 0
             self._context_injected = False
             self._clear_cache()
+            self._clear_session()
             self.console.success("Context reset. Conversation history and cache cleared.")
             self._update_mode_prompt()
             return
@@ -3843,6 +3859,7 @@ class App(tk.Tk):
             self.console._start_thinking_ui()
             def _compact():
                 self._compact_if_needed(force=True)
+                self._save_session()
                 self.console.stop_thinking()
             threading.Thread(target=_compact, daemon=True).start()
             return
@@ -3908,13 +3925,12 @@ class App(tk.Tk):
         if limit <= 0:
             return None
         api = getattr(self, '_total_api_tokens', 0) or 0
-        estimated = self._estimate_tokens(self._llm_messages)
-        used = max(api, estimated)
+        used = api if api > 0 else self._estimate_tokens(self._llm_messages)
         pct = (used * 100) // limit
         if used > 0 and pct == 0:
             pct = 1
         pct = min(99, pct)
-        _ctx_log(f"get_ctx_pct api={api} est={estimated} used={used} limit={limit} pct={pct} msgs={len(self._llm_messages)}")
+        _ctx_log(f"get_ctx_pct api={api} used={used} limit={limit} pct={pct} msgs={len(self._llm_messages)}")
         return pct
 
     def _update_mode_prompt(self):
@@ -3944,6 +3960,38 @@ class App(tk.Tk):
                 _ctx_log("cache cleared")
         except Exception as e:
             _ctx_log(f"cache clear ERROR: {e}")
+
+    def _save_session(self):
+        from src.llm import session
+        mode = "agent" if self._agent_mode else ("consultor" if self._consultor_mode else None)
+        try:
+            snapshot = list(self._llm_messages)
+            session.save(
+                snapshot, mode=mode,
+                context_injected=self._context_injected,
+                total_api_tokens=getattr(self, '_total_api_tokens', 0))
+        except Exception as e:
+            _ctx_log(f"session save ERROR: {e}")
+
+    def _load_session(self):
+        from src.llm import session
+        data = session.load()
+        if not data:
+            return None
+        msgs = [m for m in data.get("messages", [])
+                if not (isinstance(m, dict) and m.get("_is_context"))]
+        self._llm_messages = msgs
+        self._context_injected = False
+        self._total_api_tokens = data.get("total_api_tokens", 0)
+        _ctx_log(f"session loaded msgs={len(msgs)} mode={data.get('mode')} api_tokens={self._total_api_tokens}")
+        return data.get("mode")
+
+    def _clear_session(self):
+        from src.llm import session
+        try:
+            session.clear()
+        except Exception as e:
+            _ctx_log(f"session clear ERROR: {e}")
 
     @staticmethod
     def _msg_attr(msg, key, default=None):
@@ -4021,6 +4069,7 @@ class App(tk.Tk):
                 after = len(self._llm_messages)
                 _ctx_log(f"compact done ok=True before={before} after={after} elapsed={elapsed:.2f}s")
                 self._total_api_tokens = 0
+                self._save_session()
                 self.console.after(0, lambda: self.console.info(
                     f"Context compacted ({before} → {after} messages)"))
                 self.console.after(0, self._update_mode_prompt)
@@ -4068,8 +4117,10 @@ class App(tk.Tk):
             self._llm_messages = []
             self._last_ctx_hash = None
             self._last_token_pct = None
+            self._total_api_tokens = 0
             self._context_injected = False
             self._clear_cache()
+            self._clear_session()
             self.console.success("Context reset. Conversation history and cache cleared.")
             self._update_mode_prompt()
             return
@@ -4088,6 +4139,7 @@ class App(tk.Tk):
             self.console._start_thinking_ui()
             def _compact():
                 self._compact_if_needed(force=True)
+                self._save_session()
                 self.console.stop_thinking()
             threading.Thread(target=_compact, daemon=True).start()
             return
@@ -4108,13 +4160,15 @@ class App(tk.Tk):
         def _clean(text):
             return _tool_xml_re.sub('', text)
         self._inject_context()
+        if not _retry:
+            self._llm_messages.append({"role": "user", "content": prompt})
+            self._save_session()
         def _run():
             self.console.start_thinking()
             stop = self._agent_stop_event
             if not _retry:
                 self._compact_if_needed()
                 msg_before = len(self._llm_messages)
-                self._llm_messages.append({"role": "user", "content": prompt})
             else:
                 msg_before = len(self._llm_messages)
             succeeded = False
@@ -4224,6 +4278,7 @@ class App(tk.Tk):
                         roles.append(r)
                     _ctx_log(f"repair pre_dump msgs={len(self._llm_messages)} roles={' '.join(roles)}")
                     self._repair_messages()
+                    self._save_session()
                 if stop is not None and not stop.is_set():
                     try:
                         self.console.after(0, lambda m=str(e): self.console.error(f"Agent error: {m}"))
@@ -4241,21 +4296,33 @@ class App(tk.Tk):
                         del self._llm_messages[safe:]
                     except (IndexError, AttributeError):
                         pass
+                self._save_session()
         threading.Thread(target=_run, daemon=True).start()
 
     def _consultor_ask(self, prompt):
         import threading
         self._inject_context()
+        self._llm_messages.append({"role": "user", "content": prompt})
+        self._save_session()
         def _run():
             self.console.start_thinking()
             stop = self._agent_stop_event
             self._compact_if_needed()
-            self._llm_messages.append({"role": "user", "content": prompt})
             succeeded = False
             try:
                 from src.llm import LLMClient
+                from src.llm.tools import CONSULTOR_TOOLS
                 client = LLMClient()
-                stream = client.chat_stream(self._llm_messages)
+                stream = client.chat_with_tools(
+                    self._llm_messages, tool_context=self, allowed_tools=CONSULTOR_TOOLS,
+                    stop_event=stop)
+                if stop is not None and stop.is_set():
+                    self._safe_after(lambda: self.console.warning("Consultor stopped."))
+                    return
+                self._safe_after(lambda: setattr(self, '_total_api_tokens', client.last_prompt_tokens))
+                if stream is None:
+                    self._safe_after(lambda: self.console.info("  (no response)"))
+                    return
                 full = ""
                 buf = ""
                 for chunk in stream:
@@ -4286,6 +4353,7 @@ class App(tk.Tk):
                         self._llm_messages.pop()
                     except (IndexError, AttributeError):
                         pass
+                self._save_session()
         threading.Thread(target=_run, daemon=True).start()
 
     def _build_model_context(self):
@@ -4358,7 +4426,7 @@ class App(tk.Tk):
         return r
 
     def _cmd_exit(self, args):
-        self.destroy()
+        self._on_close()
 
     def _run_system(self, cmd):
         threading.Thread(target=self._run_system_thread, args=(cmd,), daemon=True).start()

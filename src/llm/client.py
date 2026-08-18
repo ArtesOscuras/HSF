@@ -48,7 +48,15 @@ class LLMClient:
         if self._purpose == "agent":
             result.append({"role": "system", "content": "[MODE: AGENT] You may use tools via the function calling API. Never use XML or markup to invoke tools."})
         else:
-            result.append({"role": "system", "content": "[MODE: CONSULTOR] Do NOT use tools. Provide analysis and advice only."})
+            result.append({"role": "system", "content": (
+                "[MODE: CONSULTOR] You may use only read-only tools for research and "
+                "inspection: check_status, check_machine, check_domain, check_inventory, "
+                "check_hash, check_shells, check_evidences, check_fuzz_results, webfetch, "
+                "websearch, list_repo, read_cache, list_files, poc_read, nslookup, "
+                "list_interfaces, ping, dicma_generate_users, dicma_find_related, "
+                "dicma_generate_passwords, dicma_generate_rules. All mutation, scanning, "
+                "and attack tools are disabled — do NOT attempt to call them."
+            )})
         result.extend(messages)
         return result
 
@@ -71,13 +79,20 @@ class LLMClient:
             stream=True,
         )
 
-    def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None, on_text=None, stop_event=None, on_warning=None):
+    def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None, on_text=None, stop_event=None, on_warning=None, allowed_tools=None):
         from src.llm.tools import TOOLS as _TOOLS, execute as _execute
 
         self._ensure_client()
         m = model or self._model
         consecutive_xml_errors = 0
         self._safe_len = len(messages) - 1
+
+        def _persist():
+            if tool_context and hasattr(tool_context, '_save_session'):
+                try:
+                    tool_context._save_session()
+                except Exception:
+                    pass
 
         while True:
             if stop_event and stop_event.is_set():
@@ -106,6 +121,7 @@ class LLMClient:
                     except RuntimeError:
                         pass
                 messages.append(choice.message)
+                _persist()
                 for tc in choice.message.tool_calls:
                     args = {}
                     try:
@@ -113,7 +129,10 @@ class LLMClient:
                         args = json.loads(tc.function.arguments)
                     except Exception:
                         pass
-                    result = _execute(tc.function.name, args, tool_context)
+                    if allowed_tools is None or tc.function.name in allowed_tools:
+                        result = _execute(tc.function.name, args, tool_context)
+                    else:
+                        result = f"Tool '{tc.function.name}' is not available in consultor mode (read-only tools only)."
                     if on_tool:
                         on_tool(tc.function.name, args, result)
                     messages.append({
@@ -121,6 +140,7 @@ class LLMClient:
                         "tool_call_id": tc.id,
                         "content": result,
                     })
+                    _persist()
                 self._safe_len = len(messages)
                 if tool_context and hasattr(tool_context, '_compact_if_needed'):
                     try:
@@ -155,6 +175,7 @@ class LLMClient:
                             "Do NOT emit raw XML. Retry your tool calls correctly."
                         ),
                     })
+                    _persist()
                     continue
                 consecutive_xml_errors = 0
                 stream = self._client.chat.completions.create(
