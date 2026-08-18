@@ -46,13 +46,14 @@ def serialize_messages(messages):
     return out
 
 
-def save(messages, mode=None, context_injected=False, total_api_tokens=0):
+def save(messages, mode=None, context_injected=False, total_api_tokens=0, console_segments=None):
     import datetime as _datetime
     data = {
         "messages": serialize_messages(messages),
         "mode": mode,
         "context_injected": bool(context_injected),
         "total_api_tokens": total_api_tokens,
+        "console_segments": console_segments,
         "updated": _datetime.datetime.now().isoformat(),
     }
     path = _session_file()

@@ -221,7 +221,7 @@ This pattern is already used in `HashcatDialog`, `InitDialog`, `_CredentialGener
 All filesystem paths are defined in a single module. Never use `os.path.dirname(__file__)` to locate resources.
 
 * **Package data** (bundled with pipx): `fonts_dir()`, `icons_dir()`, `hashcat_db()`, `logs_dir()`
-* **Runtime data** (user's home): `databases_dir()`, `credentials_dir()`, `evidence_dir()`, `chrome_profile_dir()`, `lst_dir()`, `settings_file()`
+* **Runtime data** (user's home): `databases_dir()`, `credentials_dir()`, `evidence_dir()`, `chrome_profile_dir()`, `antibot_profile_dir()`, `lst_dir()`, `rules_dir()`, `pocs_dir()`, `cache_dir()`, `settings_file()`, `session_file()`, `runtime_logs_dir()`
 * Runtime directories are created lazily with `os.makedirs(exist_ok=True)`.
 * Override runtime root via `HSF_HOME` environment variable.
 
@@ -247,6 +247,34 @@ User preferences (console font size, view zoom level) are persisted to `~/.local
 * `load()` / `save()` — read/write JSON with thread-safe I/O.
 * `get(key, default)` / `set(key, value)` — access in-memory dict, thread-safe.
 * Settings are loaded once at startup (`App.__init__`) and saved on every font/zoom change and on graceful shutdown (`_on_close`).
+
+---
+
+## Session Persistence (`src/llm/session.py`)
+
+The LLM conversation context (and the rendered console output) is persisted to a **single file** `~/.local/share/hsf/session.json` (path via `session_file()` in `src/hsf_paths.py`), so it survives a restart.
+
+* `save(messages, mode=None, context_injected=False, total_api_tokens=0, console_segments=None)` — writes atomically (temp file + `os.replace`) under a `threading.Lock`.
+* `load()` — reads and returns the data dict, or `None` if missing/corrupt.
+* `clear()` — deletes the file.
+
+The persisted dict holds:
+- `messages` — the full `_llm_messages` conversation (serialized via `serialize_messages`, which handles dicts and OpenAI message objects, preserving `tool_calls`, `tool_call_id`, and the markers `_is_context` / `_is_compaction` / `_recent`).
+- `mode` — last active mode (`"agent"` / `"consultor"` / `null`).
+- `context_injected` — whether the state snapshot was already injected.
+- `total_api_tokens` — last `prompt_tokens` from the API (used for the context % and compaction trigger).
+- `console_segments` — list of `[text, color]` pairs, the rendered console output with colors.
+
+**Integration (`src/gui/app.py`):**
+- `_save_session()` — snapshots `list(self._llm_messages)` and the console segments, and writes the file. It is called in **real time**: after the user prompt is appended (synchronously), after each tool call/result (`_persist()` inside `chat_with_tools`), and in the `finally` of each exchange. It checks `_closing` and skips during shutdown.
+- `_load_session()` — on startup (`App.__init__`), loads the messages (stripping `_is_context` so the next prompt re-injects a fresh state snapshot), restores `total_api_tokens`, restores the console via `console.restore_segments()`, and returns the saved `mode` so the app re-enters agent/consultor mode.
+- `_clear_session()` — deletes the file. Called by the `reset` command (both modes), which also clears `_llm_messages`, `_total_api_tokens`, and the cache.
+- The console tracks its content as `(text, color)` segments in `Console._segments` (`src/gui/console.py`), updated in `write()` / `_write_segments()` and reset in `_cmd_clear()`.
+
+**Rules:**
+- The machine/domain/inventory databases are already persistent and remain **outside** the session (the session is currently only the model context + console display).
+- The session must stay a **single file** so sessions can be loaded/listed easily in the future.
+- `_save_session()` performs no tkinter calls (the console segment capture is a plain Python list read), so it is safe to call from worker threads.
 
 ---
 
@@ -386,14 +414,17 @@ HSF integrates with LLMs via an extensible provider system supporting any OpenAI
 **Architecture:**
 
 * `config.py` — Persists provider configs to `~/.local/share/hsf/llm.json`. Each provider key doubles as its display name (no separate `name` field). Per-provider `base_url`, `api_key`, `models`. Active model is per-provider (`active_models` dict, not global — avoids cross-provider model confusion). System prompts stored in `prompts` dict (deep-merged from defaults on load).
-* `client.py` — `LLMClient` wraps `openai.OpenAI`. `chat()` / `chat_stream()`. Prepends purpose-specific system prompt unless messages already contain a `system` role. Timeout: 300s.
+* `client.py` — `LLMClient` wraps `openai.OpenAI`. `chat()` / `chat_stream()` / `chat_with_tools()`. Prepends purpose-specific system prompt unless messages already contain a `system` role. Timeout: 300s. `chat_with_tools()` is fully streaming (`stream=True` + `stream_options={"include_usage": True}`), checks `stop_event` per chunk, and returns the accumulated final `content` string (or `None`).
 * `settings.py` — Settings dialog: **Models** tab (provider cards, click to edit/set active) + **Prompts** tab (editable system prompts per purpose).
 
 **Console integration:**
 
-* `consultor` — enters LLM mode (prompt changes to yellow `Consultor>`). All input sent to LLM. Full conversation history maintained. `exit` leaves mode. Responses stream line-by-line.
+* `consultor` — enters LLM mode (prompt changes to yellow `Consultor>`). All input sent to LLM. Full conversation history maintained. `exit` closes the app. Responses stream line-by-line. Consultor may call read-only tools (via `chat_with_tools(allowed_tools=CONSULTOR_TOOLS)`).
 * `consultor <prompt>` — one-shot query without entering mode.
+* `agent` — enters agent mode (blue `Agent>`); full tool access. `agent <prompt>` is a one-shot query.
 * `settings` — opens LLM configuration dialog.
+
+Both modes display the model output in white, marked with a colored `▣` (blue for agent, orange for consultor); the echoed prompt is `User prompt > ` colored by mode.
 
 **Evidence analysis:**
 
@@ -401,9 +432,9 @@ HSF integrates with LLMs via an extensible provider system supporting any OpenAI
 
 **Rules:**
 
-* All LLM calls run in daemon threads. Output dispatched to main thread via `self.after(0, ...)`.
+* All LLM calls run in daemon threads. Output dispatched to main thread via `app._safe_after(callback, *args)`.
 * The `openai` library is used for all providers by setting a custom `base_url`.
-* System prompts are configurable per purpose (`consultor`, `evidence_analysis`, `agent`).
+* System prompts are configurable per purpose (`system`, `evidence_analysis`, `investigate_interests`).
 
 **Provider Edit Dialog:**
 
@@ -417,22 +448,29 @@ The provider editor (`_open_provider_dialog` in `src/gui/dialogs/settings.py`) u
 
 The agent mode gives the LLM the ability to call **57 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
 
-**Tool-calling loop**:
-...
+**Tool-calling loop** (fully streaming):
 
-The tool-calling phase does **not** stream — only the final assistant response is streamed.
+`chat_with_tools()` issues a single streaming request (`stream=True` + `stream_options={"include_usage": True}`, with a fallback when the provider rejects `include_usage`), iterating chunks and:
+- checking `stop_event` **per chunk** (aborts immediately and closes the stream — opencode-style interruption),
+- emitting text deltas via `on_text` as they arrive,
+- accumulating `tool_calls` by `index` from the streaming delta format,
+- reading `usage.prompt_tokens` from the final chunk into `_total_api_tokens`.
+
+When the stream ends with `finish_reason == "tool_calls"`, it appends the assistant message (with `tool_calls`), executes each tool (respecting `allowed_tools`), appends the tool results, calls `on_flush()`, and loops. Otherwise it calls `on_flush()` and returns the accumulated final `content` string (or `None` if stopped/no response).
 
 **Method signature:**
 
 ```python
-def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None, on_text=None, stop_event=None, on_warning=None):
+def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None, on_text=None, stop_event=None, on_warning=None, allowed_tools=None, on_flush=None):
 ```
 
 - `on_tool(name, args, result)` — callback invoked after each tool execution (used for console logging).
-- `on_text(text)` — callback invoked when the model emits text alongside tool calls.
-- `stop_event` — `threading.Event` to cancel tool-calling loop cleanly.
+- `on_text(text)` — callback invoked with each text delta (used for live streaming display).
+- `on_flush()` — callback invoked at the end of each stream (flushes any buffered line; resets the `▣` first-line marker).
+- `stop_event` — `threading.Event` to cancel the loop cleanly (checked per chunk).
 - `on_warning(msg)` — callback invoked when the model outputs invalid XML tool call syntax (corrected via system message injection).
-- `tool_context` — passed through to tool handlers. In agent mode this is the `App` instance.
+- `allowed_tools` — a `set` of tool names allowed to execute; `None` = all (agent). In consultor mode this is `CONSULTOR_TOOLS`; non-allowed tools return a "not available in consultor mode" string (the tool schemas are still sent so context stays equivalent).
+- `tool_context` — passed through to tool handlers. In agent/consultor mode this is the `App` instance.
 
 ### Tool Definitions (`src/llm/tools.py`)
 
@@ -624,7 +662,7 @@ POCs (Proof of Concept) are Python scripts generated by the LLM agent to demonst
 HSF automatically manages LLM context to prevent overflow during long agent or consultor sessions.
 
 **Automatic Compaction:**
-- Triggers when estimated tokens exceed `context_limit - 20,000` (configurable buffer via `DEFAULT_BUFFER` in `src/llm/compaction.py`)
+- Triggers when the actual `prompt_tokens` (`_total_api_tokens`, reported by the API) reach `context_limit - 20,000` (configurable buffer via `DEFAULT_BUFFER` in `src/llm/compaction.py`). Falls back to a chars/4 estimate before the first API response.
 - Calls the LLM to generate an incremental summary of old messages using a structured template
 - Replaces summarized messages with a single compaction message (`_is_compaction: true`) that includes the summary text and recent verbatim messages
 - Recent messages (~8K tokens worth, configurable via `DEFAULT_KEEP_TOKENS`) are preserved intact
@@ -742,10 +780,13 @@ The agent mode is a **console mode handler**, similar to `consultor`. The `App` 
 
 ```python
 self._agent_mode = False
+self._consultor_mode = False
+self._closing = False         # set in _on_close; guards worker-thread work during shutdown
+self._llm_running = False     # guards against concurrent agent/consultor exchanges
 self._agent_stop_event = None
-self._agent_consecutive_xml_errors = 0
 self._llm_messages = []        # shared conversation history (agent + consultor)
 self._context_injected = False # one-shot: injected on first prompt only
+self._total_api_tokens = 0     # last known prompt_tokens reported by the API
 ```
 
 **Console command registration:**
@@ -768,23 +809,38 @@ def _cmd_agent(self, args):
 # Interactive handler — all console input routed here
 def _agent_handler(self, text):
     if text.strip().lower() == "exit":
-        self._leave_agent_mode()     # restores "HSF> " prompt
+        self._on_close()             # closes the app (not just leaving mode)
+        return
+    if text.strip().lower() == "stop":
+        self._agent_stop_event.set()
         return
     self._agent_ask(text)
 
-# Core request — runs in daemon thread, dispatches to main via after()
-def _agent_ask(self, prompt, _retry=False):
+# Core request — runs in daemon thread, dispatches to main via _safe_after()
+def _agent_ask(self, prompt):
+    if self._llm_running:            # reject concurrent exchanges (also stops typos)
+        self.console.warning("Still processing...")
+        return
+    self._llm_running = True
+    self._agent_stop_event = threading.Event()
     self._inject_context()           # injects context on first call only
     self._llm_messages.append({"role": "user", "content": prompt})
+    self._save_session()
     def _run():
         client = LLMClient(purpose="agent")   # uses "agent" system prompt
         def _on_tool(name, args, result):
-            self.console.after(0, lambda: ...)
-        stream = client.chat_with_tools(
+            self._safe_after(lambda: ...)
+        _emit, _flush = self._make_stream_emitter("#5ba3ec", self.console.agent, clean_fn=_clean)
+        content = client.chat_with_tools(
             self._llm_messages, on_tool=_on_tool, tool_context=self,
-            on_warning=lambda msg: self.console.warning(msg),
+            on_text=_emit, on_flush=_flush,
+            on_warning=lambda msg: self._safe_after(...),
             stop_event=stop)
-        # ... stream and append assistant response to _llm_messages
+        _flush()
+        if stop.is_set(): ...        # "Agent stopped."
+        if content is None: ...      # "(no response)"
+        self._llm_messages.append({"role": "assistant", "content": _clean(content)})
+        self._llm_running = False    # reset in finally
     threading.Thread(target=_run, daemon=True).start()
 ```
 
@@ -801,7 +857,7 @@ This gives the LLM a snapshot of available targets. After the first injection, `
 
 **`_build_model_context()`** now returns only machine IPs/IDs and domain names in a single line (~50-200 tokens). The heavy per-machine SQLite queries (ports, banners, web services) and inventory details (users, credentials, hashes, evidence, shells, dictionaries, rules, POCs) are no longer injected — the LLM uses tools (`check_status`, `check_inventory`, `check_machine`, `check_domain`) to query them on demand.
 
-The `reset` command clears `_llm_messages` and resets `_context_injected = False`, so the next prompt re-injects the current state snapshot.
+The `reset` command clears `_llm_messages`, resets `_context_injected = False` and `_total_api_tokens = 0`, and deletes the persisted session (`_clear_session()`), so the next prompt re-injects the current state snapshot.
 
 **Comparison with previous design:**
 
@@ -824,14 +880,14 @@ This mechanism is **shared** between agent and consultor modes via the shared `s
 |---|---|---|
 | Command | `agent` | `consultor` |
 | Purpose | `"agent"` | `"consultor"` |
-| System prompt | Penetration testing agent, concise | Helpful assistant, brief responses |
-| Tool calling | **Yes** — `chat_with_tools()` | **No** — `chat_stream()` |
+| System prompt | Shared `system` prompt + `[MODE: AGENT]` message | Shared `system` prompt + `[MODE: CONSULTOR]` message (lists read-only tools) |
+| Tool calling | **Yes** — `chat_with_tools()` (all 57 tools) | **Yes** — `chat_with_tools(allowed_tools=CONSULTOR_TOOLS)` (21 read-only tools; the rest are sent but denied) |
 | Prompt color | Blue (`#5ba3ec`) | Yellow (`#e6b422`) |
 | Context injection | Yes | Yes |
 | Shared history | Yes (`self._llm_messages`) | Yes (`self._llm_messages`) |
 | Context % display | Yes (`Agent (45%)>`) | Yes (`Consultor (45%)>`) |
 | Spinner while processing | Yes | Yes |
-| Commands | `exit`, `stop`, `reset`, `menu` | `exit`, `reset`, `menu` |
+| Commands | `exit`, `stop`, `reset`, `compact`, `menu` | `exit`, `stop`, `reset`, `compact`, `menu` |
 | Tab mode cycle | Cycles without interrupting agent | Cycles without interrupting consultor |
 
 **Rules for agent development:**
@@ -842,12 +898,12 @@ This mechanism is **shared** between agent and consultor modes via the shared `s
 - New tools that perform network operations MUST trigger async processes and return immediately — never block the daemon thread.
 - Web tools (`webfetch`, `websearch`) are exceptions: they run synchronously inside the daemon thread because the LLM needs the fetched content to reason about it. HTTP requests complete quickly (timeout ≤ 30s).
 - Tool results are strings returned to the LLM. Keep them concise and factual.
-- The `_llm_messages` list accumulates the full conversation including tool call/result messages. It is reset on each new `agent` or `consultor` session entry (not on each prompt within a session).
-- When the LLM outputs invalid XML tool call syntax (e.g. `<invoke>`, `<function_calls>`) instead of proper function calling, the system detects it via regex (`<[^>]*DSML`), warns the model, and retries. A consecutive error counter (`_agent_consecutive_xml_errors`, max 5 followed by abort) prevents infinite loops.
-- Pressing Tab with empty input cycles through Normal → Consultor → Agent without interrupting the currently running agent thread. A braille spinner (⠋⠙⠹...) appears next to the prompt while the LLM is processing, visible in all modes.
-- The prompt shows context usage percentage for both agent and consultor (e.g. `Agent (45%)>`, `Consultor (45%)>`), updated via `_update_mode_prompt()`.
+- The `_llm_messages` list accumulates the full conversation including tool call/result messages. It is **shared** between agent and consultor modes and **persists** across restarts (via `session.json`); it is only cleared by the `reset` command.
+- When the LLM outputs invalid XML tool call syntax (e.g. `<invoke>`, `<function_calls>`) instead of proper function calling, the system detects it via regex (`<[^>]*DSML`), warns the model, and retries. A consecutive error counter (`consecutive_xml_errors`, local to `chat_with_tools()`, max 5 followed by abort) prevents infinite loops.
+- Pressing Tab cycles through Normal → Consultor → Agent without interrupting the currently running agent thread, **when the input is empty OR is a multi-word prompt whose first word is not a command**. If the first word matches a command (or its prefix), Tab performs command/argument autocomplete. A braille spinner (⠋⠙⠹...) appears next to the prompt while the LLM is processing, visible in all modes.
+- The prompt shows context usage percentage for both agent and consultor (e.g. `Agent (45%)>`, `Consultor (45%)>`), updated via `_update_mode_prompt()`. The percentage uses the actual `prompt_tokens` (`_total_api_tokens`) with a chars/4 estimate fallback.
 - All GUI updates from agent/consultor daemon threads must use `app._safe_after(callback, *args)` instead of bare `self.after(0, ...)`. This wrapper catches `RuntimeError` if the widget has been destroyed between scheduling and execution.
-- `_on_close()` sets `_agent_stop_event` and calls `console.stop_thinking()` before `destroy()` to prevent agent/consultor threads from accessing dead widgets. The `exit` command handlers in both modes call `_on_close()` to ensure proper cleanup.
+- `_on_close()` sets `_closing = True`, then `_agent_stop_event`, and calls `console.stop_thinking()` before `destroy()` to prevent agent/consultor threads from accessing dead widgets. `_save_session()` and `chat_with_tools()`'s `after()` call both check `_closing` and skip work during shutdown. The `exit` command handlers in both modes call `_on_close()` to ensure proper cleanup.
 
 ---
 

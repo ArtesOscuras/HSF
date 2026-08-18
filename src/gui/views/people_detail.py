@@ -272,28 +272,25 @@ class _InvestigateInterestsDialog(tk.Toplevel):
                     f"\n[tool] {tn} {s} → {sm}\n", "tool"))
 
             self._log("Investigating...\n", "muted")
-            stream = client.chat_with_tools(
-                messages, on_tool=_on_tool, tool_context=None)
-            if stream is None:
+            buf = [""]
+            def _on_text(delta):
+                buf[0] += delta
+                if "\n" not in buf[0]:
+                    return
+                lines = buf[0].split("\n")
+                for line in lines[:-1]:
+                    if line.strip():
+                        self.after(0, lambda l=line: self._log(l.rstrip() + "\n"))
+                buf[0] = lines[-1]
+            content = client.chat_with_tools(
+                messages, on_tool=_on_tool, tool_context=None, on_text=_on_text)
+            if buf[0].strip():
+                self.after(0, lambda b=buf[0]: self._log(b.rstrip() + "\n"))
+            if content is None:
                 self._log("\n(no response)\n", "muted")
                 return
-            full = ""
-            buf = ""
-            for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    ctext = chunk.choices[0].delta.content
-                    full += ctext
-                    buf += ctext
-                    if "\n" in buf:
-                        lines = buf.split("\n")
-                        for line in lines[:-1]:
-                            if line.strip():
-                                self._log(line.rstrip() + "\n")
-                        buf = lines[-1]
-            if buf.strip():
-                self._log(buf.rstrip() + "\n")
 
-            interests = full.strip()
+            interests = content.strip()
             cleaned = _clean_interests(interests)
             if cleaned:
                 people_db.update_person(

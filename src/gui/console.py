@@ -106,6 +106,8 @@ class Console(tk.Frame):
 
         self._arg5_contains = set()
 
+        self._segments = []
+
         self.grid_propagate(False)
         self.config(bg=BG)
         self.columnconfigure(0, weight=1)
@@ -321,6 +323,7 @@ class Console(tk.Frame):
             self.output_area.insert(tk.END, text, tag)
         else:
             self.output_area.insert(tk.END, text)
+        self._segments.append((text, color))
         if is_at_bottom:
             self.output_area.see(tk.END)
         self.output_area.config(state=tk.DISABLED)
@@ -341,10 +344,49 @@ class Console(tk.Frame):
         self.writeln(text, FG_DIM)
 
     def agent(self, text):
-        self.writeln(text, AGENT_COLOR)
+        self.writeln(text, FG)
 
     def consultor(self, text):
-        self.writeln(text, FG_CONSULTOR)
+        self.writeln(text, FG)
+
+    def _write_segments(self, segments):
+        if not self.winfo_exists():
+            return
+        self.output_area.config(state=tk.NORMAL)
+        is_at_bottom = self.output_area.yview()[1] >= 1.0
+        for text, color in segments:
+            if color:
+                tag = f"color_{id(color)}"
+                self.output_area.tag_configure(tag, foreground=color)
+                self.output_area.insert(tk.END, text, tag)
+            else:
+                self.output_area.insert(tk.END, text)
+        self.output_area.insert(tk.END, "\n")
+        self._segments.extend(segments)
+        self._segments.append(("\n", None))
+        if is_at_bottom:
+            self.output_area.see(tk.END)
+        self.output_area.config(state=tk.DISABLED)
+
+    def get_segments(self):
+        return list(self._segments)
+
+    def restore_segments(self, segments):
+        self.output_area.config(state=tk.NORMAL)
+        self.output_area.delete("1.0", tk.END)
+        for text, color in segments:
+            if color:
+                tag = f"color_{id(color)}"
+                self.output_area.tag_configure(tag, foreground=color)
+                self.output_area.insert(tk.END, text, tag)
+            else:
+                self.output_area.insert(tk.END, text)
+        self._segments = list(segments)
+        self.output_area.see(tk.END)
+        self.output_area.config(state=tk.DISABLED)
+
+    def role_mark(self, text, color):
+        self._write_segments([("\u25a3 ", color), (text, FG)])
 
     def warning(self, text):
         self.writeln(f"[!] {text}", WARN_COLOR)
@@ -463,7 +505,7 @@ class Console(tk.Frame):
             return
 
         if self._mode_handler:
-            self.write(f"{self._mode_label}> ", color=self._mode_fg)
+            self.write("User prompt > ", color=self._mode_fg)
             self.writeln(raw, color=FG)
             self._mode_handler(raw)
             return
@@ -495,6 +537,7 @@ class Console(tk.Frame):
     def _cmd_clear(self, args):
         self.output_area.config(state=tk.NORMAL)
         self.output_area.delete("1.0", tk.END)
+        self._segments = []
         self.output_area.config(state=tk.DISABLED)
 
     def _on_key_press(self, event):
@@ -565,6 +608,15 @@ class Console(tk.Frame):
         cmd_prefix = parts[0]
         arg_prefix = parts[1] if len(parts) > 1 else ""
         in_arg_mode = " " in raw.lstrip()
+
+        if self._mode_handler and self._mode_commands:
+            match_src = self._mode_commands
+        else:
+            match_src = self.commands
+        if arg_prefix and not any(n.startswith(cmd_prefix) for n in match_src):
+            if self._mode_cycle_cb:
+                self._mode_cycle_cb()
+            return "break"
 
         if in_arg_mode and cmd_prefix in self._subcommands:
             arg1 = arg_prefix.split(None, 1)[0] if arg_prefix else ""

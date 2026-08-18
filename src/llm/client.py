@@ -79,7 +79,7 @@ class LLMClient:
             stream=True,
         )
 
-    def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None, on_text=None, stop_event=None, on_warning=None, allowed_tools=None):
+    def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None, on_text=None, stop_event=None, on_warning=None, allowed_tools=None, on_flush=None):
         from src.llm.tools import TOOLS as _TOOLS, execute as _execute
 
         self._ensure_client()
@@ -94,50 +94,115 @@ class LLMClient:
                 except Exception:
                     pass
 
+        def _abort(stream):
+            try:
+                stream.close()
+            except Exception:
+                pass
+
         while True:
             if stop_event and stop_event.is_set():
                 return None
-            resp = self._client.chat.completions.create(
-                model=m,
-                messages=self._messages(messages),
-                tools=_TOOLS,
-            )
-            if hasattr(resp, 'usage') and resp.usage:
-                self.last_prompt_tokens = resp.usage.prompt_tokens
-                if tool_context:
-                    tool_context._total_api_tokens = resp.usage.prompt_tokens
-                    try:
-                        tool_context.after(0, tool_context._update_mode_prompt)
-                    except RuntimeError:
-                        pass
-            choice = resp.choices[0]
-            if choice.finish_reason == "tool_calls" and choice.message.tool_calls:
+            try:
+                stream = self._client.chat.completions.create(
+                    model=m,
+                    messages=self._messages(messages),
+                    tools=_TOOLS,
+                    stream=True,
+                    stream_options={"include_usage": True},
+                )
+            except Exception:
+                stream = self._client.chat.completions.create(
+                    model=m,
+                    messages=self._messages(messages),
+                    tools=_TOOLS,
+                    stream=True,
+                )
+            content_parts = []
+            tool_calls = {}
+            finish_reason = None
+            for chunk in stream:
+                if stop_event and stop_event.is_set():
+                    _abort(stream)
+                    return None
+                if getattr(chunk, 'usage', None):
+                    self.last_prompt_tokens = chunk.usage.prompt_tokens
+                    if tool_context and not getattr(tool_context, '_closing', False):
+                        tool_context._total_api_tokens = chunk.usage.prompt_tokens
+                        try:
+                            tool_context.after(0, tool_context._update_mode_prompt)
+                        except RuntimeError:
+                            pass
+                if not chunk.choices:
+                    continue
+                choice = chunk.choices[0]
+                delta = choice.delta
+                if delta is not None:
+                    if delta.content:
+                        content_parts.append(delta.content)
+                        if on_text:
+                            try:
+                                on_text(delta.content)
+                            except RuntimeError:
+                                pass
+                    if delta.tool_calls:
+                        for tc in delta.tool_calls:
+                            acc = tool_calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                            if tc.id:
+                                acc["id"] = tc.id
+                            if tc.function is not None:
+                                if tc.function.name:
+                                    acc["name"] += tc.function.name
+                                if tc.function.arguments:
+                                    acc["arguments"] += tc.function.arguments
+                if choice.finish_reason:
+                    finish_reason = choice.finish_reason
+
+            content = "".join(content_parts)
+            if on_flush:
+                try:
+                    on_flush()
+                except RuntimeError:
+                    pass
+
+            if finish_reason == "tool_calls" and tool_calls:
                 if stop_event and stop_event.is_set():
                     return None
                 consecutive_xml_errors = 0
-                if choice.message.content and on_text:
-                    try:
-                        on_text(choice.message.content)
-                    except RuntimeError:
-                        pass
-                messages.append(choice.message)
+                tool_calls_list = [
+                    {
+                        "id": tool_calls[i]["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tool_calls[i]["name"],
+                            "arguments": tool_calls[i]["arguments"],
+                        },
+                    }
+                    for i in sorted(tool_calls)
+                ]
+                messages.append({
+                    "role": "assistant",
+                    "content": content or None,
+                    "tool_calls": tool_calls_list,
+                })
                 _persist()
-                for tc in choice.message.tool_calls:
+                for i in sorted(tool_calls):
+                    tc = tool_calls[i]
                     args = {}
                     try:
                         import json
-                        args = json.loads(tc.function.arguments)
+                        args = json.loads(tc["arguments"])
                     except Exception:
                         pass
-                    if allowed_tools is None or tc.function.name in allowed_tools:
-                        result = _execute(tc.function.name, args, tool_context)
+                    if allowed_tools is None or tc["name"] in allowed_tools:
+                        result = _execute(tc["name"], args, tool_context)
                     else:
-                        result = f"Tool '{tc.function.name}' is not available in consultor mode (read-only tools only)."
+                        result = f"Tool '{tc['name']}' is not available in consultor mode (read-only tools only)."
                     if on_tool:
-                        on_tool(tc.function.name, args, result)
+                        on_tool(tc["name"], args, result)
                     messages.append({
                         "role": "tool",
-                        "tool_call_id": tc.id,
+                        "tool_call_id": tc["id"],
                         "content": result,
                     })
                     _persist()
@@ -149,42 +214,35 @@ class LLMClient:
                     except Exception:
                         pass
                 continue
-            if choice.message.content:
-                if _XML_TOOL_PATTERN.search(choice.message.content):
-                    consecutive_xml_errors += 1
-                    if on_warning:
-                        try:
-                            on_warning("Tool calling error")
-                        except RuntimeError:
-                            pass
-                    if consecutive_xml_errors >= 5:
-                        stream = self._client.chat.completions.create(
-                            model=m,
-                            messages=self._messages(messages),
-                            stream=True,
-                        )
-                        return stream
-                    messages.append(choice.message)
-                    messages.append({
-                        "role": "system",
-                        "content": (
-                            "INVALID TOOL CALL FORMAT. You used XML tags like "
-                            "<invoke> which is not supported. You MUST use the "
-                            "proper function calling mechanism to invoke tools. "
-                            "The tool was NOT executed — nothing happened. "
-                            "Do NOT emit raw XML. Retry your tool calls correctly."
-                        ),
-                    })
-                    _persist()
-                    continue
-                consecutive_xml_errors = 0
-                stream = self._client.chat.completions.create(
-                    model=m,
-                    messages=self._messages(messages),
-                    stream=True,
-                )
-                return stream
-            return None
+
+            if not content:
+                return None
+
+            if _XML_TOOL_PATTERN.search(content):
+                consecutive_xml_errors += 1
+                if on_warning:
+                    try:
+                        on_warning("Tool calling error")
+                    except RuntimeError:
+                        pass
+                if consecutive_xml_errors >= 5:
+                    return content
+                messages.append({"role": "assistant", "content": content})
+                messages.append({
+                    "role": "system",
+                    "content": (
+                        "INVALID TOOL CALL FORMAT. You used XML tags like "
+                        "<invoke> which is not supported. You MUST use the "
+                        "proper function calling mechanism to invoke tools. "
+                        "The tool was NOT executed — nothing happened. "
+                        "Do NOT emit raw XML. Retry your tool calls correctly."
+                    ),
+                })
+                _persist()
+                continue
+
+            consecutive_xml_errors = 0
+            return content
 
     @property
     def model(self):

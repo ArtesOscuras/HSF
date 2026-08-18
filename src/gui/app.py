@@ -611,8 +611,9 @@ class App(tk.Tk):
         self._bruteforce_engine = None
         self._consultor_mode = False
         self._agent_mode = False
+        self._closing = False
+        self._llm_running = False
         self._agent_stop_event = None
-        self._agent_consecutive_xml_errors = 0
         self._llm_messages = []
         self._silent_mode_cycle = False
         self._last_ctx_hash = None
@@ -3863,8 +3864,6 @@ class App(tk.Tk):
                 self.console.stop_thinking()
             threading.Thread(target=_compact, daemon=True).start()
             return
-        import threading
-        self._agent_stop_event = threading.Event()
         self._consultor_ask(text)
 
     def _leave_consultor_mode(self):
@@ -3962,14 +3961,18 @@ class App(tk.Tk):
             _ctx_log(f"cache clear ERROR: {e}")
 
     def _save_session(self):
+        if getattr(self, '_closing', False):
+            return
         from src.llm import session
         mode = "agent" if self._agent_mode else ("consultor" if self._consultor_mode else None)
         try:
             snapshot = list(self._llm_messages)
+            segments = self.console.get_segments()
             session.save(
                 snapshot, mode=mode,
                 context_injected=self._context_injected,
-                total_api_tokens=getattr(self, '_total_api_tokens', 0))
+                total_api_tokens=getattr(self, '_total_api_tokens', 0),
+                console_segments=segments)
         except Exception as e:
             _ctx_log(f"session save ERROR: {e}")
 
@@ -3983,6 +3986,12 @@ class App(tk.Tk):
         self._llm_messages = msgs
         self._context_injected = False
         self._total_api_tokens = data.get("total_api_tokens", 0)
+        segments = data.get("console_segments")
+        if segments:
+            try:
+                self.console.restore_segments(segments)
+            except Exception as e:
+                _ctx_log(f"console restore ERROR: {e}")
         _ctx_log(f"session loaded msgs={len(msgs)} mode={data.get('mode')} api_tokens={self._total_api_tokens}")
         return data.get("mode")
 
@@ -4049,9 +4058,11 @@ class App(tk.Tk):
     def _compact_if_needed(self, force=False):
         from src.llm import compaction
         limit = self._get_model_context_limit()
+        api = getattr(self, '_total_api_tokens', 0) or 0
         estimated = self._estimate_tokens(self._llm_messages)
-        overflow = compaction.is_overflow(estimated, limit)
-        _ctx_log(f"compact check msgs={len(self._llm_messages)} est={estimated} limit={limit} overflow={overflow} force={force}")
+        used = api if api > 0 else estimated
+        overflow = compaction.is_overflow(used, limit)
+        _ctx_log(f"compact check msgs={len(self._llm_messages)} api={api} est={estimated} used={used} limit={limit} overflow={overflow} force={force}")
         if not force and not overflow:
             return False
         before = len(self._llm_messages)
@@ -4143,8 +4154,6 @@ class App(tk.Tk):
                 self.console.stop_thinking()
             threading.Thread(target=_compact, daemon=True).start()
             return
-        import threading
-        self._agent_stop_event = threading.Event()
         self._agent_ask(text)
 
     def _leave_agent_mode(self):
@@ -4154,30 +4163,66 @@ class App(tk.Tk):
         if not self._silent_mode_cycle:
             self.console.info("Left agent mode.")
 
-    def _agent_ask(self, prompt, _retry=False):
+    def _make_stream_emitter(self, color, display, clean_fn=None):
+        buf = [""]
+        first = [True]
+        def _clean(text):
+            return clean_fn(text) if clean_fn else text
+        def _emit(delta):
+            if getattr(self, '_closing', False):
+                return
+            buf[0] += delta
+            if "\n" not in buf[0]:
+                return
+            lines = buf[0].split("\n")
+            for line in lines[:-1]:
+                text = _clean(line).rstrip()
+                if text.strip():
+                    if first[0]:
+                        first[0] = False
+                        self._safe_after(lambda l=text: self.console.role_mark(l, color))
+                    else:
+                        self._safe_after(lambda l=text: display(l))
+            buf[0] = lines[-1]
+        def _flush():
+            if getattr(self, '_closing', False):
+                return
+            text = _clean(buf[0]).rstrip()
+            if text.strip():
+                if first[0]:
+                    first[0] = False
+                    self._safe_after(lambda l=text: self.console.role_mark(l, color))
+                else:
+                    self._safe_after(lambda l=text: display(l))
+            buf[0] = ""
+            first[0] = True
+        return _emit, _flush
+
+    def _agent_ask(self, prompt):
         import threading, re
+        if getattr(self, '_llm_running', False):
+            self.console.warning("Still processing the previous request. Use 'stop' to interrupt first.")
+            return
+        self._llm_running = True
+        self._agent_stop_event = threading.Event()
         _tool_xml_re = re.compile(r'<[^>]*DSML', re.IGNORECASE)
         def _clean(text):
             return _tool_xml_re.sub('', text)
         self._inject_context()
-        if not _retry:
-            self._llm_messages.append({"role": "user", "content": prompt})
-            self._save_session()
+        self._llm_messages.append({"role": "user", "content": prompt})
+        self._save_session()
         def _run():
             self.console.start_thinking()
             stop = self._agent_stop_event
-            if not _retry:
-                self._compact_if_needed()
-                msg_before = len(self._llm_messages)
-            else:
-                msg_before = len(self._llm_messages)
+            self._compact_if_needed()
+            msg_before = len(self._llm_messages)
             succeeded = False
-            _ctx_log(f"agent_ask start msgs={len(self._llm_messages)} retry={_retry} prompt_len={len(prompt)}")
+            _ctx_log(f"agent_ask start msgs={len(self._llm_messages)} prompt_len={len(prompt)}")
+            _emit, _flush = self._make_stream_emitter("#5ba3ec", self.console.agent, clean_fn=_clean)
             try:
                 from src.llm import LLMClient
                 client = LLMClient(purpose="agent")
                 def _on_tool(name, args, result):
-                    self._agent_consecutive_xml_errors = 0
                     if stop is not None and stop.is_set():
                         return
                     display = result
@@ -4200,70 +4245,26 @@ class App(tk.Tk):
                             f"  [tool] {name} {str(args)[:60]} → {d} (~{len(result)//4} tokens)"))
                     except RuntimeError:
                         pass
-                stream = client.chat_with_tools(
+                content = client.chat_with_tools(
                     self._llm_messages, on_tool=_on_tool, tool_context=self,
-                    on_text=lambda text: self._safe_after(
-                        lambda t=text: self.console.agent(_clean(t).rstrip())),
+                    on_text=_emit,
                     on_warning=lambda msg: self._safe_after(
                         lambda m=msg: self.console.warning(m)),
-                    stop_event=stop)
+                    stop_event=stop, on_flush=_flush)
+                _flush()
                 if stop is not None and stop.is_set():
                     self._safe_after(lambda: self.console.warning("Agent stopped."))
                     return
                 self._safe_after(lambda: setattr(self, '_total_api_tokens', client.last_prompt_tokens))
                 _ctx_log(f"agent_ask tokens={client.last_prompt_tokens} msgs={len(self._llm_messages)} after_stream")
-                if stream is None:
+                if content is None:
                     self._safe_after(lambda: self.console.info("  (no response)"))
                     return
-                full = ""
-                buf = ""
-                for chunk in stream:
-                    if stop is not None and stop.is_set():
-                        self._safe_after(lambda: self.console.warning("Agent stopped."))
-                        return
-                    if chunk.choices and chunk.choices[0].delta.content:
-                        full += chunk.choices[0].delta.content
-                        buf += chunk.choices[0].delta.content
-                        if "\n" in buf:
-                            lines = buf.split("\n")
-                            for line in lines[:-1]:
-                                clean = _clean(line)
-                                if clean.strip():
-                                    self._safe_after(lambda l=clean: self.console.agent(l.rstrip()))
-                            buf = lines[-1]
-                clean = _clean(buf)
-                if clean.strip():
-                    self._safe_after(lambda c=clean: self.console.agent(c.rstrip()))
-                if _tool_xml_re.search(full):
-                    self._agent_consecutive_xml_errors += 1
-                    self._safe_after(lambda: self.console.warning("Tool calling error"))
-                    if self._agent_consecutive_xml_errors >= 5:
-                        self._llm_messages.append({"role": "assistant", "content": _clean(full)})
-                        self._safe_after(lambda: self.console.info("---"))
-                        self._safe_after(self._update_mode_prompt)
-                        succeeded = True
-                    else:
-                        self._llm_messages.append({"role": "assistant", "content": full})
-                        self._llm_messages.append({
-                            "role": "system",
-                            "content": (
-                                "INVALID TOOL CALL FORMAT. You used XML tags like "
-                                "<invoke> which is not supported. You MUST use the "
-                                "proper function calling mechanism to invoke tools. "
-                                "Do NOT emit raw XML. Retry your tool calls correctly."
-                            ),
-                        })
-                        succeeded = True
-                        if stop is not None and stop.is_set():
-                            return
-                        self._safe_after(lambda p=prompt: self._agent_ask(p, _retry=True))
-                else:
-                    self._agent_consecutive_xml_errors = 0
-                    self._llm_messages.append({"role": "assistant", "content": _clean(full)})
-                    self._safe_after(lambda: self.console.info("---"))
-                    self._safe_after(self._update_mode_prompt)
-                    succeeded = True
-                    _ctx_log(f"agent_ask success msgs={len(self._llm_messages)} pct={self._get_context_percentage()}")
+                self._llm_messages.append({"role": "assistant", "content": _clean(content)})
+                self._safe_after(lambda: self.console.writeln(""))
+                self._safe_after(self._update_mode_prompt)
+                succeeded = True
+                _ctx_log(f"agent_ask success msgs={len(self._llm_messages)} pct={self._get_context_percentage()}")
             except Exception as e:
                 _ctx_log(f"agent_ask ERROR: {e}")
                 err_str = str(e).lower()
@@ -4297,10 +4298,16 @@ class App(tk.Tk):
                     except (IndexError, AttributeError):
                         pass
                 self._save_session()
+                self._llm_running = False
         threading.Thread(target=_run, daemon=True).start()
 
     def _consultor_ask(self, prompt):
         import threading
+        if getattr(self, '_llm_running', False):
+            self.console.warning("Still processing the previous request. Use 'stop' to interrupt first.")
+            return
+        self._llm_running = True
+        self._agent_stop_event = threading.Event()
         self._inject_context()
         self._llm_messages.append({"role": "user", "content": prompt})
         self._save_session()
@@ -4309,39 +4316,24 @@ class App(tk.Tk):
             stop = self._agent_stop_event
             self._compact_if_needed()
             succeeded = False
+            _emit, _flush = self._make_stream_emitter("#e6b422", self.console.consultor)
             try:
                 from src.llm import LLMClient
                 from src.llm.tools import CONSULTOR_TOOLS
                 client = LLMClient()
-                stream = client.chat_with_tools(
+                content = client.chat_with_tools(
                     self._llm_messages, tool_context=self, allowed_tools=CONSULTOR_TOOLS,
-                    stop_event=stop)
+                    on_text=_emit, stop_event=stop, on_flush=_flush)
+                _flush()
                 if stop is not None and stop.is_set():
                     self._safe_after(lambda: self.console.warning("Consultor stopped."))
                     return
                 self._safe_after(lambda: setattr(self, '_total_api_tokens', client.last_prompt_tokens))
-                if stream is None:
+                if content is None:
                     self._safe_after(lambda: self.console.info("  (no response)"))
                     return
-                full = ""
-                buf = ""
-                for chunk in stream:
-                    if stop is not None and stop.is_set():
-                        self._safe_after(lambda: self.console.warning("Consultor stopped."))
-                        return
-                    if chunk.choices and chunk.choices[0].delta.content:
-                        full += chunk.choices[0].delta.content
-                        buf += chunk.choices[0].delta.content
-                        if "\n" in buf:
-                            lines = buf.split("\n")
-                            for line in lines[:-1]:
-                                if line.strip():
-                                    self._safe_after(lambda l=line: self.console.consultor(l.rstrip()))
-                            buf = lines[-1]
-                if buf.strip():
-                    self._safe_after(lambda b=buf: self.console.consultor(b.rstrip()))
-                self._llm_messages.append({"role": "assistant", "content": full})
-                self._safe_after(lambda: self.console.info("---"))
+                self._llm_messages.append({"role": "assistant", "content": content})
+                self._safe_after(lambda: self.console.writeln(""))
                 self._safe_after(self._update_mode_prompt)
                 succeeded = True
             except Exception as e:
@@ -4354,6 +4346,7 @@ class App(tk.Tk):
                     except (IndexError, AttributeError):
                         pass
                 self._save_session()
+                self._llm_running = False
         threading.Thread(target=_run, daemon=True).start()
 
     def _build_model_context(self):
@@ -5479,6 +5472,7 @@ class App(tk.Tk):
             pass
 
     def _on_close(self):
+        self._closing = True
         self._agent_mode = False
         self._consultor_mode = False
         if self._agent_stop_event:
@@ -5497,5 +5491,5 @@ class App(tk.Tk):
         save_mdns_cache()
         hsf_settings.save()
         event_bus.stop()
-        self.update()
+        self.update_idletasks()
         self.destroy()
