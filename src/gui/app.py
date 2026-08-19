@@ -4164,6 +4164,7 @@ class App(tk.Tk):
             self.console.info("Left agent mode.")
 
     def _make_stream_emitter(self, color, display, clean_fn=None):
+        self.console.reset_markdown_state()
         buf = [""]
         first = [True]
         def _clean(text):
@@ -4196,6 +4197,7 @@ class App(tk.Tk):
                     self._safe_after(lambda l=text: display(l))
             buf[0] = ""
             first[0] = True
+            self._safe_after(lambda: self.console.flush_markdown())
         return _emit, _flush
 
     def _agent_ask(self, prompt):

@@ -194,7 +194,7 @@ def select_messages(messages, keep_tokens):
 
     for i in range(split, len(conversation)):
         line = conversation[i]
-        if line.startswith("[User]:") or line.startswith("[Assistant tool call]:"):
+        if line.startswith("[User]:") or line.startswith("[Assistant"):
             split = i
             split_prefix = ""
             split_suffix = ""

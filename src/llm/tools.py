@@ -726,7 +726,7 @@ TOOLS = [
                 "properties": {
                     "filename": {"type": "string", "description": "Filename from list_files(cache) or the truncation marker"},
                     "offset": {"type": "integer", "description": "Line number to start reading from (1-indexed, default 1). Ignored if regex is set."},
-                    "limit": {"type": "integer", "description": "Max lines to read (default 500). Ignored if regex is set."},
+                    "limit": {"type": "integer", "description": "Max lines to read (default 200). Ignored if regex is set."},
                     "regex": {"type": "string", "description": "Optional regex pattern to search within the file. When set, returns matching lines with surrounding context instead of offset/limit pagination."},
                     "context_before": {"type": "integer", "description": "Lines to show before each regex match (default: 2)"},
                     "context_after": {"type": "integer", "description": "Lines to show after each regex match (default: 10)"},
@@ -965,9 +965,11 @@ TOOL_BYTE_LIMITS = {
     "check_machine": 3000,
     "websearch": 8000,
     "webfetch": 3000,
+    "read_cache": 6000,
 }
 TOOL_LINE_LIMITS = {
     "webfetch": 60,
+    "read_cache": 200,
 }
 
 
@@ -2547,7 +2549,7 @@ def _read_cache(args, ctx=None):
         return "\n".join(result)
 
     offset = int(args.get("offset", 1))
-    limit = int(args.get("limit", 500))
+    limit = int(args.get("limit", 200))
     if offset < 1:
         offset = 1
     if offset > total_lines:

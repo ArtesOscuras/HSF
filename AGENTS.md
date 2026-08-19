@@ -426,6 +426,8 @@ HSF integrates with LLMs via an extensible provider system supporting any OpenAI
 
 Both modes display the model output in white, marked with a colored `▣` (blue for agent, orange for consultor); the echoed prompt is `User prompt > ` colored by mode.
 
+**Markdown rendering:** the agent/consultor output is rendered as markdown (`Console._insert_markdown` in `src/gui/console.py`), following opencode's dark-theme colors: headers (`#`–`######`) and `**bold**` in bold white; `*italic*`/`_italic_` in yellow; inline `` `code` `` in green; blockquotes (`>`) in yellow; links `[text](url)` show the text in cyan; list markers `-`/`*`/`+` in blue and `1.` in cyan; horizontal rules (`---`) in grey; fenced code blocks (```) with a dark background; tables are aligned with `│`/`─` box-drawing. Only agent/consultor output is rendered; all other console messages (info, warnings, `[tool]`, `User prompt >`) stay plain. Markdown state (`_in_code_block`, `_table_buffer`) is tracked per line and reset at the start of each exchange (`reset_markdown_state()`), flushed at the end (`flush_markdown()`), and preserved across restarts by re-rendering `"__md__"` segments in `restore_segments()`.
+
 **Evidence analysis:**
 
 * `_ModelAnalysisDialog` — opens from any evidence detail view. Reads all files from the evidence directory as context. Sends to LLM with the `evidence_analysis` system prompt. Chat input below output for follow-up questions (accumulated conversation history).
@@ -713,7 +715,7 @@ The summarizer receives the current cache file listing (with associated URLs whe
 - Directory: `~/.local/share/hsf/cache/` (created lazily)
 - Files named `tool_{timestamp}_{tool_name}.txt`
 - Cleaned on `reset` command or `delete cache`
-- Tools: `list_files(cache)` to list, `read_cache(filename, offset=1, limit=500)` to read, or `read_cache(filename, regex="pattern", context_before=2, context_after=10)` to search within cached files. Use `delete cache` or `delete_file(cache, filename)` to remove.
+- Tools: `list_files(cache)` to list, `read_cache(filename, offset=1, limit=200)` to read, or `read_cache(filename, regex="pattern", context_before=2, context_after=10)` to search within cached files. Use `delete cache` or `delete_file(cache, filename)` to remove.
 
 **Webfetch HTML Cleaning:**
 - Before HTML-to-markdown conversion, non-content elements are stripped via `_strip_html_non_content()` in `src/llm/web.py`
