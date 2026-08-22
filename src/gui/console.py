@@ -37,7 +37,7 @@ _BLOCKQUOTE_RE = re.compile(r'^(\s*>\s?)(.*)$')
 _BULLET_RE = re.compile(r'^(\s*)([-*+])\s+(.*)$')
 _ENUM_RE = re.compile(r'^(\s*)(\d+[.)])\s+(.*)$')
 _TABLE_ROW_RE = re.compile(r'^\s*\|')
-_MD_TOKEN_RE = re.compile(r'(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*\s][^*]*\*|_[^_\s][^_]*_|\[[^\]]+\]\([^)]+\))')
+_MD_TOKEN_RE = re.compile(r'(`[^`]+`|\*\*[^*]+\*\*|(?<!\w)__[^_]+__(?!\w)|\*[^*\s][^*]*\*|(?<!\w)_[^_\s][^_]*_(?!\w)|\[[^\]]+\]\([^)]+\))')
 
 
 class Console(tk.Frame):
@@ -507,6 +507,10 @@ class Console(tk.Frame):
         if self._table_buffer:
             self._flush_table()
 
+    def _markdown_enabled(self):
+        from src import settings as _app_settings
+        return bool(_app_settings.get("console_markdown", True))
+
     def _configure_md_tags(self):
         self.output_area.tag_configure("md_bold", font=(fonts.family_bold(), self._font_size), foreground=FG)
         self.output_area.tag_configure("md_code", foreground=MD_CODE)
@@ -519,6 +523,7 @@ class Console(tk.Frame):
         self.output_area.tag_configure("md_fence", foreground=MD_FENCE)
         self.output_area.tag_configure("md_codeblock", background=MD_CODEBLOCK_BG, foreground=FG)
         self.output_area.tag_configure("md_table", foreground=MD_TABLE)
+        self.output_area.tag_configure("md_plain", foreground=FG)
 
     def _write_segments(self, segments):
         if not self.winfo_exists():
@@ -527,7 +532,10 @@ class Console(tk.Frame):
         is_at_bottom = self.output_area.yview()[1] >= 1.0
         for text, color in segments:
             if color == "__md__":
-                self._insert_markdown(text)
+                if self._markdown_enabled():
+                    self._insert_markdown(text)
+                else:
+                    self.output_area.insert(tk.END, text, "md_plain")
             elif color:
                 tag = f"color_{id(color)}"
                 self.output_area.tag_configure(tag, foreground=color)
@@ -550,7 +558,10 @@ class Console(tk.Frame):
         self.reset_markdown_state()
         for text, color in segments:
             if color == "__md__":
-                self._insert_markdown(text)
+                if self._markdown_enabled():
+                    self._insert_markdown(text)
+                else:
+                    self.output_area.insert(tk.END, text, "md_plain")
             elif color:
                 tag = f"color_{id(color)}"
                 self.output_area.tag_configure(tag, foreground=color)

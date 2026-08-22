@@ -173,3 +173,12 @@ def delete_person(person_id):
         return True
     except (PermissionError, OSError, sqlite3.OperationalError, sqlite3.DatabaseError):
         return False
+
+
+def delete_all():
+    _init_db_path()
+    try:
+        if os.path.isfile(_DB_PATH):
+            os.remove(_DB_PATH)
+    except (PermissionError, OSError):
+        pass

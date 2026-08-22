@@ -1,3 +1,4 @@
+import json
 import tkinter as tk
 from tkinter import ttk
 from src.gui import fonts
@@ -56,6 +57,10 @@ class SettingsDialog(tk.Toplevel):
         self._tab_safety = tk.Frame(self._nb, bg=BG)
         self._nb.add(self._tab_safety, text="  Safety  ")
         self._build_safety_tab(self._tab_safety)
+
+        self._tab_console = tk.Frame(self._nb, bg=BG)
+        self._nb.add(self._tab_console, text="  Console  ")
+        self._build_console_tab(self._tab_console)
 
         self._nb.select(0)
 
@@ -213,6 +218,58 @@ class SettingsDialog(tk.Toplevel):
         _app_settings.set("agent_default_shell_access", not current)
         _app_settings.save()
         self._refresh_shell_access_toggle()
+
+    # ─── Console Tab ─────────────────────────────────────────
+
+    def _build_console_tab(self, parent):
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(0, weight=0)
+        parent.rowconfigure(1, weight=1)
+
+        tk.Label(
+            parent, text="Console",
+            font=fonts.view_font_bold(11), fg=FG, bg=BG,
+        ).grid(row=0, column=0, sticky="w", padx=15, pady=(10, 5))
+
+        content = tk.Frame(parent, bg=BG_WIDGET)
+        content.grid(row=1, column=0, sticky="nsew", padx=15, pady=(0, 5))
+        content.columnconfigure(1, weight=1)
+
+        tk.Label(
+            content, text="  Markdown interpretation",
+            font=fonts.view_font(11), fg=FG, bg=BG_WIDGET,
+        ).grid(row=0, column=0, sticky="w", padx=15, pady=(12, 12))
+
+        self._md_var = tk.BooleanVar(
+            value=_app_settings.get("console_markdown", True))
+        self._md_toggle = tk.Label(
+            content, text="", bg=BG_WIDGET,
+            font=fonts.view_font_bold(11),
+            cursor="", padx=8, pady=4,
+        )
+        self._md_toggle.grid(row=0, column=1, sticky="e", padx=15, pady=(12, 12))
+        self._md_toggle.bind("<Button-1>", lambda e: self._toggle_markdown())
+        self._refresh_md_toggle()
+
+    def _refresh_md_toggle(self):
+        on = self._md_var.get()
+        self._md_toggle.config(
+            text="  ON  " if on else " OFF ",
+            fg="#00cc66" if on else "#888888",
+        )
+
+    def _toggle_markdown(self):
+        current = self._md_var.get()
+        self._md_var.set(not current)
+        _app_settings.set("console_markdown", not current)
+        _app_settings.save()
+        self._refresh_md_toggle()
+        console = getattr(getattr(self, "master", None), "console", None)
+        if console is not None:
+            try:
+                console.restore_segments(console.get_segments())
+            except Exception:
+                pass
 
     # ─── Models Tab ──────────────────────────────────────────
 
@@ -493,6 +550,30 @@ class SettingsDialog(tk.Toplevel):
         detect_btn.bind("<Enter>", lambda e: detect_btn.config(bg="#333333"))
         detect_btn.bind("<Leave>", lambda e: detect_btn.config(bg="#222222"))
 
+        def _ollama_context_length(base, model):
+            if not model or not base:
+                return None
+            if "11434" not in base and "ollama" not in base.lower():
+                return None
+            try:
+                import urllib.request
+                root = base.rstrip("/")
+                if root.endswith("/v1"):
+                    root = root[:-3].rstrip("/")
+                payload = json.dumps({"name": model}).encode("utf-8")
+                req = urllib.request.Request(
+                    root + "/api/show", data=payload,
+                    headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=8) as r:
+                    data = json.loads(r.read().decode("utf-8"))
+                info = data.get("model_info") or {}
+                for k, v in info.items():
+                    if isinstance(k, str) and k.lower().endswith("context_length") and isinstance(v, int) and v > 0:
+                        return v
+                return None
+            except Exception:
+                return None
+
         def _run_detect():
             url = url_var.get().strip()
             key = key_var.get().strip()
@@ -506,14 +587,17 @@ class SettingsDialog(tk.Toplevel):
                     client = OpenAI(base_url=url, api_key=key or "none")
                     api_models = client.models.list()
                     ids = [m.id for m in api_models.data]
-                    dialog.after(0, lambda: _on_detect(ids))
+                    ctx = _ollama_context_length(url, ids[0] if ids else None)
+                    dialog.after(0, lambda: _on_detect(ids, ctx))
                 except Exception as e:
                     dialog.after(0, lambda err=str(e): _on_error(err))
-            def _on_detect(ids):
+            def _on_detect(ids, ctx=None):
                 try:
                     model_combo['values'] = ids
                     if ids and model_var.get() not in ids:
                         model_var.set(ids[0])
+                    if ctx and not ctx_limit_var.get().strip():
+                        ctx_limit_var.set(str(ctx))
                     feedback.config(text=f"Found {len(ids)} model(s).", fg=SUCCESS)
                     detect_btn.config(text=" Detect ", fg=FG)
                 except tk.TclError:
@@ -537,6 +621,20 @@ class SettingsDialog(tk.Toplevel):
 
         detect_btn.bind("<Button-1>", lambda e: _run_detect())
 
+        row += 1
+
+        tk.Label(
+            dialog, text="Context limit (tokens):", font=fonts.view_font(11),
+            fg=FG_DIM, bg=BG,
+        ).grid(row=row, column=0, sticky="w", padx=15, pady=(5, 3))
+        ctx_limit_var = tk.StringVar()
+        tk.Entry(
+            dialog, textvariable=ctx_limit_var, bg=BG_WIDGET, fg=FG,
+            insertbackground=FG, font=fonts.view_font(11),
+            borderwidth=1, relief=tk.FLAT,
+            highlightthickness=1, highlightcolor="#333333",
+            highlightbackground="#333333",
+        ).grid(row=row, column=1, sticky="ew", padx=15, pady=(5, 3))
         row += 1
 
         feedback = tk.Label(
@@ -608,6 +706,7 @@ class SettingsDialog(tk.Toplevel):
                 url_var.set("")
                 key_var.set("")
                 model_var.set("")
+                ctx_limit_var.set("")
                 model_combo['values'] = []
                 return
             pid = pid_var.get().strip()
@@ -615,6 +714,8 @@ class SettingsDialog(tk.Toplevel):
             name_var.set(pid)
             url_var.set(p.get("base_url", ""))
             key_var.set(p.get("api_key", ""))
+            ctx = p.get("context_limit", "")
+            ctx_limit_var.set(str(ctx) if ctx else "")
             model_list = p.get("models", [])
             model_combo['values'] = model_list
             am = active_models.get(pid, "")
@@ -659,6 +760,14 @@ class SettingsDialog(tk.Toplevel):
                 "api_key": key_var.get().strip(),
                 "models": combo_models,
             }
+            ctx_raw = ctx_limit_var.get().strip()
+            if ctx_raw:
+                try:
+                    ctx_int = int(ctx_raw)
+                    if ctx_int > 0:
+                        providers[new_key]["context_limit"] = ctx_int
+                except ValueError:
+                    pass
             if selected:
                 active_models[new_key] = selected
                 self._config["active_models"] = active_models

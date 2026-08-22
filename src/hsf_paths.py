@@ -80,6 +80,9 @@ def cache_dir() -> Path:
     p.mkdir(parents=True, exist_ok=True)
     return p
 
+def models_catalog_file() -> Path:
+    return databases_dir() / "models_catalog.json"
+
 def settings_file() -> Path:
     p = _get_data_home() / "settings.json"
     return p

@@ -631,6 +631,12 @@ class App(tk.Tk):
         from .dialogs.settings import SettingsDialog
         _nav_set_settings(lambda: SettingsDialog(self))
 
+        try:
+            from src.llm import models_catalog
+            models_catalog.refresh_async()
+        except Exception:
+            pass
+
         self._register_views()
         self.visualizer.activate_view("tools")
         self._register_commands()
@@ -3815,12 +3821,12 @@ class App(tk.Tk):
         self._consultor_mode = True
         if not self._silent_mode_cycle:
             self.console.info(
-                "Consultor mode. Commands: exit, stop, reset, compact, menu."
+                "Consultor mode. Commands: exit, stop, reset, compact, clear, menu."
             )
         self.console.set_mode_handler(self._consultor_handler, "Consultor", "#e6b422",
             commands={"exit": "Quit HSF", "stop": "Interrupt execution",
                       "reset": "Clear conversation and cache", "compact": "Compact context",
-                      "menu": "Show help"})
+                      "clear": "Clear the console", "menu": "Show help"})
         self._update_mode_prompt()
 
     def _consultor_handler(self, text):
@@ -3835,6 +3841,7 @@ class App(tk.Tk):
                 "  stop    - Interrupt the current consultor execution\n"
                 "  reset   - Clear conversation history, clear cache, start fresh\n"
                 "  compact - Manually compact the conversation context\n"
+                "  clear   - Clear the console display\n"
                 "  menu    - Show this help\n\n"
                 "Press Tab with empty input to cycle modes."
             )
@@ -3843,6 +3850,9 @@ class App(tk.Tk):
             if self._agent_stop_event:
                 self._agent_stop_event.set()
             self.console.warning("Interrupting consultor execution...")
+            return
+        if text.lower() == "clear":
+            self.console._cmd_clear([])
             return
         if text.lower() == "reset":
             self._llm_messages = []
@@ -3880,8 +3890,9 @@ class App(tk.Tk):
         "claude-3-opus": 200000, "claude-3-sonnet": 200000,
         "claude-3-haiku": 200000, "claude-3.5-sonnet": 200000,
         "claude-3.5-haiku": 200000, "claude-3.7-sonnet": 200000,
-        "deepseek-chat": 200000, "deepseek-v3": 200000,
-        "deepseek-r1": 200000, "deepseek-v4": 200000,
+        "deepseek-chat": 1000000, "deepseek-v3": 200000,
+        "deepseek-r1": 200000, "deepseek-v4": 1000000,
+        "deepseek-v4-flash": 1000000, "deepseek-v4-pro": 1000000,
         "gemini-pro": 128000, "gemini-1.5-pro": 2097152,
         "gemini-1.5-flash": 1048576, "gemini-2.0-flash": 1048576,
         "llama3": 8192, "llama3.1": 128000, "llama3.2": 128000,
@@ -3891,24 +3902,37 @@ class App(tk.Tk):
     }
     _DEFAULT_CONTEXT_LIMIT = 128000
 
-    def _get_active_model_name(self):
+    def _get_active_model(self):
         try:
             from src.llm.config import load
             config = load()
-            pid = config.get("active_provider", "")
+            pid = config.get("active_provider", "") or ""
             am = config.get("active_models", {})
-            return am.get(pid) or (config.get("providers", {}).get(pid, {}).get("models", [None])[0])
+            providers = config.get("providers", {})
+            name = am.get(pid) or (providers.get(pid, {}).get("models", [None])[0])
+            override = providers.get(pid, {}).get("context_limit")
+            return pid, name, override
         except Exception:
-            return None
+            return "", None, None
 
     def _get_model_context_limit(self):
-        name = self._get_active_model_name()
-        if not name:
-            return self._DEFAULT_CONTEXT_LIMIT
-        name_lower = name.lower()
-        for key, limit in self._MODEL_CONTEXT_LIMITS.items():
-            if key in name_lower:
-                return limit
+        pid, name, override = self._get_active_model()
+        if isinstance(override, int) and override > 0:
+            return override
+        if name:
+            try:
+                from src.llm import models_catalog
+                limit = models_catalog.lookup_context_limit(name)
+                if limit:
+                    return limit
+            except Exception:
+                pass
+            name_lower = name.lower()
+            if name_lower in self._MODEL_CONTEXT_LIMITS:
+                return self._MODEL_CONTEXT_LIMITS[name_lower]
+            for key, limit in self._MODEL_CONTEXT_LIMITS.items():
+                if key in name_lower:
+                    return limit
         return self._DEFAULT_CONTEXT_LIMIT
 
     def _estimate_tokens(self, messages):
@@ -4106,12 +4130,12 @@ class App(tk.Tk):
         self._last_token_pct = None
         if not self._silent_mode_cycle:
             self.console.info(
-                "Agent mode. Commands: exit, stop, reset, compact, menu."
+                "Agent mode. Commands: exit, stop, reset, compact, clear, menu."
             )
         self.console.set_mode_handler(self._agent_handler, "Agent", "#5ba3ec",
             commands={"exit": "Quit HSF", "stop": "Interrupt execution",
                       "reset": "Clear conversation and cache", "compact": "Compact context",
-                      "menu": "Show help"})
+                      "clear": "Clear the console", "menu": "Show help"})
         self._update_mode_prompt()
 
     def _agent_handler(self, text):
@@ -4123,6 +4147,9 @@ class App(tk.Tk):
             if self._agent_stop_event:
                 self._agent_stop_event.set()
             self.console.warning("Interrupting agent execution...")
+            return
+        if text.lower() == "clear":
+            self.console._cmd_clear([])
             return
         if text.lower() == "reset":
             self._llm_messages = []
@@ -4142,6 +4169,7 @@ class App(tk.Tk):
                 "  stop    - Interrupt the current agent execution\n"
                 "  reset   - Clear conversation history, clear cache, start fresh\n"
                 "  compact - Manually compact the conversation context\n"
+                "  clear   - Clear the console display\n"
                 "  menu    - Show this help"
             )
             return
@@ -5060,10 +5088,12 @@ class App(tk.Tk):
 
     def _cmd_delete(self, args):
         if not args:
-            self.console.body("Usage: delete <dbs|credentials|evidences>")
+            self.console.body("Usage: delete <all|dbs|inventory|machine|domain|user|credential|password|hash|people|shell|evidence|poc|dictionary|rule|cache>")
             return
         sub = args[0].lower()
-        if sub == "dbs":
+        if sub == "all":
+            self._cmd_delete_all()
+        elif sub == "dbs":
             self._cmd_delete_dbs(args[1:])
         elif sub == "credential":
             self._cmd_delete_credential(args[1:])
@@ -5453,6 +5483,41 @@ class App(tk.Tk):
         stop_machines_autosave()
         start_machines_autosave(store)
         self.console.info("All data cleared (mDNS cache + machine list + database files)")
+
+    def _cmd_delete_all(self):
+        import shutil
+        from src.hsf_paths import evidence_dir, pocs_dir, cache_dir
+        from src.machines.people_db import delete_all as del_people
+        from src.shells import shell_db
+
+        store.clear()
+        store.save()
+        clear_mdns_cache()
+        machine_db.delete_all()
+        domain_db.delete_all()
+        from src.machines.credential_db import delete_all as del_creds
+        del_creds()
+        del_people()
+        wipe_mdns_cache()
+        stop_machines_autosave()
+        start_machines_autosave(store)
+
+        for s in list(shell_db.get_all()):
+            shell_db.close_session(s["id"])
+
+        base = str(evidence_dir())
+        if os.path.isdir(base):
+            shutil.rmtree(base)
+            os.makedirs(base, exist_ok=True)
+
+        for d in (str(pocs_dir()), str(cache_dir())):
+            if os.path.isdir(d):
+                for f in os.listdir(d):
+                    fp = os.path.join(d, f)
+                    if os.path.isfile(fp):
+                        os.remove(fp)
+
+        self.console.success("All data cleared (machines, domains, inventory, people, shells, evidence, POCs, cache). Dictionaries and rules preserved.")
 
     def _toggle_focus(self, event=None):
         focused = self.focus_get()
