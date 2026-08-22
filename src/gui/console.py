@@ -673,10 +673,9 @@ class Console(tk.Frame):
             self._autocomplete_listbox.selection_set(self._autocomplete_index)
             fs = self._font_size
             f = tkfont.Font(font=(fonts.family(), fs))
-            line_h = f.metrics("linespace")
-            h = len(self._autocomplete_matches) * line_h + 4 + len(self._autocomplete_matches)
             longest = max((len(it.strip()) for it in items), default=10)
             w = f.measure(" " * (longest + 3)) + 4
+            h = self._popup_height(self._autocomplete_listbox, len(items))
             con_top = self.winfo_rooty() - self.master.winfo_rooty()
             y = con_top - h
             self._autocomplete_popup.place_configure(x=0, y=y, width=w, height=h)
@@ -989,11 +988,14 @@ class Console(tk.Frame):
             self._close_autocomplete()
             return "break"
 
+    def _popup_height(self, lb, n):
+        lb.configure(height=max(1, n))
+        return lb.winfo_reqheight() + 2
+
     def _show_autocomplete(self, matches):
         self._close_autocomplete()
         fs = self._font_size
         f = tkfont.Font(font=(fonts.family(), fs))
-        line_h = f.metrics("linespace")
         longest = max((len(name) for name, _ in matches), default=10)
         frame = tk.Frame(self.master, bg="#111111", highlightbackground="#333333", highlightthickness=1)
 
@@ -1010,7 +1012,7 @@ class Console(tk.Frame):
         lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self._input_focus()))
 
         popup_w = f.measure(" " * (longest + 3)) + 4
-        h = len(matches) * line_h + 4 + len(matches)
+        h = self._popup_height(lb, len(matches))
         con_top = self.winfo_rooty() - self.master.winfo_rooty()
         y = con_top - h
 
@@ -1035,11 +1037,10 @@ class Console(tk.Frame):
             self._autocomplete_index = 0
             fs = self._font_size
             f = tkfont.Font(font=(fonts.family(), fs))
-            line_h = f.metrics("linespace")
             longest = max((len(name) for name, _ in matches), default=10)
             lb.configure(width=longest + 3)
             popup_w = f.measure(" " * (longest + 3)) + 4
-            h = len(matches) * line_h + 4 + len(matches)
+            h = self._popup_height(lb, len(matches))
             con_top = self.winfo_rooty() - self.master.winfo_rooty()
             y = con_top - h
             self._autocomplete_popup.place_configure(x=0, y=y, width=popup_w, height=h)
@@ -1239,9 +1240,7 @@ class Console(tk.Frame):
             return
         fs = self._font_size
         f = tkfont.Font(font=(fonts.family(), fs))
-        line_h = f.metrics("linespace")
         longest = max((len(s) for s in items), default=10)
-        h = len(items) * line_h + 4 + len(items)
         popup_w = f.measure(" " * (longest + 3)) + 4
 
         cmd_x = self._autocomplete_popup.winfo_x()
@@ -1260,6 +1259,7 @@ class Console(tk.Frame):
             lb.configure(width=longest + 3)
             self._arg_matches = items
             self._arg_index = 0
+            h = self._popup_height(lb, len(items))
             self._arg_popup.place_configure(
                 x=cmd_x + cmd_w, y=bottom - h, width=popup_w, height=h)
             self._arg_popup.lift()
@@ -1277,6 +1277,7 @@ class Console(tk.Frame):
             lb.bind("<ButtonRelease-1>", lambda e: self._on_arg_click())
             lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self._input_focus()))
 
+            h = self._popup_height(lb, len(items))
             frame.place(x=cmd_x + cmd_w, y=bottom - h, width=popup_w, height=h)
             frame.lift()
 
@@ -1308,9 +1309,7 @@ class Console(tk.Frame):
 
         fs = self._font_size
         f = tkfont.Font(font=(fonts.family(), fs))
-        line_h = f.metrics("linespace")
         longest = max((len(s) for s in displays), default=10)
-        h = len(displays) * line_h + 4 + len(displays)
         popup_w = f.measure(" " * (longest + 3)) + 4
 
         arg1_x = self._arg_popup.winfo_x()
@@ -1329,6 +1328,7 @@ class Console(tk.Frame):
             lb.configure(width=longest + 3)
             self._arg2_matches = normalized
             self._arg2_index = 0
+            h = self._popup_height(lb, len(displays))
             self._arg2_popup.place_configure(
                 x=arg1_x + arg1_w, y=bottom - h, width=popup_w, height=h)
             self._arg2_popup.lift()
@@ -1346,6 +1346,7 @@ class Console(tk.Frame):
             lb.bind("<ButtonRelease-1>", lambda e: self._on_arg2_click())
             lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self._input_focus()))
 
+            h = self._popup_height(lb, len(displays))
             frame.place(x=arg1_x + arg1_w, y=bottom - h, width=popup_w, height=h)
             frame.lift()
 
@@ -1390,9 +1391,7 @@ class Console(tk.Frame):
 
         fs = self._font_size
         f = tkfont.Font(font=(fonts.family(), fs))
-        line_h = f.metrics("linespace")
         longest = max((len(s) for s in displays), default=10)
-        h = len(displays) * line_h + 4 + len(displays)
         popup_w = f.measure(" " * (longest + 3)) + 4
 
         arg2_x = self._arg2_popup.winfo_x()
@@ -1411,6 +1410,7 @@ class Console(tk.Frame):
             lb.configure(width=longest + 3)
             self._arg3_matches = normalized
             self._arg3_index = 0
+            h = self._popup_height(lb, len(displays))
             self._arg3_popup.place_configure(
                 x=arg2_x + arg2_w, y=bottom - h, width=popup_w, height=h)
             self._arg3_popup.lift()
@@ -1428,6 +1428,7 @@ class Console(tk.Frame):
             lb.bind("<ButtonRelease-1>", lambda e: self._on_arg3_click())
             lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self._input_focus()))
 
+            h = self._popup_height(lb, len(displays))
             frame.place(x=arg2_x + arg2_w, y=bottom - h, width=popup_w, height=h)
             frame.lift()
 
@@ -1473,9 +1474,7 @@ class Console(tk.Frame):
 
         fs = self._font_size
         f = tkfont.Font(font=(fonts.family(), fs))
-        line_h = f.metrics("linespace")
         longest = max((len(s) for s in displays), default=10)
-        h = len(displays) * line_h + 4 + len(displays)
         popup_w = f.measure(" " * (longest + 3)) + 4
 
         arg3_x = self._arg3_popup.winfo_x()
@@ -1494,6 +1493,7 @@ class Console(tk.Frame):
             lb.configure(width=longest + 3)
             self._arg4_matches = normalized
             self._arg4_index = 0
+            h = self._popup_height(lb, len(displays))
             self._arg4_popup.place_configure(
                 x=arg3_x + arg3_w, y=bottom - h, width=popup_w, height=h)
             self._arg4_popup.lift()
@@ -1511,6 +1511,7 @@ class Console(tk.Frame):
             lb.bind("<ButtonRelease-1>", lambda e: self._on_arg4_click())
             lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self._input_focus()))
 
+            h = self._popup_height(lb, len(displays))
             frame.place(x=arg3_x + arg3_w, y=bottom - h, width=popup_w, height=h)
             frame.lift()
 
@@ -1556,9 +1557,7 @@ class Console(tk.Frame):
         displays = [d for d, _ in normalized]
         fs = self._font_size
         f = tkfont.Font(font=(fonts.family(), fs))
-        line_h = f.metrics("linespace")
         longest = max((len(s) for s in displays), default=10)
-        h = len(displays) * line_h + 4 + len(displays)
         popup_w = f.measure(" " * (longest + 3)) + 4
 
         arg4_x = self._arg4_popup.winfo_x()
@@ -1577,6 +1576,7 @@ class Console(tk.Frame):
             lb.configure(width=longest + 3)
             self._arg5_matches = normalized
             self._arg5_index = 0
+            h = self._popup_height(lb, len(displays))
             self._arg5_popup.place_configure(
                 x=arg4_x + arg4_w, y=bottom - h, width=popup_w, height=h)
             self._arg5_popup.lift()
@@ -1593,6 +1593,7 @@ class Console(tk.Frame):
             lb.activate(0)
             lb.bind("<ButtonRelease-1>", lambda e: self._on_arg5_click())
             lb.bind("<Escape>", lambda e: (self._close_autocomplete(), self._input_focus()))
+            h = self._popup_height(lb, len(displays))
             frame.place(x=arg4_x + arg4_w, y=bottom - h, width=popup_w, height=h)
             frame.lift()
             self._arg5_popup = frame
