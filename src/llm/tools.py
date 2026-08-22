@@ -917,6 +917,46 @@ TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "report_write",
+            "description": (
+                "Create or overwrite a markdown report file in the reports/ directory. "
+                "Use only when the user requests a report."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "The filename (e.g. 'recon_report.md'). Must end with .md"},
+                    "content": {"type": "string", "description": "The full markdown content to write to the report."},
+                },
+                "required": ["filename", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "report_read",
+            "description": (
+                "Read a markdown report from the reports/ directory. Supports offset/limit "
+                "pagination or regex search with context lines (like read_cache)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": {"type": "string", "description": "The filename to read (e.g. 'recon_report.md')"},
+                    "offset": {"type": "integer", "description": "Line number to start reading from (1-indexed, default 1)"},
+                    "limit": {"type": "integer", "description": "Maximum number of lines to read (default 150)"},
+                    "regex": {"type": "string", "description": "Optional regex to search for; returns matching lines with context."},
+                    "context_before": {"type": "integer", "description": "Lines before each regex match (default 2)"},
+                    "context_after": {"type": "integer", "description": "Lines after each regex match (default 10)"},
+                },
+                "required": ["filename"],
+            },
+        },
+    },
 ]
 
 _HANDLERS = {}
@@ -925,7 +965,7 @@ CONSULTOR_TOOLS = frozenset({
     "check_status", "check_machine", "check_domain", "check_inventory",
     "check_hash", "check_shells", "check_evidences", "check_fuzz_results",
     "webfetch", "websearch", "list_repo",
-    "read_cache", "list_files", "poc_read",
+    "read_cache", "list_files", "poc_read", "report_read",
     "nslookup", "list_interfaces", "ping",
     "dicma_generate_users", "dicma_find_related",
     "dicma_generate_passwords", "dicma_generate_rules",
@@ -1262,7 +1302,7 @@ def _check_inventory(args, ctx=None):
     import os
     from src.machines.credential_db import load_users, load_passwords, load_hashes, load_credentials, load_tickets
     from src.machines.people_db import load_people
-    from src.hsf_paths import lst_dir, rules_dir, pocs_dir
+    from src.hsf_paths import lst_dir, rules_dir, pocs_dir, reports_dir
 
     lines = ["Current HSF inventory:"]
 
@@ -1385,6 +1425,18 @@ def _check_inventory(args, ctx=None):
             if len(poc_files) > 30:
                 lines.append(f"  ... and {len(poc_files) - 30} more")
 
+    reports_d = str(reports_dir())
+    if os.path.isdir(reports_d):
+        report_files = sorted(
+            f for f in os.listdir(reports_d) if os.path.isfile(os.path.join(reports_d, f))
+        )
+        if report_files:
+            lines.append(f"\nReports ({len(report_files)}):")
+            for f in report_files[:30]:
+                lines.append(f"  {f}")
+            if len(report_files) > 30:
+                lines.append(f"  ... and {len(report_files) - 30} more")
+
     return "\n".join(lines)
 
 
@@ -1395,7 +1447,7 @@ def _check_status(args, ctx=None):
         load_users, load_passwords, load_credentials, load_hashes)
     from src.shells import shell_db
     import os
-    from src.hsf_paths import evidence_dir, lst_dir, rules_dir, pocs_dir
+    from src.hsf_paths import evidence_dir, lst_dir, rules_dir, pocs_dir, reports_dir
 
     lines = ["Current HSF state:"]
 
@@ -1464,7 +1516,8 @@ def _check_status(args, ctx=None):
 
     for label, path in [("Dictionaries", lst_dir()),
                          ("Hashcat rules", rules_dir()),
-                         ("POCs", pocs_dir())]:
+                         ("POCs", pocs_dir()),
+                         ("Reports", reports_dir())]:
         p = str(path)
         if os.path.isdir(p):
             files = [f for f in os.listdir(p)
@@ -2498,6 +2551,15 @@ def _resolve_poc_path(filename):
     return resolved
 
 
+def _resolve_report_path(filename):
+    from src.hsf_paths import reports_dir
+    base = str(reports_dir())
+    resolved = os.path.normpath(os.path.join(base, filename))
+    if not resolved.startswith(os.path.normpath(base) + os.sep) and resolved != os.path.normpath(base):
+        return None
+    return resolved
+
+
 @register("read_cache")
 def _read_cache(args, ctx=None):
     filename = args.get("filename", "").strip()
@@ -2926,6 +2988,98 @@ def _poc_exec(args, ctx=None):
         return (f"POC '{filename}' (exit {proc.returncode})"
                 f"[{len(lines)} lines total, last 10]:\n{output}")
     return f"POC '{filename}' (exit {proc.returncode}):\n{output.strip()}"
+
+
+@register("report_write")
+def _report_write(args, ctx=None):
+    filename = args.get("filename", "").strip()
+    content = args.get("content", "")
+    if not filename:
+        return "Missing filename."
+    if not content:
+        return "Missing content."
+    if not filename.endswith(".md"):
+        return "Filename must end with .md"
+    path = _resolve_report_path(filename)
+    if not path:
+        return f"Invalid filename: {filename}"
+    try:
+        with open(path, "w") as f:
+            f.write(content)
+    except (PermissionError, OSError) as e:
+        return f"Error writing {filename}: {e}"
+    return f"Report '{filename}' written ({len(content)} chars)."
+
+
+@register("report_read")
+def _report_read(args, ctx=None):
+    filename = args.get("filename", "").strip()
+    if not filename:
+        return "Missing filename."
+    path = _resolve_report_path(filename)
+    if not path:
+        return f"Invalid filename: {filename}"
+    if not os.path.isfile(path):
+        return f"Report '{filename}' not found."
+    try:
+        with open(path, "r") as f:
+            content = f.read()
+    except (PermissionError, OSError) as e:
+        return f"Error reading {filename}: {e}"
+
+    lines = content.splitlines(keepends=True)
+    total_lines = len(lines)
+    regex = args.get("regex", "").strip()
+
+    if regex:
+        import re
+        try:
+            pattern = re.compile(regex, re.IGNORECASE)
+        except re.error as e:
+            return f"Invalid regex: {e}"
+        ctx_before = max(0, int(args.get("context_before", 2)))
+        ctx_after = max(0, int(args.get("context_after", 10)))
+        matches = [i for i, line in enumerate(lines) if pattern.search(line)]
+        if not matches:
+            return f"reports/{filename} ({total_lines} lines, 0 matches for '{regex}')"
+        result = [f"reports/{filename} ({total_lines} lines, {len(matches)} matches for '{regex}'):"]
+        shown_until = -1
+        shown_count = 0
+        for m in matches:
+            start = max(0, m - ctx_before)
+            end = min(total_lines, m + ctx_after + 1)
+            if start <= shown_until:
+                start = shown_until + 1
+            if start >= end:
+                continue
+            shown_count += 1
+            result.append("---")
+            for j in range(start, end):
+                marker = ">" if j == m else " "
+                result.append(f"{marker} Line {j+1}: {lines[j].rstrip()}")
+            shown_until = end - 1
+        result.append(f"---\n({shown_count} match groups, {len(matches)} total matches)")
+        result = "\n".join(result)
+    else:
+        offset = int(args.get("offset", 1))
+        limit = int(args.get("limit", 150))
+        if offset < 1:
+            offset = 1
+        if offset > total_lines:
+            offset = total_lines
+        start = offset - 1
+        end = start + limit
+        sliced = lines[start:end]
+        result = "".join(sliced)
+        header = f"reports/{filename} ({total_lines} lines"
+        if len(sliced) < total_lines:
+            header += f", showing lines {offset}-{min(end, total_lines)}"
+        header += "):\n"
+        result = header + result
+
+    if len(result) > 5000:
+        result = result[:5000] + "\n... (truncated at 5000 chars)"
+    return result
 
 
 def _resolve_target(ctx, target):

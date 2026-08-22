@@ -221,7 +221,7 @@ This pattern is already used in `HashcatDialog`, `InitDialog`, `_CredentialGener
 All filesystem paths are defined in a single module. Never use `os.path.dirname(__file__)` to locate resources.
 
 * **Package data** (bundled with pipx): `fonts_dir()`, `icons_dir()`, `hashcat_db()`, `logs_dir()`
-* **Runtime data** (user's home): `databases_dir()`, `credentials_dir()`, `evidence_dir()`, `chrome_profile_dir()`, `antibot_profile_dir()`, `lst_dir()`, `rules_dir()`, `pocs_dir()`, `cache_dir()`, `settings_file()`, `session_file()`, `runtime_logs_dir()`
+* **Runtime data** (user's home): `databases_dir()`, `credentials_dir()`, `evidence_dir()`, `chrome_profile_dir()`, `antibot_profile_dir()`, `lst_dir()`, `rules_dir()`, `pocs_dir()`, `reports_dir()`, `cache_dir()`, `settings_file()`, `session_file()`, `runtime_logs_dir()`
 * Runtime directories are created lazily with `os.makedirs(exist_ok=True)`.
 * Override runtime root via `HSF_HOME` environment variable.
 
@@ -427,7 +427,7 @@ HSF integrates with LLMs via an extensible provider system supporting any OpenAI
 
 Both modes display the model output in white, marked with a colored `▣` (blue for agent, orange for consultor); the echoed prompt is `User prompt > ` colored by mode.
 
-**Markdown rendering:** the agent/consultor output is rendered as markdown (`Console._insert_markdown` in `src/gui/console.py`), following opencode's dark-theme colors: headers (`#`–`######`) and `**bold**` in bold white; `*italic*`/`_italic_` in yellow; inline `` `code` `` in green; blockquotes (`>`) in yellow; links `[text](url)` show the text in cyan; list markers `-`/`*`/`+` in blue and `1.` in cyan; horizontal rules (`---`) in grey; fenced code blocks (```) with a dark background; tables are aligned with `│`/`─` box-drawing. Only agent/consultor output is rendered; all other console messages (info, warnings, `[tool]`, `User prompt >`) stay plain. Markdown state (`_in_code_block`, `_table_buffer`) is tracked per line and reset at the start of each exchange (`reset_markdown_state()`), flushed at the end (`flush_markdown()`), and preserved across restarts by re-rendering `"__md__"` segments in `restore_segments()`.
+**Markdown rendering:** the agent/consultor output is rendered as markdown, following opencode's dark-theme colors: headers (`#`–`######`) and `**bold**` in bold white; `*italic*`/`_italic_` in yellow; inline `` `code` `` in green; blockquotes (`>`) in yellow; links `[text](url)` show the text in cyan; list markers `-`/`*`/`+` in blue and `1.` in cyan; horizontal rules (`---`) in grey; fenced code blocks (```) with a dark background; tables are aligned with `│`/`─` box-drawing. Only agent/consultor output is rendered; all other console messages (info, warnings, `[tool]`, `User prompt >`) stay plain. The markdown logic lives in `MarkdownRenderer` (`src/gui/markdown.py`), a standalone class that renders into any `tk.Text` widget — the console delegates to it (`Console._insert_markdown` → `MarkdownRenderer.insert_line`), and the report detail view uses it directly (`render()`). State (`_in_code_block`, `_table_buffer`) is tracked per line and reset at the start of each exchange (`reset_markdown_state()`), flushed at the end (`flush_markdown()`), and preserved across restarts by re-rendering `"__md__"` segments in `restore_segments()`.
 
 **Markdown toggle:** the setting `console_markdown` (default `true`, persisted in `settings.json`) controls whether `"__md__"` segments render as markdown or plain white text. It is toggled from **Settings → Console → Markdown interpretation** (ON green / OFF grey, same Label-switch pattern as the Safety tab). The console checks the setting on every write (`Console._markdown_enabled()`), so new output switches instantly without restart; toggling also re-renders existing history via `restore_segments(get_segments())`. Segments are always stored as `"__md__"` regardless of the toggle, so sessions remain re-renderable when the setting changes.
 
@@ -451,7 +451,7 @@ The provider editor (`_open_provider_dialog` in `src/gui/dialogs/settings.py`) u
 
 ### Agent Tool-Calling (`src/llm/client.py` → `chat_with_tools()`)
 
-The agent mode gives the LLM the ability to call **57 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
+The agent mode gives the LLM the ability to call **59 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
 
 **Tool-calling loop** (fully streaming):
 
@@ -481,7 +481,7 @@ def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None,
 
 Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` variable. Each entry follows the `{"type": "function", "function": {...}}` format with `name`, `description`, and `parameters` (JSON Schema).
 
-**57 tools** in seven categories:
+**59 tools** in eight categories:
 
 **Data tools** (23) — query and manipulate inventory, no `tool_context` needed:
 
@@ -582,6 +582,13 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 | `poc_edit` | Edit a POC file by exact string replacement (`filename`, `old_string`, `new_string`, optional `replace_all`, optional `new_filename` to rename the file). If `old_string` is not found, returns an error with instructions. If multiple matches found without `replace_all=true`, returns the count and asks for more context. Path-traversal protected. |
 | `poc_exec` | Execute a POC Python script (`filename`) and return its output. Output truncated to last 5000 chars if too large. Respects the "Agent can execute POCs" safety setting. |
 
+**Report tools** (2) — create and read markdown reports in the `reports/` directory, no `tool_context` needed:
+
+| Tool | Description |
+|---|---|
+| `report_write` | Create or overwrite a `.md` report in the `reports/` directory (`filename`, `content`). Rejects filenames without `.md` extension. Path-traversal protected via `_resolve_report_path()`. Rules in the system prompt: only generate a report when requested by the user; markdown usage recommended. |
+| `report_read` | Read a report with `offset`/`limit` (default 150 lines) or `regex` search (`context_before`/`context_after`, same semantics as `read_cache`). Output capped at 5,000 chars. Read-only, so included in `CONSULTOR_TOOLS`. |
+
 **POC system overview:**
 
 POCs (Proof of Concept) are Python scripts generated by the LLM agent to demonstrate security vulnerabilities or exploit techniques. They are stored in the `pocs/` directory under `~/.local/share/hsf/pocs/`.
@@ -621,6 +628,32 @@ POCs (Proof of Concept) are Python scripts generated by the LLM agent to demonst
 
 **Path traversal protection:**
 - `_resolve_poc_path(filename)` in `tools.py` validates that the resolved path is within the `pocs/` directory, rejecting `../` attacks.
+
+### Reports System
+
+Reports are markdown documents (`.md`) that record findings. They are stored in the `reports/` directory under `~/.local/share/hsf/reports/` (created lazily, no package seeding). They can be created/edited manually through the GUI, or generated by the agent via the `report_write`/`report_read` tools.
+
+**Directory and path resolution:**
+- `src/hsf_paths.py` — `reports_dir()` returns `Path` to `~/.local/share/hsf/reports/`, created lazily.
+
+**GUI integration:**
+- `ReportsView` (`src/gui/views/reports.py`) — lists report files with icon (`report.png`), size, and delete button (same poll-based pattern as `PocsView`). Has a **Back** button (→ `inventory`) and a **New** button that opens `ReportDialog` to create a report manually.
+- `ReportView` (`src/gui/views/report_detail.py`) — read-only detail view that renders the report's markdown via `MarkdownRenderer` (`src/gui/markdown.py`). Has **Edit** (opens `ReportDialog` in edit mode) and **Back** (→ `reports`) buttons. Re-reads and re-renders the file on `on_activate()`.
+- `ReportDialog` (`src/gui/views/report_dialog.py`) — modal dialog (`tk.Toplevel`) with a filename entry (`.md` suffix forced) and a markdown `Text` editor. Handles both "new" (empty) and "edit" (preloaded) modes. Follows the `wait_visibility()` before `grab_set()` pattern.
+
+**Inventory integration:**
+- Added as a category in `InventoryView` (`src/gui/views/inventory.py`): `{"name": "Reports", "action": "reports", "icon": "report.png", "enabled": True}`.
+
+**Console commands:**
+- `view report` — shows the `ReportsView` listing
+- `view report <filename>` — opens the report in `ReportView`
+- `delete report <filename|all>` — deletes report files
+- `delete all` also wipes the `reports/` directory (reports are operational data, not bundled assets).
+
+**Agent tools:**
+- `report_write` — create/overwrite a `.md` report in `reports/` (`filename`, `content`). Path-traversal protected via `_resolve_report_path()`. Rules in the system prompt: only generate a report when requested by the user; markdown usage recommended.
+- `report_read` — read a report with `offset`/`limit` (default 150 lines) or `regex` search (`context_before`/`context_after`, same semantics as `read_cache`). Output capped at 5,000 chars. It is read-only, so it is included in `CONSULTOR_TOOLS` (like `poc_read`).
+- Reports are listed in `check_inventory` and `check_status` alongside POCs.
 
 **Implementation details for POC tools** (`src/llm/tools.py`):
 
@@ -892,7 +925,7 @@ This mechanism is **shared** between agent and consultor modes via the shared `s
 | Command | `agent` | `consultor` |
 | Purpose | `"agent"` | `"consultor"` |
 | System prompt | Shared `system` prompt + `[MODE: AGENT]` message | Shared `system` prompt + `[MODE: CONSULTOR]` message (lists read-only tools) |
-| Tool calling | **Yes** — `chat_with_tools()` (all 57 tools) | **Yes** — `chat_with_tools(allowed_tools=CONSULTOR_TOOLS)` (21 read-only tools; the rest are sent but denied) |
+| Tool calling | **Yes** — `chat_with_tools()` (all 59 tools) | **Yes** — `chat_with_tools(allowed_tools=CONSULTOR_TOOLS)` (22 read-only tools; the rest are sent but denied) |
 | Prompt color | Blue (`#5ba3ec`) | Yellow (`#e6b422`) |
 | Context injection | Yes | Yes |
 | Shared history | Yes (`self._llm_messages`) | Yes (`self._llm_messages`) |

@@ -37,7 +37,7 @@ _DEFAULTS = {
             "- AGENT mode: you may call tools freely when they would help.\n"
             "- CONSULTOR mode: you may only call read-only tools (websearch, webfetch, "
             "list_repo, check_* inventory queries, read_cache, list_files, poc_read, "
-            "nslookup, list_interfaces, ping, dicma_* wordlist generation). Mutation, "
+            "report_read, nslookup, list_interfaces, ping, dicma_* wordlist generation). Mutation, "
             "scanning, and attack tools are disabled in consultor mode.\n\n"
             "When in AGENT mode, available tool categories:\n"
             "- Data: check_status (see all machines, domains, and counts), check_machine, "
@@ -113,7 +113,10 @@ _DEFAULTS = {
             "- Any RCE or reverse shell will not have a dedicated listener. "
             "HSF already has a reverse shell listener at ports 8443 (no root) "
             "or 443 (root).\n"
-            "- After write or edit every POC stop, and ask user what to do."
+            "- After write or edit every POC stop, and ask user what to do.\n\n"
+            "Rules for report generation or edition:\n"
+            "- Report must only be generated when requested by user.\n"
+            "- Report markdown usage recommended."
         ),
         "evidence_analysis": (
             "This evidence is part of a web browsing session. "

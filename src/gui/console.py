@@ -1,5 +1,5 @@
 from src.gui import fonts
-import re
+from src.gui.markdown import MarkdownRenderer
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import scrolledtext
@@ -17,27 +17,6 @@ INFO_COLOR = "#888888"
 WARN_COLOR = "#ce9178"
 ERR_COLOR = "#f44747"
 AGENT_COLOR = "#5ba3ec"
-
-# Markdown colors (opencode dark theme)
-MD_CODE = "#7fd88f"
-MD_EMPH = "#e5c07b"
-MD_BLOCKQUOTE = "#e5c07b"
-MD_LINK = "#56b6c2"
-MD_LIST = "#5c9cf5"
-MD_ENUM = "#56b6c2"
-MD_HR = "#808080"
-MD_FENCE = "#888888"
-MD_CODEBLOCK_BG = "#1e1e1e"
-MD_TABLE = "#888888"
-
-_HEADER_RE = re.compile(r'^(#{1,6})\s+(.*)$')
-_FENCE_RE = re.compile(r'^(\s*)```')
-_HR_RE = re.compile(r'^(\s*)(-{3,}|\*{3,}|_{3,})\s*$')
-_BLOCKQUOTE_RE = re.compile(r'^(\s*>\s?)(.*)$')
-_BULLET_RE = re.compile(r'^(\s*)([-*+])\s+(.*)$')
-_ENUM_RE = re.compile(r'^(\s*)(\d+[.)])\s+(.*)$')
-_TABLE_ROW_RE = re.compile(r'^\s*\|')
-_MD_TOKEN_RE = re.compile(r'(`[^`]+`|\*\*[^*]+\*\*|(?<!\w)__[^_]+__(?!\w)|\*[^*\s][^*]*\*|(?<!\w)_[^_\s][^_]*_(?!\w)|\[[^\]]+\]\([^)]+\))')
 
 
 class Console(tk.Frame):
@@ -129,8 +108,6 @@ class Console(tk.Frame):
         self._arg5_contains = set()
 
         self._segments = []
-        self._in_code_block = False
-        self._table_buffer = []
 
         self.grid_propagate(False)
         self.config(bg=BG)
@@ -152,7 +129,7 @@ class Console(tk.Frame):
         self.output_area.grid(row=0, column=0, sticky="nsew")
         self.output_area.vbar.configure(bg="#333333", troughcolor="#1a1a1a", activebackground="#555555",
                                          width=10, borderwidth=0, highlightthickness=0, elementborderwidth=0)
-        self._configure_md_tags()
+        self._md_renderer = MarkdownRenderer(self.output_area, self._font_size)
 
         input_frame = tk.Frame(self, bg=BG_INPUT)
         input_frame.columnconfigure(0, weight=0)
@@ -375,155 +352,20 @@ class Console(tk.Frame):
         self._write_segments([(text, "__md__")])
 
     def _insert_markdown(self, text):
-        stripped = text.rstrip()
-
-        # Fenced code block
-        if self._in_code_block:
-            m = _FENCE_RE.match(stripped)
-            if m:
-                self._in_code_block = False
-                self.output_area.insert(tk.END, m.group(1) + "```", "md_fence")
-            else:
-                self.output_area.insert(tk.END, text, "md_codeblock")
-            return
-
-        m = _FENCE_RE.match(stripped)
-        if m:
-            self._in_code_block = True
-            self.output_area.insert(tk.END, m.group(1) + "```", "md_fence")
-            return
-
-        # Table row (buffer until the table ends)
-        if _TABLE_ROW_RE.match(stripped):
-            self._table_buffer.append(stripped)
-            return
-
-        if self._table_buffer:
-            self._flush_table()
-
-        # Horizontal rule
-        m = _HR_RE.match(stripped)
-        if m:
-            self.output_area.insert(tk.END, stripped, "md_hr")
-            return
-
-        # Blockquote
-        m = _BLOCKQUOTE_RE.match(stripped)
-        if m:
-            self.output_area.insert(tk.END, m.group(1), "md_blockquote")
-            self._insert_inline(m.group(2))
-            return
-
-        # Header
-        m = _HEADER_RE.match(stripped)
-        if m and m.group(2).strip():
-            self._insert_inline(m.group(2), base_tag="md_bold")
-            return
-
-        # Bullet list
-        m = _BULLET_RE.match(stripped)
-        if m:
-            self.output_area.insert(tk.END, m.group(1), None)
-            self.output_area.insert(tk.END, m.group(2), "md_list")
-            self.output_area.insert(tk.END, " ", None)
-            self._insert_inline(m.group(3))
-            return
-
-        # Numbered list
-        m = _ENUM_RE.match(stripped)
-        if m:
-            self.output_area.insert(tk.END, m.group(1), None)
-            self.output_area.insert(tk.END, m.group(2), "md_enum")
-            self.output_area.insert(tk.END, " ", None)
-            self._insert_inline(m.group(3))
-            return
-
-        # Inline markdown (bold / italic / code / links)
-        self._insert_inline(text)
-
-    def _insert_inline(self, text, base_tag=None):
-        if base_tag is None:
-            base_tag = f"color_{id(FG)}"
-            self.output_area.tag_configure(base_tag, foreground=FG)
-        for part in _MD_TOKEN_RE.split(text):
-            if not part:
-                continue
-            if part.startswith('`') and part.endswith('`') and len(part) >= 2:
-                self.output_area.insert(tk.END, part[1:-1], "md_code")
-            elif part.startswith('**') and part.endswith('**') and len(part) >= 4:
-                self.output_area.insert(tk.END, part[2:-2], "md_bold")
-            elif part.startswith('__') and part.endswith('__') and len(part) >= 4:
-                self.output_area.insert(tk.END, part[2:-2], "md_bold")
-            elif part.startswith('*') and part.endswith('*') and len(part) >= 2:
-                self.output_area.insert(tk.END, part[1:-1], "md_emph")
-            elif part.startswith('_') and part.endswith('_') and len(part) >= 2:
-                self.output_area.insert(tk.END, part[1:-1], "md_emph")
-            elif part.startswith('[') and part.endswith(')') and '](' in part:
-                self.output_area.insert(tk.END, part[1:part.index('](')], "md_link")
-            else:
-                self.output_area.insert(tk.END, part, base_tag)
-
-    def _flush_table(self):
-        rows = self._table_buffer
-        self._table_buffer = []
-        if not rows:
-            return
-        parsed = []
-        for row in rows:
-            inner = row.strip().strip('|')
-            parsed.append([c.strip() for c in inner.split('|')])
-        ncols = max(len(c) for c in parsed) if parsed else 0
-        if ncols == 0:
-            return
-        sep_idx = None
-        for i, cells in enumerate(parsed):
-            if cells and all(re.fullmatch(r':?-{1,}:?', c) for c in cells):
-                sep_idx = i
-                break
-        widths = [3] * ncols
-        for i, cells in enumerate(parsed):
-            if i == sep_idx:
-                continue
-            for j, c in enumerate(cells):
-                if j < ncols:
-                    widths[j] = max(widths[j], len(c))
-        for i, cells in enumerate(parsed):
-            if i == sep_idx:
-                line = "\u251c" + "\u253c".join("\u2500" * w for w in widths) + "\u2524"
-                self.output_area.insert(tk.END, line, "md_table")
-                continue
-            padded = []
-            for j in range(ncols):
-                c = cells[j] if j < len(cells) else ""
-                padded.append(" " + c.ljust(widths[j]) + " ")
-            line = "\u2502" + "\u2502".join(padded) + "\u2502"
-            self.output_area.insert(tk.END, line, "md_table")
+        self._md_renderer.insert_line(text)
 
     def reset_markdown_state(self):
-        self._in_code_block = False
-        self._table_buffer = []
+        self._md_renderer.reset()
 
     def flush_markdown(self):
-        if self._table_buffer:
-            self._flush_table()
+        self._md_renderer.flush()
 
     def _markdown_enabled(self):
         from src import settings as _app_settings
         return bool(_app_settings.get("console_markdown", True))
 
     def _configure_md_tags(self):
-        self.output_area.tag_configure("md_bold", font=(fonts.family_bold(), self._font_size), foreground=FG)
-        self.output_area.tag_configure("md_code", foreground=MD_CODE)
-        self.output_area.tag_configure("md_emph", foreground=MD_EMPH)
-        self.output_area.tag_configure("md_blockquote", foreground=MD_BLOCKQUOTE)
-        self.output_area.tag_configure("md_link", foreground=MD_LINK)
-        self.output_area.tag_configure("md_list", foreground=MD_LIST)
-        self.output_area.tag_configure("md_enum", foreground=MD_ENUM)
-        self.output_area.tag_configure("md_hr", foreground=MD_HR)
-        self.output_area.tag_configure("md_fence", foreground=MD_FENCE)
-        self.output_area.tag_configure("md_codeblock", background=MD_CODEBLOCK_BG, foreground=FG)
-        self.output_area.tag_configure("md_table", foreground=MD_TABLE)
-        self.output_area.tag_configure("md_plain", foreground=FG)
+        self._md_renderer.configure_tags(self._font_size)
 
     def _write_segments(self, segments):
         if not self.winfo_exists():

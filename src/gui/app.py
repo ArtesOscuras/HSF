@@ -12,7 +12,7 @@ from src.network_iface import interfaces, ifaddresses, AF_INET
 from . import fonts
 from .console import Console
 from .visualizer import Visualizer
-from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UsersView, PasswordsView, HashListView, ShellListView, ToolsView, InventoryView, PeopleView, ServicesView, DictionarysView, RulesView, PocsView
+from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UsersView, PasswordsView, HashListView, ShellListView, ToolsView, InventoryView, PeopleView, ServicesView, DictionarysView, RulesView, PocsView, ReportsView, ReportView
 from .dialogs import ScanDialog
 from src import settings as hsf_settings
 from src.machines import store, start_autosave as start_machines_autosave, stop_autosave as stop_machines_autosave
@@ -793,10 +793,15 @@ class App(tk.Tk):
         pocs_view._on_item_click = self._open_poc_view
         self.visualizer.register_view("pocs", pocs_view)
 
+        reports_view = ReportsView(self.visualizer)
+        reports_view._on_item_click = self._open_report_view
+        reports_view._on_new_click = self._new_report
+        self.visualizer.register_view("reports", reports_view)
+
     def _register_commands(self):
         self.console.set_mode_cycle_callback(self._cycle_mode)
         self.console.register_command("view", self._cmd_view, "Switch or list views")
-        self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "people", "evidence", "services", "dictionary", "rule", "poc"])
+        self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "people", "evidence", "services", "dictionary", "rule", "poc", "report"])
         self.console.register_command("use", self._cmd_use, "Use a tool")
         self.console.set_subcommands("use", ["scanner", "port-inspector", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "bannergrab", "whatweb", "bruteforce", "hashcat", "dicma"])
         self.console.register_command("connect", self._cmd_connect, "Connect via FTP/SFTP/SSH/WinRM")
@@ -1535,6 +1540,11 @@ class App(tk.Tk):
                 self._cmd_view_file(rest, "poc")
             else:
                 self.visualizer.activate_view("pocs")
+        elif sub == "report":
+            if rest:
+                self._open_report_view(rest[0])
+            else:
+                self.visualizer.activate_view("reports")
         elif sub == "people":
             if rest:
                 self._cmd_view_people(rest)
@@ -2657,6 +2667,37 @@ class App(tk.Tk):
         if not os.path.isfile(path):
             return
         open_file_search(self, path, f"POC \u2014 {fname}", file_type="poc")
+
+    def _open_report_view(self, fname):
+        from src.hsf_paths import reports_dir
+        path = os.path.join(str(reports_dir()), fname)
+        if not os.path.isfile(path):
+            return
+        view_name = f"report_{fname}"
+        if view_name not in self.visualizer.get_view_names():
+            detail_view = ReportView(self.visualizer, fname)
+            detail_view._on_back_click = lambda: self.visualizer.activate_view("reports")
+            detail_view._on_edit_click = lambda: self._edit_report(fname)
+            self.visualizer.register_view(view_name, detail_view)
+        self.visualizer.activate_view(view_name)
+
+    def _new_report(self):
+        from .views.report_dialog import ReportDialog
+        ReportDialog(self)
+
+    def _edit_report(self, fname):
+        from .views.report_dialog import ReportDialog
+        view_name = f"report_{fname}"
+
+        def _after_save(saved_name):
+            if view_name in self.visualizer.get_view_names():
+                view = self.visualizer.get_view(view_name)
+                if view is not None:
+                    view._fname = saved_name
+                    view._title_label.config(text=saved_name)
+                    view._refresh()
+
+        ReportDialog(self, fname=fname, on_save=_after_save)
 
     def _open_user_view(self, username):
         view_name = f"user_{username}"
@@ -4228,6 +4269,38 @@ class App(tk.Tk):
             self._safe_after(lambda: self.console.flush_markdown())
         return _emit, _flush
 
+    def _make_tool_logger(self, stop):
+        def _tool_display(name, result):
+            if name in ("check_machine", "check_status", "check_inventory", "check_domain", "list_repo"):
+                return result.split("\n")[0] + "..."
+            if name == "webfetch":
+                return f"fetched {len(result)} chars"
+            if name == "websearch":
+                return f"searched ({len(result)} chars)"
+            if name == "read_cache":
+                return f"read {len(result.split(chr(10)))} lines"
+            if name in ("poc_exec", "poc_read", "poc_write", "poc_edit"):
+                return f"poc {len(result)} chars"
+            if name in ("report_read", "report_write"):
+                return f"report {len(result)} chars"
+            if name == "port_inspector":
+                return "inventoried"
+            if len(result) > 120:
+                return result[:117] + "..."
+            return result
+
+        def _on_tool(name, args, result):
+            if stop is not None and stop.is_set():
+                return
+            display = _tool_display(name, result)
+            try:
+                self.console.after(0, lambda d=display: self.console.info(
+                    f"  [tool] {name} {str(args)[:60]} → {d} (~{len(result)//4} tokens)"))
+            except RuntimeError:
+                pass
+
+        return _on_tool
+
     def _agent_ask(self, prompt):
         import threading, re
         if getattr(self, '_llm_running', False):
@@ -4252,29 +4325,7 @@ class App(tk.Tk):
             try:
                 from src.llm import LLMClient
                 client = LLMClient(purpose="agent")
-                def _on_tool(name, args, result):
-                    if stop is not None and stop.is_set():
-                        return
-                    display = result
-                    if name in ("check_machine", "check_status", "check_inventory", "check_domain", "list_repo"):
-                        display = result.split("\n")[0] + "..."
-                    elif name == "webfetch":
-                        display = f"fetched {len(result)} chars"
-                    elif name == "websearch":
-                        display = f"searched ({len(result)} chars)"
-                    elif name == "read_cache":
-                        display = f"read {len(result.split(chr(10)))} lines"
-                    elif name in ("poc_exec", "poc_read", "poc_write", "poc_edit"):
-                        display = f"poc {len(result)} chars"
-                    elif name == "port_inspector":
-                        display = "inventoried"
-                    elif len(result) > 120:
-                        display = result[:117] + "..."
-                    try:
-                        self.console.after(0, lambda d=display: self.console.info(
-                            f"  [tool] {name} {str(args)[:60]} → {d} (~{len(result)//4} tokens)"))
-                    except RuntimeError:
-                        pass
+                _on_tool = self._make_tool_logger(stop)
                 content = client.chat_with_tools(
                     self._llm_messages, on_tool=_on_tool, tool_context=self,
                     on_text=_emit,
@@ -4351,9 +4402,13 @@ class App(tk.Tk):
                 from src.llm import LLMClient
                 from src.llm.tools import CONSULTOR_TOOLS
                 client = LLMClient()
+                _on_tool = self._make_tool_logger(stop)
                 content = client.chat_with_tools(
                     self._llm_messages, tool_context=self, allowed_tools=CONSULTOR_TOOLS,
-                    on_text=_emit, stop_event=stop, on_flush=_flush)
+                    on_tool=_on_tool, on_text=_emit,
+                    on_warning=lambda msg: self._safe_after(
+                        lambda m=msg: self.console.warning(m)),
+                    stop_event=stop, on_flush=_flush)
                 _flush()
                 if stop is not None and stop.is_set():
                     self._safe_after(lambda: self.console.warning("Consultor stopped."))
@@ -5088,7 +5143,7 @@ class App(tk.Tk):
 
     def _cmd_delete(self, args):
         if not args:
-            self.console.body("Usage: delete <all|dbs|inventory|machine|domain|user|credential|password|hash|people|shell|evidence|poc|dictionary|rule|cache>")
+            self.console.body("Usage: delete <all|dbs|inventory|machine|domain|user|credential|password|hash|people|shell|evidence|poc|report|dictionary|rule|cache>")
             return
         sub = args[0].lower()
         if sub == "all":
@@ -5119,6 +5174,8 @@ class App(tk.Tk):
             self._cmd_delete_rule(args[1:])
         elif sub == "poc":
             self._cmd_delete_poc(args[1:])
+        elif sub == "report":
+            self._cmd_delete_report(args[1:])
         elif sub == "inventory":
             self._cmd_delete_inventory(args[1:])
         elif sub == "cache":
@@ -5382,6 +5439,30 @@ class App(tk.Tk):
         else:
             self.console.warning(f"POC not found: {target}")
 
+    def _cmd_delete_report(self, args):
+        if not args:
+            self.console.body("Usage: delete report <filename|all>")
+            return
+        from src.hsf_paths import reports_dir
+        import os as _os
+        d = str(reports_dir())
+        target = args[0]
+        if target == "all":
+            count = 0
+            for f in sorted(_os.listdir(d)):
+                fp = _os.path.join(d, f)
+                if _os.path.isfile(fp):
+                    _os.remove(fp)
+                    count += 1
+            self.console.success(f"{count} report files deleted")
+            return
+        path = _os.path.join(d, target)
+        if _os.path.isfile(path):
+            _os.remove(path)
+            self.console.success(f"Report '{target}' deleted")
+        else:
+            self.console.warning(f"Report not found: {target}")
+
     def _cmd_delete_password(self, args):
         if not args:
             self.console.body("Usage: delete password <password|all>")
@@ -5486,7 +5567,7 @@ class App(tk.Tk):
 
     def _cmd_delete_all(self):
         import shutil
-        from src.hsf_paths import evidence_dir, pocs_dir, cache_dir
+        from src.hsf_paths import evidence_dir, pocs_dir, reports_dir, cache_dir
         from src.machines.people_db import delete_all as del_people
         from src.shells import shell_db
 
@@ -5510,14 +5591,14 @@ class App(tk.Tk):
             shutil.rmtree(base)
             os.makedirs(base, exist_ok=True)
 
-        for d in (str(pocs_dir()), str(cache_dir())):
+        for d in (str(pocs_dir()), str(reports_dir()), str(cache_dir())):
             if os.path.isdir(d):
                 for f in os.listdir(d):
                     fp = os.path.join(d, f)
                     if os.path.isfile(fp):
                         os.remove(fp)
 
-        self.console.success("All data cleared (machines, domains, inventory, people, shells, evidence, POCs, cache). Dictionaries and rules preserved.")
+        self.console.success("All data cleared (machines, domains, inventory, people, shells, evidence, POCs, reports, cache). Dictionaries and rules preserved.")
 
     def _toggle_focus(self, event=None):
         focused = self.focus_get()

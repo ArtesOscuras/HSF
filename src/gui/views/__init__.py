@@ -24,4 +24,6 @@ from .services import ServicesView
 from .dictionarys import DictionarysView
 from .rules_view import RulesView
 from .pocs import PocsView
+from .reports import ReportsView
+from .report_detail import ReportView
 from .file_detail import FileDetailView

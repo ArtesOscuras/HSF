@@ -75,6 +75,11 @@ def pocs_dir() -> Path:
     p.mkdir(parents=True, exist_ok=True)
     return p
 
+def reports_dir() -> Path:
+    p = _get_data_home() / "reports"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
 def cache_dir() -> Path:
     p = _get_data_home() / "cache"
     p.mkdir(parents=True, exist_ok=True)
