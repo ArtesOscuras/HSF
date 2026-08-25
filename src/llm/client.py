@@ -1,11 +1,45 @@
 import re as _re
-from openai import OpenAI
+import secrets as _secrets
+import time as _time
+from openai import OpenAI, RateLimitError
 
 _XML_TOOL_PATTERN = _re.compile(r'<[^>]*DSML', _re.IGNORECASE)
 
+_RATE_LIMIT_ATTEMPTS = 6
+_RATE_LIMIT_BASE_DELAY = 3
+_RATE_LIMIT_MAX_DELAY = 60
+
+_OPENCODE_ID_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+_OPENCODE_UA = "opencode/latest/1.2.3/cli"
+
+_STAINLESS_HEADER_KEYS = (
+    "x-stainless-lang",
+    "x-stainless-package-version",
+    "x-stainless-os",
+    "x-stainless-arch",
+    "x-stainless-runtime",
+    "x-stainless-runtime-version",
+)
+
+
+def _generate_opencode_id(prefix, descending=True):
+    """Generate a26-char ID matching OpenCode's identifier.ts format."""
+    ts = _time.time_ns() // 1_000_000
+    counter = 0
+    val = ts * 0x1000 + counter
+    if descending:
+        val = ~val
+    raw = val.to_bytes(8, byteorder="big", signed=True)
+    time_hex = raw[:6].hex()
+    random_part = "".join(
+        _OPENCODE_ID_CHARS[b % 62]
+        for b in _secrets.token_bytes(14)
+    )
+    return prefix + time_hex + random_part
+
 
 class LLMClient:
-    def __init__(self, config=None, purpose="consultor"):
+    def __init__(self, config=None, purpose="consultor", request_id=None):
         import src.llm.config as _cfg
         if config is None:
             config = _cfg.load()
@@ -15,6 +49,7 @@ class LLMClient:
         provider = _cfg.get_provider(config, pid)
         self._base_url = provider.get("base_url", "")
         self._api_key = provider.get("api_key", "")
+        self._provider_id = pid
         self._model = _cfg.get_active_model(config)
         self._purpose = purpose
         self._system_prompt = config.get("prompts", {}).get("system", "")
@@ -32,12 +67,89 @@ class LLMClient:
                 f"'{pid}'. Use 'settings' to configure it."
             )
 
+        if pid == "opencode":
+            if not self._api_key:
+                self._api_key = "public"
+            self._session_id = _generate_opencode_id("ses_", descending=True)
+            self._request_id = request_id or _generate_opencode_id("msg_", descending=False)
+        else:
+            self._session_id = None
+            self._request_id = None
+
     def _ensure_client(self):
         if self._client is None:
-            self._client = OpenAI(
-                base_url=self._base_url,
-                api_key=self._api_key,
-                timeout=300,
+            if self._provider_id == "opencode":
+                default_headers = {
+                    "User-Agent": _OPENCODE_UA,
+                }
+                for k in _STAINLESS_HEADER_KEYS:
+                    default_headers[k] = ""
+                self._client = OpenAI(
+                    base_url=self._base_url,
+                    api_key=self._api_key,
+                    timeout=300,
+                    default_headers=default_headers,
+                )
+            else:
+                kwargs = {"base_url": self._base_url, "timeout": 300}
+                if self._api_key:
+                    kwargs["api_key"] = self._api_key
+                else:
+                    kwargs["api_key"] = ""
+                    kwargs["_enforce_credentials"] = False
+                self._client = OpenAI(**kwargs)
+
+    def _opencode_headers(self):
+        if self._provider_id != "opencode":
+            return None
+        return {
+            "x-opencode-session": self._session_id,
+            "x-opencode-request": self._request_id,
+            "x-opencode-client": "cli",
+        }
+
+    def _rate_limit_retry(self, fn, stop_event=None, on_warning=None):
+        last = None
+        for attempt in range(_RATE_LIMIT_ATTEMPTS):
+            try:
+                return fn()
+            except RateLimitError as e:
+                last = e
+                if stop_event is not None and stop_event.is_set():
+                    raise
+                delay = min(_RATE_LIMIT_MAX_DELAY, _RATE_LIMIT_BASE_DELAY * (2 ** attempt))
+                if on_warning:
+                    try:
+                        on_warning(f"Rate limit reached — retrying in {delay}s...")
+                    except Exception:
+                        pass
+                slept = 0.0
+                while slept < delay:
+                    if stop_event is not None and stop_event.is_set():
+                        raise e
+                    _time.sleep(0.25)
+                    slept += 0.25
+        raise last
+
+    def _create_stream_attempt(self, m, messages, tools):
+        try:
+            return self._client.chat.completions.create(
+                model=m,
+                messages=self._messages(messages),
+                tools=tools,
+                stream=True,
+                stream_options={"include_usage": True},
+                extra_headers=self._opencode_headers(),
+            )
+        except RateLimitError:
+            raise
+        except Exception:
+            return self._client.chat.completions.create(
+                model=m,
+                messages=self._messages(messages),
+                tools=tools,
+                stream=True,
+                extra_headers=self._opencode_headers(),
             )
 
     def _messages(self, messages):
@@ -63,21 +175,31 @@ class LLMClient:
     def chat(self, messages, model=None, stream=False, **kwargs):
         self._ensure_client()
         m = model or self._model
-        return self._client.chat.completions.create(
-            model=m,
-            messages=self._messages(messages),
-            stream=stream,
-            **kwargs,
-        )
+
+        def _call():
+            return self._client.chat.completions.create(
+                model=m,
+                messages=self._messages(messages),
+                stream=stream,
+                extra_headers=self._opencode_headers(),
+                **kwargs,
+            )
+
+        return self._rate_limit_retry(_call)
 
     def chat_stream(self, messages, model=None):
         self._ensure_client()
         m = model or self._model
-        return self._client.chat.completions.create(
-            model=m,
-            messages=self._messages(messages),
-            stream=True,
-        )
+
+        def _call():
+            return self._client.chat.completions.create(
+                model=m,
+                messages=self._messages(messages),
+                stream=True,
+                extra_headers=self._opencode_headers(),
+            )
+
+        return self._rate_limit_retry(_call)
 
     def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None, on_text=None, stop_event=None, on_warning=None, allowed_tools=None, on_flush=None):
         from src.llm.tools import TOOLS as _TOOLS, execute as _execute
@@ -103,21 +225,10 @@ class LLMClient:
         while True:
             if stop_event and stop_event.is_set():
                 return None
-            try:
-                stream = self._client.chat.completions.create(
-                    model=m,
-                    messages=self._messages(messages),
-                    tools=_TOOLS,
-                    stream=True,
-                    stream_options={"include_usage": True},
-                )
-            except Exception:
-                stream = self._client.chat.completions.create(
-                    model=m,
-                    messages=self._messages(messages),
-                    tools=_TOOLS,
-                    stream=True,
-                )
+            stream = self._rate_limit_retry(
+                lambda: self._create_stream_attempt(m, messages, _TOOLS),
+                stop_event=stop_event, on_warning=on_warning,
+            )
             content_parts = []
             tool_calls = {}
             finish_reason = None

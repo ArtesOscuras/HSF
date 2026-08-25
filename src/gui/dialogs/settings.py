@@ -401,13 +401,12 @@ class SettingsDialog(tk.Toplevel):
             self._prov_text.insert(tk.END, f"      {url}\n", "muted")
 
             models = p.get("models", [])
-            model_str = ", ".join(models) if models else "(no models)"
             am = active_models.get(pid, "")
-            if is_active and am:
-                model_str += f"  [active: {am}]"
-            elif is_active and models:
-                model_str += f"  [active: {models[0]}]"
-            self._prov_text.insert(tk.END, f"      Models: {model_str}\n", "info")
+            active_model = am or (models[0] if models else "")
+            if active_model:
+                self._prov_text.insert(tk.END, f"      Model: {active_model}\n", "info")
+            else:
+                self._prov_text.insert(tk.END, "      Model: (none)\n", "muted")
 
             self._prov_text.insert(tk.END, "\n")
             self._prov_entries.append(pid)

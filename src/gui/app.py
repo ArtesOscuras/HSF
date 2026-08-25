@@ -615,6 +615,7 @@ class App(tk.Tk):
         self._llm_running = False
         self._agent_stop_event = None
         self._llm_messages = []
+        self._llm_request_id = None
         self._silent_mode_cycle = False
         self._last_ctx_hash = None
         self._context_injected = False
@@ -811,7 +812,7 @@ class App(tk.Tk):
         self.console.register_command("stop", self._cmd_stop, "Stop listeners")
         self.console.set_subcommands("stop", ["shells-listener", "mdns-listener", "scanner", "bruteforce", "fuzzer", "webrecorder", "tcpscan", "udpscan", "whatweb", "port-inspector", "bannergrab", "hashcat"])
         self.console.register_command("delete", self._cmd_delete, "Delete stored data")
-        self.console.set_subcommands("delete", ["dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell", "people", "dictionary", "rule", "poc", "inventory", "cache"])
+        self.console.set_subcommands("delete", ["all", "dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell", "people", "dictionary", "rule", "poc", "report", "inventory", "cache"])
         self.console.register_command("add", self._cmd_add, "Add to inventory")
         self.console.set_subcommands("add", ["machine", "domain", "credential", "user", "password", "hash", "people", "dictionary", "rule"])
         self.console.register_command("init", self._cmd_init, "Re-run initialization checks")
@@ -3897,6 +3898,7 @@ class App(tk.Tk):
             return
         if text.lower() == "reset":
             self._llm_messages = []
+            self._llm_request_id = None
             self._last_ctx_hash = None
             self._last_token_pct = None
             self._total_api_tokens = 0
@@ -4137,7 +4139,7 @@ class App(tk.Tk):
         self.console.after(0, lambda: self.console._set_spinner_color("#ce9178"))
         try:
             from src.llm import LLMClient
-            client = LLMClient(purpose="agent")
+            client = LLMClient(purpose="agent", request_id=self._llm_request_id)
             self.console.after(0, lambda: self.console.warning("Compacting context..."))
             ok = compaction.compact_messages(self._llm_messages, client, limit)
             elapsed = (_datetime.datetime.now() - t0).total_seconds()
@@ -4194,6 +4196,7 @@ class App(tk.Tk):
             return
         if text.lower() == "reset":
             self._llm_messages = []
+            self._llm_request_id = None
             self._last_ctx_hash = None
             self._last_token_pct = None
             self._total_api_tokens = 0
@@ -4324,7 +4327,7 @@ class App(tk.Tk):
             _emit, _flush = self._make_stream_emitter("#5ba3ec", self.console.agent, clean_fn=_clean)
             try:
                 from src.llm import LLMClient
-                client = LLMClient(purpose="agent")
+                client = LLMClient(purpose="agent", request_id=self._llm_request_id)
                 _on_tool = self._make_tool_logger(stop)
                 content = client.chat_with_tools(
                     self._llm_messages, on_tool=_on_tool, tool_context=self,
@@ -4401,7 +4404,7 @@ class App(tk.Tk):
             try:
                 from src.llm import LLMClient
                 from src.llm.tools import CONSULTOR_TOOLS
-                client = LLMClient()
+                client = LLMClient(request_id=self._llm_request_id)
                 _on_tool = self._make_tool_logger(stop)
                 content = client.chat_with_tools(
                     self._llm_messages, tool_context=self, allowed_tools=CONSULTOR_TOOLS,
@@ -5567,7 +5570,7 @@ class App(tk.Tk):
 
     def _cmd_delete_all(self):
         import shutil
-        from src.hsf_paths import evidence_dir, pocs_dir, reports_dir, cache_dir
+        from src.hsf_paths import evidence_dir, pocs_dir, cache_dir
         from src.machines.people_db import delete_all as del_people
         from src.shells import shell_db
 
@@ -5591,14 +5594,14 @@ class App(tk.Tk):
             shutil.rmtree(base)
             os.makedirs(base, exist_ok=True)
 
-        for d in (str(pocs_dir()), str(reports_dir()), str(cache_dir())):
+        for d in (str(pocs_dir()), str(cache_dir())):
             if os.path.isdir(d):
                 for f in os.listdir(d):
                     fp = os.path.join(d, f)
                     if os.path.isfile(fp):
                         os.remove(fp)
 
-        self.console.success("All data cleared (machines, domains, inventory, people, shells, evidence, POCs, reports, cache). Dictionaries and rules preserved.")
+        self.console.success("All data cleared (machines, domains, inventory, people, shells, evidence, POCs, cache). Dictionaries, rules and reports preserved.")
 
     def _toggle_focus(self, event=None):
         focused = self.focus_get()

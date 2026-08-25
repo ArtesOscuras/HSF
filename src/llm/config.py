@@ -6,6 +6,21 @@ _LLM_CONFIG_FILE = os.path.join(os.path.dirname(str(_settings_dir())), "llm.json
 
 _DEFAULTS = {
     "providers": {
+        "opencode": {
+            "base_url": "https://opencode.ai/zen/v1",
+            "api_key": "public",
+            "models": [
+                "big-pickle",
+                "deepseek-v4-flash-free",
+                "x-preview-f-free",
+                "muse-spark-1.2-contributor-free",
+                "mimo-v2.5-free",
+                "hy3-free",
+                "nemotron-3-ultra-free",
+                "nemotron-3.5-lightning-free",
+                "laguna-s-2.1-free",
+            ],
+        },
         "ollama": {
             "name": "Ollama (local)",
             "base_url": "http://localhost:11434/v1",
@@ -13,8 +28,8 @@ _DEFAULTS = {
             "models": ["llama3.2:3b"],
         },
     },
-    "active_provider": "ollama",
-    "active_models": {},
+    "active_provider": "opencode",
+    "active_models": {"opencode": "big-pickle"},
     "prompts": {
         "system": (
             "You are an AI assistant operating within HSF, a penetration testing program. "
