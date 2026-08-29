@@ -166,10 +166,18 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "check_evidences",
-            "description": "List all evidence sessions with metadata, filenames, and request directories (no file contents).",
+            "description": (
+                "List evidence sessions with metadata, filenames, and request directories "
+                "(no file contents). Without 'name': lists sessions (paginated). With 'name': "
+                "lists that session's files and request dirs (paginated)."
+            ),
             "parameters": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "name": {"type": "string", "description": "Optional session name. If set, list that session's files and request directories instead of listing sessions."},
+                    "offset": {"type": "integer", "description": "1-indexed start (default 1)"},
+                    "limit": {"type": "integer", "description": "Max entries (sessions default 20; request dirs default 60)"},
+                },
             },
         },
     },
@@ -738,6 +746,30 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "read_evidence",
+            "description": (
+                "Read a specific file from an evidence session (session.json, request.json, "
+                "response.json, body.html). Use offset/limit to paginate, or regex with "
+                "context_before/context_after to search. List sessions with check_evidences."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Evidence session name (from check_evidences)"},
+                    "filename": {"type": "string", "description": "Relative file path within the session, e.g. 'session.json' or '0001_GET_root/request.json'"},
+                    "offset": {"type": "integer", "description": "Line number to start reading from (1-indexed, default 1). Ignored if regex is set."},
+                    "limit": {"type": "integer", "description": "Max lines to read (default 200). Ignored if regex is set."},
+                    "regex": {"type": "string", "description": "Optional regex pattern to search within the file. When set, returns matching lines with surrounding context instead of offset/limit pagination."},
+                    "context_before": {"type": "integer", "description": "Lines to show before each regex match (default: 2)"},
+                    "context_after": {"type": "integer", "description": "Lines to show after each regex match (default: 10)"},
+                },
+                "required": ["name", "filename"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "delete_file",
             "description": "Delete a file by type: dictionary, rule, poc, or cache.",
             "parameters": {
@@ -963,7 +995,7 @@ _HANDLERS = {}
 
 CONSULTOR_TOOLS = frozenset({
     "check_status", "check_machine", "check_domain", "check_inventory",
-    "check_hash", "check_shells", "check_evidences", "check_fuzz_results",
+    "check_hash", "check_shells", "check_evidences", "read_evidence", "check_fuzz_results",
     "webfetch", "websearch", "list_repo",
     "read_cache", "list_files", "poc_read", "report_read",
     "nslookup", "list_interfaces", "ping",
@@ -1006,10 +1038,12 @@ TOOL_BYTE_LIMITS = {
     "websearch": 8000,
     "webfetch": 3000,
     "read_cache": 6000,
+    "read_evidence": 6000,
 }
 TOOL_LINE_LIMITS = {
     "webfetch": 60,
     "read_cache": 200,
+    "read_evidence": 200,
 }
 
 
@@ -1054,6 +1088,15 @@ def _resolve_cache_path(filename):
     base = str(cache_dir())
     resolved = os.path.normpath(os.path.join(base, filename))
     if not resolved.startswith(os.path.normpath(base) + os.sep) and resolved != os.path.normpath(base):
+        return None
+    return resolved
+
+
+def _resolve_evidence_path(name, filename):
+    from src.hsf_paths import evidence_dir
+    base = os.path.normpath(os.path.join(str(evidence_dir()), name))
+    resolved = os.path.normpath(os.path.join(base, filename))
+    if not resolved.startswith(base + os.sep) and resolved != base:
         return None
     return resolved
 
@@ -1615,11 +1658,24 @@ def _check_evidences(args, ctx=None):
     if not names:
         return "No evidence sessions found."
 
-    lines = [f"Evidence sessions ({len(names)}):"]
-    for name in names[:20]:
-        session_dir = os.path.join(base, name)
-        lines.append(f"\n  {name}/")
+    name = args.get("name", "").strip()
+    if name:
+        if name not in names:
+            return f"Evidence session '{name}' not found."
+        return _describe_evidence_session(base, name, args)
 
+    offset = int(args.get("offset", 1))
+    limit = int(args.get("limit", 20)) or 20
+    if offset < 1:
+        offset = 1
+    start = offset - 1
+    end = start + limit
+    shown = names[start:end]
+
+    lines = [f"Evidence sessions ({len(names)} total):"]
+    for n in shown:
+        session_dir = os.path.join(base, n)
+        lines.append(f"\n  {n}/")
         meta_path = os.path.join(session_dir, "session.json")
         if os.path.isfile(meta_path):
             try:
@@ -1646,14 +1702,68 @@ def _check_evidences(args, ctx=None):
         dirs = [e for e in entries if os.path.isdir(os.path.join(session_dir, e))]
 
         if files:
-            lines.append(f"    files ({len(files)}): {', '.join(files)}")
+            lines.append(f"    files ({len(files)})")
         if dirs:
-            dirs_shown = dirs[:10]
-            suffix = f" (+{len(dirs) - 10} more)" if len(dirs) > 10 else ""
-            lines.append(f"    request dirs ({len(dirs)}): {', '.join(dirs_shown)}{suffix}")
+            lines.append(f"    request dirs ({len(dirs)})")
 
-    if len(names) > 20:
-        lines.append(f"\n  ... and {len(names) - 20} more sessions")
+    if end < len(names):
+        lines.append(f"\n  ... {len(names) - end} more sessions — use offset={end + 1}")
+    lines.append('\nUse check_evidences(name="<session>") to list its files and request dirs.')
+    return "\n".join(lines)
+
+
+def _describe_evidence_session(base, name, args):
+    import json
+    import os
+
+    session_dir = os.path.join(base, name)
+    lines = [f"Evidence session: {name}/"]
+
+    meta_path = os.path.join(session_dir, "session.json")
+    if os.path.isfile(meta_path):
+        try:
+            with open(meta_path) as f:
+                meta = json.load(f)
+            if meta.get("target"):
+                lines.append(f"  target: {meta['target']}")
+            if meta.get("browser"):
+                lines.append(f"  browser: {meta['browser']}")
+            if meta.get("started_at"):
+                lines.append(f"  started: {meta['started_at']}")
+            if meta.get("ended_at"):
+                lines.append(f"  ended: {meta['ended_at']}")
+            if meta.get("request_count", 0):
+                lines.append(f"  requests: {meta['request_count']}")
+        except (json.JSONDecodeError, PermissionError, OSError):
+            pass
+
+    try:
+        entries = sorted(os.listdir(session_dir))
+    except (PermissionError, OSError):
+        entries = []
+    files = [e for e in entries if os.path.isfile(os.path.join(session_dir, e))]
+    dirs = [e for e in entries if os.path.isdir(os.path.join(session_dir, e))]
+
+    if files:
+        lines.append(f"\nFiles ({len(files)}):")
+        for f in files:
+            lines.append(f"  {f}")
+
+    if dirs:
+        offset = int(args.get("offset", 1))
+        limit = int(args.get("limit", 60)) or 60
+        if offset < 1:
+            offset = 1
+        start = offset - 1
+        end = start + limit
+        shown = dirs[start:end]
+        lines.append(f"\nRequest dirs ({len(dirs)} total):")
+        for d in shown:
+            lines.append(f"  {d}/")
+        if end < len(dirs):
+            lines.append(f"  ... {len(dirs) - end} more request dirs — use offset={end + 1}")
+    else:
+        lines.append("\nNo request dirs.")
 
     return "\n".join(lines)
 
@@ -2573,21 +2683,12 @@ def _resolve_report_path(filename):
     return resolved
 
 
-@register("read_cache")
-def _read_cache(args, ctx=None):
-    filename = args.get("filename", "").strip()
-    if not filename:
-        return "Missing filename."
-    path = _resolve_cache_path(filename)
-    if not path:
-        return f"Invalid filename: {filename}"
-    if not os.path.isfile(path):
-        return f"Cached file '{filename}' not found."
+def _read_text_file(path, label, args, default_limit=200):
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
     except (PermissionError, OSError) as e:
-        return f"Error reading {filename}: {e}"
+        return f"Error reading {label}: {e}"
 
     lines = content.splitlines(keepends=True)
     total_lines = len(lines)
@@ -2603,8 +2704,8 @@ def _read_cache(args, ctx=None):
         ctx_after = max(0, int(args.get("context_after", 10)))
         matches = [i for i, line in enumerate(lines) if pattern.search(line)]
         if not matches:
-            return f"cache/{filename} ({total_lines} lines, 0 matches for '{regex}')"
-        result = [f"cache/{filename} ({total_lines} lines, {len(matches)} matches for '{regex}'):"]
+            return f"{label} ({total_lines} lines, 0 matches for '{regex}')"
+        result = [f"{label} ({total_lines} lines, {len(matches)} matches for '{regex}'):"]
         shown_until = -1
         shown_count = 0
         for m in matches:
@@ -2624,7 +2725,7 @@ def _read_cache(args, ctx=None):
         return "\n".join(result)
 
     offset = int(args.get("offset", 1))
-    limit = int(args.get("limit", 200))
+    limit = int(args.get("limit", default_limit))
     if offset < 1:
         offset = 1
     if offset > total_lines:
@@ -2633,11 +2734,38 @@ def _read_cache(args, ctx=None):
     end = start + limit
     sliced = lines[start:end]
     result = "".join(sliced)
-    header = f"cache/{filename} ({total_lines} lines"
+    header = f"{label} ({total_lines} lines"
     if len(sliced) < total_lines:
         header += f", showing lines {offset}-{min(end, total_lines)}"
     header += "):\n"
     return header + result
+
+
+@register("read_cache")
+def _read_cache(args, ctx=None):
+    filename = args.get("filename", "").strip()
+    if not filename:
+        return "Missing filename."
+    path = _resolve_cache_path(filename)
+    if not path:
+        return f"Invalid filename: {filename}"
+    if not os.path.isfile(path):
+        return f"Cached file '{filename}' not found."
+    return _read_text_file(path, f"cache/{filename}", args)
+
+
+@register("read_evidence")
+def _read_evidence(args, ctx=None):
+    name = args.get("name", "").strip()
+    filename = args.get("filename", "").strip()
+    if not name or not filename:
+        return "Missing name or filename."
+    path = _resolve_evidence_path(name, filename)
+    if not path:
+        return f"Invalid filename: {filename}"
+    if not os.path.isfile(path):
+        return f"File '{filename}' not found in evidence session '{name}'."
+    return _read_text_file(path, f"evidence/{name}/{filename}", args)
 
 
 @register("delete_file")

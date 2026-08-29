@@ -333,6 +333,14 @@ class Console(tk.Frame):
     def writeln(self, text="", color=None):
         self.write(text + "\n", color)
 
+    def _blank_line_if_needed(self):
+        try:
+            content = self.output_area.get("1.0", "end-1c")
+        except tk.TclError:
+            return
+        if content and not content.endswith("\n\n"):
+            self.writeln("")
+
     def title(self, text):
         self.writeln(f"\u2500\u2500\u2500 {text} \u2500\u2500\u2500", TITLE_COLOR)
 
@@ -535,6 +543,7 @@ class Console(tk.Frame):
             return
 
         if self._mode_handler:
+            self._blank_line_if_needed()
             self.write("User prompt > ", color=self._mode_fg)
             self.writeln(raw, color=FG)
             self.writeln("")

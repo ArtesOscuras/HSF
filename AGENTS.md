@@ -450,15 +450,11 @@ Both modes display the model output in white, marked with a colored `▣` (blue 
 
 **Markdown toggle:** the setting `console_markdown` (default `true`, persisted in `settings.json`) controls whether `"__md__"` segments render as markdown or plain white text. It is toggled from **Settings → Console → Markdown interpretation** (ON green / OFF grey, same Label-switch pattern as the Safety tab). The console checks the setting on every write (`Console._markdown_enabled()`), so new output switches instantly without restart; toggling also re-renders existing history via `restore_segments(get_segments())`. Segments are always stored as `"__md__"` regardless of the toggle, so sessions remain re-renderable when the setting changes.
 
-**Evidence analysis:**
-
-* `_ModelAnalysisDialog` — opens from any evidence detail view. Reads all files from the evidence directory as context. Sends to LLM with the `evidence_analysis` system prompt. Chat input below output for follow-up questions (accumulated conversation history).
-
 **Rules:**
 
 * All LLM calls run in daemon threads. Output dispatched to main thread via `app._safe_after(callback, *args)`.
 * The `openai` library is used for all providers by setting a custom `base_url`.
-* System prompts are configurable per purpose (`system`, `evidence_analysis`, `investigate_interests`).
+* System prompts are configurable per purpose (`system`, `investigate_interests`).
 
 **Provider Edit Dialog:**
 
@@ -470,7 +466,7 @@ The provider editor (`_open_provider_dialog` in `src/gui/dialogs/settings.py`) u
 
 ### Agent Tool-Calling (`src/llm/client.py` → `chat_with_tools()`)
 
-The agent mode gives the LLM the ability to call **59 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
+The agent mode gives the LLM the ability to call **60 tools** that read and modify application state and trigger network operations. It is activated via the `agent` console command or `agent <one-shot prompt>`.
 
 **Tool-calling loop** (fully streaming):
 
@@ -500,9 +496,9 @@ def chat_with_tools(self, messages, on_tool=None, model=None, tool_context=None,
 
 Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` variable. Each entry follows the `{"type": "function", "function": {...}}` format with `name`, `description`, and `parameters` (JSON Schema).
 
-**59 tools** in eight categories:
+**60 tools** in eight categories:
 
-**Data tools** (23) — query and manipulate inventory, no `tool_context` needed:
+**Data tools** (24) — query and manipulate inventory, no `tool_context` needed:
 
 **Query tools:**
 
@@ -514,7 +510,8 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 | `check_inventory` | Get full inventory: users, credentials, passwords, hashes, people, tickets, dictionaries, rules |
 | `check_hash` | List all hashes (truncated). With `hash_id`: return full hash value and details |
 | `check_shells` | List all shell sessions with ID, type, status, active flag, IP, ports, OS, timestamps |
-| `check_evidences` | List evidence sessions with metadata, filenames, request directories (no file contents) |
+| `check_evidences` | List evidence sessions with metadata (no file contents). Without `name`: sessions list, paginated via offset/limit (default 20). With `name`: that session's files + request dirs, paginated via offset/limit (default 60). |
+| `read_evidence` | Read a specific file from an evidence session (`session.json`, `request.json`, `response.json`, `body.html`) with offset/limit pagination or regex search (`context_before`/`context_after`). Path-traversal protected via `_resolve_evidence_path`. Bounded like `read_cache`. |
 | `check_fuzz_results` | Retrieve fuzz results for a machine: saved directories and subdomains discovered via fuzzing. Uses offset/limit pagination (default: 60 entries per section). |
 
 **Mutation tools:**
@@ -944,7 +941,7 @@ This mechanism is **shared** between agent and consultor modes via the shared `s
 | Command | `agent` | `consultor` |
 | Purpose | `"agent"` | `"consultor"` |
 | System prompt | Shared `system` prompt + `[MODE: AGENT]` message | Shared `system` prompt + `[MODE: CONSULTOR]` message (lists read-only tools) |
-| Tool calling | **Yes** — `chat_with_tools()` (all 59 tools) | **Yes** — `chat_with_tools(allowed_tools=CONSULTOR_TOOLS)` (22 read-only tools; the rest are sent but denied) |
+| Tool calling | **Yes** — `chat_with_tools()` (all 60 tools) | **Yes** — `chat_with_tools(allowed_tools=CONSULTOR_TOOLS)` (23 read-only tools; the rest are sent but denied) |
 | Prompt color | Blue (`#5ba3ec`) | Yellow (`#e6b422`) |
 | Context injection | Yes | Yes |
 | Shared history | Yes (`self._llm_messages`) | Yes (`self._llm_messages`) |

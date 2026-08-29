@@ -243,17 +243,6 @@ class EvidenceDetailView(BaseView):
         btn_frame = tk.Frame(self, bg="#000000")
         btn_frame.grid(row=2, column=0, pady=(0, 15))
 
-        analyze_btn = tk.Label(
-            btn_frame, text="  Model Analysis  ", bg="#222222", fg=BRIGHT,
-            font=fonts.view_font(10), relief=tk.RAISED, bd=1,
-            padx=15, pady=6,
-        )
-        analyze_btn.pack(side=tk.LEFT, padx=(0, 10))
-        analyze_btn.bind("<Button-1>",
-                         lambda e: self._open_model_analysis())
-        analyze_btn.bind("<Enter>", lambda e: analyze_btn.config(bg="#333333"))
-        analyze_btn.bind("<Leave>", lambda e: analyze_btn.config(bg="#222222"))
-
         back_btn = tk.Label(
             btn_frame, text="  \u2190 Back  ", bg="#222222", fg=BRIGHT,
             font=fonts.view_font(10), relief=tk.RAISED, bd=1,
@@ -277,10 +266,6 @@ class EvidenceDetailView(BaseView):
     def _on_title_click(self, event):
         if self._on_back_click:
             self._on_back_click()
-
-    def _open_model_analysis(self):
-        from src.gui.dialogs.model_analysis import _ModelAnalysisDialog
-        _ModelAnalysisDialog(self, self._ev_name)
 
     def _refresh(self):
         meta = _load_evidence(self._ev_name)

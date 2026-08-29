@@ -15,7 +15,7 @@ from src.machines import machine_db
 from src.machines import domain_db
 from .browsers import find_browsers, BrowserSelector
 from .cdp import CDPClient
-from .evidence import save_session_meta, update_session_count, save_request, target_dir, save_llm_guide
+from .evidence import save_session_meta, update_session_count, save_request, target_dir
 
 from src.hsf_paths import chrome_profile_dir as _chrome_profile_dir
 
@@ -118,7 +118,6 @@ class Recorder:
             self._cdp = CDPClient(cdp_url)
 
             meta = save_session_meta(tdir, self._evidence_name, os.path.basename(self._browser_path))
-            save_llm_guide(tdir)
             self._log(f"Recording to {tdir}\n")
             self._log(f"Browser active — navigate freely. Use 'webrecorder stop' when done.\n")
 

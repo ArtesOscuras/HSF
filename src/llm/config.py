@@ -57,7 +57,7 @@ _DEFAULTS = {
             "When in AGENT mode, available tool categories:\n"
             "- Data: check_status (see all machines, domains, and counts), check_machine, "
             "check_domain, check_inventory, check_hash, check_shells, "
-            "check_evidences, check_fuzz_results (query inventory); add/delete users, "
+            "check_evidences, read_evidence, check_fuzz_results (query inventory); add/delete users, "
             "machines, domains, subdomains, credentials, hashes, passwords, people.\n"
             "- Network: list_interfaces, scan_interface, scan_ip, stop_scan, "
             "port_scan(tcp|udp) (returns common ports immediately then continues full "
@@ -132,11 +132,6 @@ _DEFAULTS = {
             "Rules for report generation or edition:\n"
             "- Report must only be generated when requested by user.\n"
             "- Report markdown usage recommended."
-        ),
-        "evidence_analysis": (
-            "This evidence is part of a web browsing session. "
-            "You need to analyze it. You have more details in the "
-            "'For LLM analysis.md' file in the same directory."
         ),
         "investigate_interests": (
             "Research the interests of the person described below. "
