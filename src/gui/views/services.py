@@ -19,11 +19,19 @@ _SERVICES = [
         "key": "mdns",
         "name": "mDNS Listener",
         "desc": "Passive listener for device discovery",
+        "icon": "service.png",
     },
     {
         "key": "revershell",
         "name": "Revershell Listener",
         "desc": "Listener for incoming reverse shell connections",
+        "icon": "service.png",
+    },
+    {
+        "key": "wifi",
+        "name": "WiFi Monitor",
+        "desc": "Captures nearby networks and client probes",
+        "icon": "wifi.png",
     },
 ]
 
@@ -167,7 +175,7 @@ class ServicesView(BaseView):
     def _insert_line(self, svc):
         on = self._states.get(svc["key"], False)
 
-        icon = icons.icon("service.png", size=ICON_SIZE)
+        icon = icons.icon(svc.get("icon", "service.png"), size=ICON_SIZE)
         if icon:
             self.text.image_create(tk.END, image=icon)
         else:

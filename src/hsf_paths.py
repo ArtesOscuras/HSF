@@ -17,7 +17,27 @@ def _get_data_home() -> Path:
     override = os.environ.get("HSF_HOME")
     if override:
         return Path(override)
+    sudo_user = os.environ.get("SUDO_USER")
+    if sudo_user and os.geteuid() == 0:
+        import pwd
+        try:
+            return Path(pwd.getpwnam(sudo_user).pw_dir) / ".local" / "share" / "hsf"
+        except Exception:
+            pass
     return Path.home() / ".local" / "share" / "hsf"
+
+
+def chown_to_real_user(path):
+    if os.geteuid() != 0:
+        return
+    sudo_uid = os.environ.get("SUDO_UID")
+    sudo_gid = os.environ.get("SUDO_GID")
+    if not sudo_uid or not sudo_gid:
+        return
+    try:
+        os.chown(str(path), int(sudo_uid), int(sudo_gid))
+    except (OSError, PermissionError):
+        pass
 
 def databases_dir() -> Path:
     p = _get_data_home() / "databases"
@@ -82,6 +102,11 @@ def reports_dir() -> Path:
 
 def cache_dir() -> Path:
     p = _get_data_home() / "cache"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+def handshakes_dir() -> Path:
+    p = _get_data_home() / "handshakes"
     p.mkdir(parents=True, exist_ok=True)
     return p
 

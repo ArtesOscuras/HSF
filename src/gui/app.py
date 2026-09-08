@@ -12,7 +12,7 @@ from src.network_iface import interfaces, ifaddresses, AF_INET
 from . import fonts
 from .console import Console
 from .visualizer import Visualizer
-from .views import NetworkView, DomainListView, EvidenceListView, CredentialListView, UsersView, PasswordsView, HashListView, ShellListView, ToolsView, InventoryView, PeopleView, ServicesView, DictionarysView, RulesView, PocsView, ReportsView, ReportView
+from .views import WifiView, NetworkView, DomainListView, EvidenceListView, CredentialListView, UsersView, PasswordsView, HashListView, ShellListView, ToolsView, InventoryView, PeopleView, ServicesView, DictionarysView, RulesView, PocsView, ReportsView, ReportView, HandshakesView
 from .dialogs import ScanDialog
 from src import settings as hsf_settings
 from src.machines import store, start_autosave as start_machines_autosave, stop_autosave as stop_machines_autosave
@@ -572,6 +572,14 @@ def _do_udp_scan_common(ip):
     return sorted(open_ports)
 
 
+def _wifi_monitor_running():
+    try:
+        from src.tools.scanner import wifi_monitor
+        return wifi_monitor.is_running()
+    except Exception:
+        return False
+
+
 class App(tk.Tk):
     def __init__(self):
         fonts.register_before_tk()
@@ -686,6 +694,7 @@ class App(tk.Tk):
             self._start_passive_scanner()
         if self._shell_listener is None or not self._shell_listener.is_running:
             self._start_shell_listener()
+        self._start_wifi_monitor()
 
     def _set_initial_sash(self):
         self.update_idletasks()
@@ -701,6 +710,14 @@ class App(tk.Tk):
         self._passive_scanner = PassiveMDNSScanner(on_host_callback=self._on_host_discovered)
         self._passive_scanner.start()
         self.console.info("Passive listening mDNS started")
+
+    def _start_wifi_monitor(self):
+        from src.tools.scanner import wifi_monitor
+        wifi_monitor.start_monitor()
+
+    def _stop_wifi_monitor(self):
+        from src.tools.scanner import wifi_monitor
+        wifi_monitor.stop_monitor()
 
     def _start_shell_listener(self):
         port = 443 if self._is_root() else 8443
@@ -729,8 +746,22 @@ class App(tk.Tk):
                 if self._shell_listener and self._shell_listener.is_running:
                     self._shell_listener.stop()
                     self.console.info("Reverse shell listener stopped")
+        elif key == "wifi":
+            from src.tools.scanner import wifi_monitor
+            if enable:
+                if not wifi_monitor.is_running():
+                    wifi_monitor.start_monitor()
+                    self.console.info("WiFi monitor started")
+            else:
+                if wifi_monitor.is_running():
+                    wifi_monitor.stop_monitor()
+                    self.console.info("WiFi monitor stopped")
 
     def _register_views(self):
+        wifi_view = WifiView(self.visualizer)
+        wifi_view._on_network_click = self._open_wifi_view
+        self.visualizer.register_view("wifi", wifi_view)
+
         net_view = NetworkView(self.visualizer)
         net_view._on_machine_click = self._open_machine_view
         self.visualizer.register_view("machines", net_view)
@@ -779,6 +810,7 @@ class App(tk.Tk):
         services_view._check_state = lambda: (
             self._passive_scanner is not None and self._passive_scanner.is_running,
             self._shell_listener is not None and self._shell_listener.is_running,
+            _wifi_monitor_running(),
         )
         self.visualizer.register_view("services", services_view)
 
@@ -799,10 +831,13 @@ class App(tk.Tk):
         reports_view._on_new_click = self._new_report
         self.visualizer.register_view("reports", reports_view)
 
+        handshakes_view = HandshakesView(self.visualizer)
+        self.visualizer.register_view("handshakes", handshakes_view)
+
     def _register_commands(self):
         self.console.set_mode_cycle_callback(self._cycle_mode)
         self.console.register_command("view", self._cmd_view, "Switch or list views")
-        self.console.set_subcommands("view", ["list", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "people", "evidence", "services", "dictionary", "rule", "poc", "report"])
+        self.console.set_subcommands("view", ["list", "wifi", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "people", "evidence", "services", "dictionary", "rule", "poc", "report", "handshake"])
         self.console.register_command("use", self._cmd_use, "Use a tool")
         self.console.set_subcommands("use", ["scanner", "port-inspector", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "bannergrab", "whatweb", "bruteforce", "hashcat", "dicma"])
         self.console.register_command("connect", self._cmd_connect, "Connect via FTP/SFTP/SSH/WinRM")
@@ -812,7 +847,7 @@ class App(tk.Tk):
         self.console.register_command("stop", self._cmd_stop, "Stop listeners")
         self.console.set_subcommands("stop", ["shells-listener", "mdns-listener", "scanner", "bruteforce", "fuzzer", "webrecorder", "tcpscan", "udpscan", "whatweb", "port-inspector", "bannergrab", "hashcat"])
         self.console.register_command("delete", self._cmd_delete, "Delete stored data")
-        self.console.set_subcommands("delete", ["all", "dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell", "people", "dictionary", "rule", "poc", "report", "inventory", "cache"])
+        self.console.set_subcommands("delete", ["all", "dbs", "credential", "evidence", "hash", "machine", "domain", "user", "password", "shell", "people", "dictionary", "rule", "poc", "report", "inventory", "cache", "wifi"])
         self.console.register_command("add", self._cmd_add, "Add to inventory")
         self.console.set_subcommands("add", ["machine", "domain", "credential", "user", "password", "hash", "people", "dictionary", "rule"])
         self.console.register_command("init", self._cmd_init, "Re-run initialization checks")
@@ -1524,7 +1559,7 @@ class App(tk.Tk):
                 self._cmd_view_evidence_name(rest)
             else:
                 self.visualizer.activate_view("evidences")
-        elif sub in ("tools", "passwords", "inventory", "services"):
+        elif sub in ("wifi", "tools", "passwords", "inventory", "services"):
             self.visualizer.activate_view(sub)
         elif sub == "dictionary":
             if rest:
@@ -1546,6 +1581,8 @@ class App(tk.Tk):
                 self._open_report_view(rest[0])
             else:
                 self.visualizer.activate_view("reports")
+        elif sub == "handshake":
+            self.visualizer.activate_view("handshakes")
         elif sub == "people":
             if rest:
                 self._cmd_view_people(rest)
@@ -2718,6 +2755,16 @@ class App(tk.Tk):
             self.visualizer.register_view(view_name, detail_view)
         self.visualizer.activate_view(view_name)
 
+    def _open_wifi_view(self, network):
+        key = (network.get("bssid") or network.get("ssid") or "net").replace(":", "")
+        view_name = f"wifi_detail_{key}"
+        if view_name not in self.visualizer.get_view_names():
+            from .views import WifiDetailView
+            detail_view = WifiDetailView(self.visualizer, network)
+            detail_view._on_back_click = lambda: self.visualizer.activate_view("wifi")
+            self.visualizer.register_view(view_name, detail_view)
+        self.visualizer.activate_view(view_name)
+
     def _on_tool_click(self, action):
         if action == "scanner":
             self._scan_active()
@@ -3762,6 +3809,8 @@ class App(tk.Tk):
                 scan_errors.append(ev)
             elif t == "scan_info":
                 self.console.body(ev["message"])
+            elif t == "handshake":
+                self.console.success(ev["message"])
 
         for ev in scan_errors:
             self.console.error(ev["message"])
@@ -5146,7 +5195,7 @@ class App(tk.Tk):
 
     def _cmd_delete(self, args):
         if not args:
-            self.console.body("Usage: delete <all|dbs|inventory|machine|domain|user|credential|password|hash|people|shell|evidence|poc|report|dictionary|rule|cache>")
+            self.console.body("Usage: delete <all|dbs|inventory|machine|domain|user|credential|password|hash|people|shell|evidence|poc|report|dictionary|rule|cache|wifi>")
             return
         sub = args[0].lower()
         if sub == "all":
@@ -5183,8 +5232,15 @@ class App(tk.Tk):
             self._cmd_delete_inventory(args[1:])
         elif sub == "cache":
             self._cmd_delete_cache(args[1:])
+        elif sub == "wifi":
+            self._cmd_delete_wifi()
         else:
             self.console.error(f"Unknown delete target: {sub}.")
+
+    def _cmd_delete_wifi(self):
+        from src.tools.scanner import wifi_monitor
+        wifi_monitor.clear()
+        self.console.success("WiFi networks and probes cleared.")
 
     def _cmd_delete_creds(self, args):
         from src.machines.credential_db import delete_all
@@ -5640,6 +5696,11 @@ class App(tk.Tk):
         stop_machines_autosave()
         store.save()
         save_mdns_cache()
+        try:
+            from src.tools.scanner import wifi_monitor
+            wifi_monitor.shutdown()
+        except Exception:
+            pass
         hsf_settings.save()
         event_bus.stop()
         self.update_idletasks()

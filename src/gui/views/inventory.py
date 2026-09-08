@@ -132,6 +132,9 @@ class InventoryView(BaseView):
             {"name": "Reports", "action": "reports",
              "desc": "Generated reports",
              "icon": "report.png", "enabled": True},
+            {"name": "Handshakes", "action": "handshakes",
+             "desc": "Captured WPA handshakes",
+             "icon": "handshake.png", "enabled": True},
         ]
 
         self._font18 = fonts.view_font(18)

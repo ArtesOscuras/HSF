@@ -1,4 +1,6 @@
 from .base import BaseView
+from .wifi import WifiView
+from .wifi_detail import WifiDetailView
 from .machines import NetworkView
 from .machine_detail import MachineDetailView
 from .domain_list import DomainListView
@@ -27,3 +29,4 @@ from .pocs import PocsView
 from .reports import ReportsView
 from .report_detail import ReportView
 from .file_detail import FileDetailView
+from .handshakes import HandshakesView
