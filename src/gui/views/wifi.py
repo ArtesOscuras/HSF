@@ -227,6 +227,10 @@ class WifiView(BaseView):
             self._render_ifaces()
 
     def _update_stats(self):
+        if not wifi_monitor.monitor_supported():
+            self.stats_label.config(
+                text=f"Scan-only mode  |  {len(self._fb_nets)} networks")
+            return
         if not wifi_monitor.is_running():
             self.stats_label.config(text="")
             return
@@ -237,6 +241,9 @@ class WifiView(BaseView):
                  f"(beacons {s['beacons_seen']}, data {s['data_seen']})")
 
     def _update_unlock_btn(self):
+        if not wifi_monitor.monitor_supported():
+            self._unlock_btn.pack_forget()
+            return
         if wifi_monitor.is_locked():
             ch = wifi_monitor.locked_channel()
             self._unlock_btn.config(text=f"  Unlock channel {ch}  ")
@@ -314,7 +321,9 @@ class WifiView(BaseView):
 
     def _render_message(self):
         font = tkfont.Font(font=self.text.cget("font"))
-        if not wifi_monitor.is_running():
+        if not wifi_monitor.monitor_supported():
+            msg = "Scanning WiFi networks (scan-only: passive probes unavailable)..."
+        elif not wifi_monitor.is_running():
             msg = "WiFi monitor off (no client probes). Scanning via system..."
         else:
             msg = "Scanning for WiFi networks..."

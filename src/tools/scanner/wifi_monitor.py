@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import threading
 import time
 from functools import partial
@@ -10,7 +11,13 @@ from scapy.all import sniff, Dot11, Dot11Beacon, Dot11Elt, RadioTap, NoPayload, 
 from scapy.layers.eap import EAPOL, EAPOL_KEY
 from scapy.config import conf
 
+from src import info as _info
+
 conf.verb = 0
+
+_PLATFORM = _info.get("platform") or sys.platform
+_IS_MACOS = _PLATFORM == "darwin"
+_IS_LINUX = _PLATFORM.startswith("linux")
 
 CHANNELS_24 = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
 CHANNELS_5 = [36, 40, 44, 48, 149, 153, 157, 161, 165]
@@ -78,7 +85,29 @@ def _is_mgmt(pkt):
         return False
 
 
+def is_macos():
+    return _IS_MACOS
+
+
+def is_linux():
+    return _IS_LINUX
+
+
+def monitor_supported():
+    return _IS_LINUX
+
+
+def _macos_backend():
+    from . import wifi_macos
+    return wifi_macos
+
+
 def wifi_interfaces():
+    if _IS_MACOS:
+        try:
+            return _macos_backend().interfaces()
+        except Exception:
+            return []
     if _which("nmcli"):
         ok, out, _ = _run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device", "status"])
         if ok:
@@ -103,6 +132,8 @@ def wifi_interfaces():
 
 
 def wifi_interfaces_state():
+    if _IS_MACOS:
+        return []
     if not _which("nmcli"):
         return []
     ok, out, _ = _run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device", "status"])
@@ -600,6 +631,8 @@ def get_networks(iface=None):
 
 
 def _scan_connected():
+    if _IS_MACOS:
+        return
     now = time.time()
     for iface in wifi_interfaces():
         ok, out, _ = _run(["iw", "dev", iface, "link"])
@@ -719,8 +752,18 @@ def _scan_nmcli(iface=None):
     return nets
 
 
+def scan_networks(iface=None):
+    if _IS_MACOS:
+        try:
+            return _macos_backend().scan(iface)
+        except Exception as e:
+            _emit_error(f"WiFi scan error: {e}")
+            return []
+    return _scan_nmcli(iface)
+
+
 def scan_networks_fallback(iface=None):
-    nets = _scan_nmcli(iface)
+    nets = scan_networks(iface)
     seen = set()
     result = []
     for n in nets:
@@ -734,6 +777,8 @@ def scan_networks_fallback(iface=None):
 
 
 def _iface_type(iface):
+    if _IS_MACOS:
+        return ""
     ok, out, _ = _run(["iw", "dev", iface, "info"])
     if not ok:
         return ""
@@ -745,6 +790,8 @@ def _iface_type(iface):
 
 
 def _enter_monitor(iface):
+    if _IS_MACOS:
+        return False
     with _mode_lock:
         _run(["nmcli", "device", "set", iface, "managed", "no"])
         _run(["ip", "link", "set", iface, "down"])
@@ -765,6 +812,8 @@ def _enter_monitor(iface):
 
 
 def _exit_monitor(iface):
+    if _IS_MACOS:
+        return
     with _mode_lock:
         _run(["ip", "link", "set", iface, "down"])
         for _ in range(3):
@@ -777,6 +826,8 @@ def _exit_monitor(iface):
 
 
 def _set_channel(iface, channel):
+    if _IS_MACOS:
+        return
     if channel:
         _run(["iw", "dev", iface, "set", "channel", str(channel)])
 
@@ -901,6 +952,8 @@ def get_service():
 
 
 def start_monitor(iface=None):
+    if _IS_MACOS:
+        return False
     return get_service().start(iface)
 
 
@@ -918,6 +971,8 @@ def last_error():
 
 
 def _monitor_interfaces():
+    if _IS_MACOS:
+        return []
     ok, out, _ = _run(["iw", "dev"])
     if not ok:
         return []
@@ -945,5 +1000,6 @@ def shutdown():
     flush_handshakes()
     for iface in _monitor_interfaces():
         _exit_monitor(iface)
-    for iface in wifi_interfaces():
-        _run(["nmcli", "device", "set", iface, "managed", "yes"])
+    if not _IS_MACOS:
+        for iface in wifi_interfaces():
+            _run(["nmcli", "device", "set", iface, "managed", "yes"])

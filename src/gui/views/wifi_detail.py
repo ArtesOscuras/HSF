@@ -117,6 +117,9 @@ class WifiDetailView(BaseView):
         self._update_lock_btn()
 
     def _update_lock_btn(self):
+        if not wifi_monitor.monitor_supported():
+            self._lock_btn.pack_forget()
+            return
         chan = self._network.get("chan")
         if not chan:
             self._lock_btn.config(text="  No channel  ", fg=MUTED)
@@ -178,6 +181,8 @@ class WifiDetailView(BaseView):
                     self._insert_probe(p)
             else:
                 self.text.insert(tk.END, "  No probes captured yet.\n", "muted")
+        elif not wifi_monitor.monitor_supported():
+            self.text.insert(tk.END, "  Probe capture requires Linux with a monitor-mode adapter.\n", "muted")
         else:
             self.text.insert(tk.END, "  Probe capture requires root (WiFi Monitor off).\n", "muted")
 

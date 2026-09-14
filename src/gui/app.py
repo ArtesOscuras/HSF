@@ -713,6 +713,10 @@ class App(tk.Tk):
 
     def _start_wifi_monitor(self):
         from src.tools.scanner import wifi_monitor
+        if not wifi_monitor.monitor_supported():
+            self.console.info(
+                "WiFi scan-only mode (monitor mode not available on this platform)")
+            return
         wifi_monitor.start_monitor()
 
     def _stop_wifi_monitor(self):
@@ -748,6 +752,10 @@ class App(tk.Tk):
                     self.console.info("Reverse shell listener stopped")
         elif key == "wifi":
             from src.tools.scanner import wifi_monitor
+            if not wifi_monitor.monitor_supported():
+                self.console.info(
+                    "WiFi scan-only mode: passive monitor/probes unavailable on this platform")
+                return
             if enable:
                 if not wifi_monitor.is_running():
                     wifi_monitor.start_monitor()

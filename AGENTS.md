@@ -382,6 +382,31 @@ Guidelines:
 
 ---
 
+## WiFi Monitor (`src/tools/scanner/wifi_monitor.py`)
+
+The WiFi subsystem is **platform-split**: Linux keeps full passive monitoring, macOS runs in scan-only mode.
+
+**Platform detection** is centralized in `src/info.py` (populated by `init_dialog` at startup). `wifi_monitor` reads `_info.get("platform") or sys.platform` once at import into `_IS_MACOS` / `_IS_LINUX`. Do not duplicate `sys.platform` checks; use `is_macos()` / `is_linux()` / `monitor_supported()`.
+
+**Linux (unchanged):**
+* Interfaces via `nmcli` / `iw`; monitor mode via `iw`/`ip`/`nmcli`; passive capture of beacons, probes, and EAPOL handshakes with `scapy`.
+* `start_monitor()` returns True, `monitor_supported()` returns True. `WifiView` uses `get_networks()` (live monitor data). Falls back to `nmcli` system scan when the monitor is off.
+* Handshake files (`.pcap`, `.hc22000`) are written to `handshakes_dir()`.
+
+**macOS (scan-only):**
+* Backend lives in `src/tools/scanner/wifi_macos.py`, imported lazily only on darwin. It uses CoreWLAN via `pyobjc-framework-CoreWLAN` (conditional dependency, installed only when `sys_platform == 'darwin'`).
+* Returns the **same normalized dict shape** as the Linux `_scan_nmcli` backend, so the GUI is platform-agnostic.
+* `monitor_supported()` returns False and `start_monitor()` returns False, so `WifiView._poll` automatically uses the fallback scan path (`scan_networks_fallback` → `scan_networks` → CoreWLAN).
+* The built-in Apple Silicon Wi-Fi adapter does **not** support monitor mode / frame injection, so client probes and WPA handshake capture are disabled. `WifiView` / `WifiDetailView` show a "scan-only" message instead of pretending the monitor is running.
+* `iface` discovery falls back to parsing `networksetup -listallhardwareports` if CoreWLAN is unavailable.
+
+**Rules for changes:**
+* Never let macOS code run on Linux or vice versa — every platform branch must early-return.
+* New scan fields must be added to both backends with identical keys.
+* Keep `wifi_macos` free of tkinter and of module-level CoreWLAN imports (so Linux never touches it).
+
+---
+
 ## Evidence Collection
 
 HSF includes mechanisms for recording and preserving evidence generated during assessments.
