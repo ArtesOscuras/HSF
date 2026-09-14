@@ -178,7 +178,7 @@ class SettingsDialog(tk.Toplevel):
         tk.Label(
             content, text="  Agent has default access to shells",
             font=fonts.view_font(11), fg=FG, bg=BG_WIDGET,
-        ).grid(row=1, column=0, sticky="w", padx=15, pady=(6, 12))
+        ).grid(row=1, column=0, sticky="w", padx=15, pady=(6, 6))
 
         self._shell_access_var = tk.BooleanVar(
             value=_app_settings.get("agent_default_shell_access", False))
@@ -187,9 +187,25 @@ class SettingsDialog(tk.Toplevel):
             font=fonts.view_font_bold(11),
             cursor="", padx=8, pady=4,
         )
-        self._shell_access_toggle.grid(row=1, column=1, sticky="e", padx=15, pady=(6, 12))
+        self._shell_access_toggle.grid(row=1, column=1, sticky="e", padx=15, pady=(6, 6))
         self._shell_access_toggle.bind("<Button-1>", lambda e: self._toggle_shell_access())
         self._refresh_shell_access_toggle()
+
+        tk.Label(
+            content, text="  Agent can run nmap",
+            font=fonts.view_font(11), fg=FG, bg=BG_WIDGET,
+        ).grid(row=2, column=0, sticky="w", padx=15, pady=(6, 12))
+
+        self._nmap_var = tk.BooleanVar(
+            value=_app_settings.get("agent_nmap", False))
+        self._nmap_toggle = tk.Label(
+            content, text="", bg=BG_WIDGET,
+            font=fonts.view_font_bold(11),
+            cursor="", padx=8, pady=4,
+        )
+        self._nmap_toggle.grid(row=2, column=1, sticky="e", padx=15, pady=(6, 12))
+        self._nmap_toggle.bind("<Button-1>", lambda e: self._toggle_nmap())
+        self._refresh_nmap_toggle()
 
     def _refresh_poc_toggle(self):
         on = self._poc_exec_var.get()
@@ -218,6 +234,20 @@ class SettingsDialog(tk.Toplevel):
         _app_settings.set("agent_default_shell_access", not current)
         _app_settings.save()
         self._refresh_shell_access_toggle()
+
+    def _refresh_nmap_toggle(self):
+        on = self._nmap_var.get()
+        self._nmap_toggle.config(
+            text="  ON  " if on else " OFF ",
+            fg="#cc3333" if on else "#00cc66",
+        )
+
+    def _toggle_nmap(self):
+        current = self._nmap_var.get()
+        self._nmap_var.set(not current)
+        _app_settings.set("agent_nmap", not current)
+        _app_settings.save()
+        self._refresh_nmap_toggle()
 
     # ─── Console Tab ─────────────────────────────────────────
 

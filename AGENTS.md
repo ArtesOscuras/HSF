@@ -547,7 +547,7 @@ Tools are defined as a list of OpenAI function-calling schemas in the `TOOLS` va
 | `nslookup` | DNS lookup on a hostname. Synchronous — returns resolved addresses directly |
 | `port_inspector` | Inspect a TCP port by sending service-specific probes. Synchronous — returns identified service banners directly |
 | `bannergrab` | Open a raw TCP connection to an IP:port and wait up to 2s for a banner/response. Synchronous — returns received data directly |
-| `nmap` | Run custom nmap scan with arbitrary arguments against a target. Returns raw output and auto-saves open ports to machine inventory. |
+| `nmap` | Run custom nmap scan with arbitrary arguments against a target. Returns raw output and auto-saves open ports to machine inventory. Disabled by default; respects the "Agent can run nmap" safety setting (Settings > Safety). |
 
 **Web tools** (3) — fetch URLs, search the web, and browse GitHub repos, no `tool_context` needed:
 

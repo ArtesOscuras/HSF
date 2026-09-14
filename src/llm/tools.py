@@ -1094,7 +1094,10 @@ def _resolve_cache_path(filename):
 
 def _resolve_evidence_path(name, filename):
     from src.hsf_paths import evidence_dir
-    base = os.path.normpath(os.path.join(str(evidence_dir()), name))
+    root = os.path.normpath(str(evidence_dir()))
+    base = os.path.normpath(os.path.join(root, name))
+    if not base.startswith(root + os.sep):
+        return None
     resolved = os.path.normpath(os.path.join(base, filename))
     if not resolved.startswith(base + os.sep) and resolved != base:
         return None
@@ -2046,6 +2049,10 @@ def _nmap(args, ctx=None):
     import subprocess
     from src.info import get as info_get
     from src.machines import store, machine_db
+    from src import settings
+
+    if not settings.get("agent_nmap", False):
+        return "nmap is disabled. Enable it in Settings > Safety."
 
     target = args.get("target", "").strip()
     arguments = args.get("arguments", "").strip()
@@ -2783,7 +2790,10 @@ def _delete_file(args, ctx=None):
         base = str(cache_dir())
     else:
         base = str(lst_dir())
-    path = os.path.join(base, fname)
+    base = os.path.normpath(base)
+    path = os.path.normpath(os.path.join(base, fname))
+    if not path.startswith(base + os.sep):
+        return f"Invalid filename: {fname}"
     if not os.path.isfile(path):
         return f"File not found: {fname}"
     os.remove(path)
@@ -2803,8 +2813,8 @@ def _delete_evidence(args, ctx=None):
             shutil.rmtree(base)
             os.makedirs(base, exist_ok=True)
         return "All evidence deleted."
-    path = os.path.join(base, name)
-    if not os.path.isdir(path):
+    path = _resolve_evidence_path(name, "")
+    if not path or not os.path.isdir(path):
         return f"Evidence session '{name}' not found."
     shutil.rmtree(path)
     return f"Evidence '{name}' deleted."
