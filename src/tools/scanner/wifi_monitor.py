@@ -398,19 +398,22 @@ def _extract_eapol(pkt):
         mic = bytes(key.key_mic) if key.key_mic else b"\x00" * 16
     except Exception:
         mic = b"\x00" * 16
-    try:
-        keyver = int(key.key_descriptor_type_version) & 7
-    except Exception:
-        keyver = 0
     eapol = b""
     eapol_len = 0
+    keyver = 0
     try:
         raw_eapol = bytes(pkt[EAPOL])
         if len(raw_eapol) >= 97:
             eapol = raw_eapol[:81] + b"\x00" * 16 + raw_eapol[97:]
             eapol_len = len(raw_eapol)
+            keyver = raw_eapol[6] & 7
     except Exception:
         pass
+    if not keyver:
+        try:
+            keyver = int(key.key_descriptor_type_version) & 7
+        except Exception:
+            keyver = 0
     return {
         "msg": msg,
         "nonce": nonce,
@@ -513,9 +516,19 @@ def _write_handshake_hc22000(bssid, client, ssid):
         anonce = state.get("anonce")
         keymic = state.get("keymic")
         eapol = state.get("eapol")
+        keyver = state.get("keyver", 0)
         seen = set(state.get("seen", set()))
     if not (anonce and keymic and eapol):
         return
+    if keyver == 0:
+        _emit_error(
+            f"WPA handshake for {ssid or '(hidden)'} ({bssid}): key descriptor "
+            f"version 0 (WPA3-SAE) — hashcat cannot crack it, skipping .hc22000")
+        return
+    if keyver == 3:
+        _emit_error(
+            f"WPA handshake for {ssid or '(hidden)'} ({bssid}) is WPA3 (key "
+            f"descriptor version 3); hashcat may reject/fail it on SAE")
     line = _build_hc22000_line(ssid, bssid, client, anonce, keymic, eapol,
                                _message_pair(seen))
     safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in ssid) or "hidden"

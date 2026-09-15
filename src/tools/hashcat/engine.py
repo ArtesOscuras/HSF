@@ -1,8 +1,9 @@
 """Hashcat engine — wraps the hashcat binary for background cracking."""
+import os
 import re
 import subprocess
+import tempfile
 import threading
-import time
 
 from src.resolve_binary import resolve
 
@@ -33,6 +34,9 @@ class HashcatEngine:
         self._progress_done = 0
         self._progress_total = 0
         self._progress_recovered = 0
+        self._outfile_path = None
+        self._outfile_seen = 0
+        self._cracked = []
 
     def start(self):
         threading.Thread(target=self._run, daemon=True).start()
@@ -67,12 +71,47 @@ class HashcatEngine:
         except (OSError, subprocess.TimeoutExpired):
             return {"cpu": True, "gpu": True}
 
+    def _make_outfile(self):
+        try:
+            fd, path = tempfile.mkstemp(prefix="hsf_hashcat_", suffix=".out")
+            os.close(fd)
+            os.unlink(path)
+            self._outfile_path = path
+            return path
+        except OSError:
+            self._outfile_path = None
+            return None
+
+    def _poll_outfile(self):
+        if not self._outfile_path:
+            return
+        try:
+            with open(self._outfile_path, "r", errors="replace") as f:
+                lines = f.read().splitlines()
+        except OSError:
+            return
+        while self._outfile_seen < len(lines):
+            plain = lines[self._outfile_seen]
+            self._outfile_seen += 1
+            if plain:
+                self._cracked.append(plain)
+                if self._on_cracked:
+                    self._on_cracked(self._hash_value, plain)
+
+    def _cleanup_outfile(self):
+        if self._outfile_path:
+            try:
+                os.unlink(self._outfile_path)
+            except OSError:
+                pass
+            self._outfile_path = None
+
     def _run(self):
         binary = resolve("hashcat")
         if not binary:
             if self._on_output:
                 self._on_output("hashcat binary not found in PATH.\n", "error")
-            self._finish(None)
+            self._finish([])
             return
 
         cmd = [binary, "-m", self._mode, self._hash_value]
@@ -84,6 +123,10 @@ class HashcatEngine:
                     cmd.extend([f"-{key}", charset])
         else:
             cmd.append(self._wordlist)
+
+        outfile = self._make_outfile()
+        if outfile:
+            cmd.extend(["--outfile", outfile, "--outfile-format", "2"])
 
         cmd.extend([
             "--quiet", "--status", "--status-timer=1", "--potfile-disable",
@@ -110,10 +153,10 @@ class HashcatEngine:
         except (FileNotFoundError, PermissionError, OSError) as e:
             if self._on_output:
                 self._on_output(f"Failed to start hashcat: {e}\n", "error")
-            self._finish(None)
+            self._cleanup_outfile()
+            self._finish([])
             return
 
-        cracked = []
         for line in self._proc.stdout:
             if self._stop_flag.is_set():
                 self._proc.terminate()
@@ -123,17 +166,16 @@ class HashcatEngine:
                 continue
             self._emit(f"  {line}\n")
             self._parse_progress(line)
-            if _is_cracked_line(line, self._hash_value):
-                plain = line.rsplit(":", 1)[1]
-                if plain and len(plain) < 200:
-                    cracked.append(line)
+            self._poll_outfile()
 
         try:
             self._proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
             self._proc.kill()
 
-        self._finish(cracked)
+        self._poll_outfile()
+        self._cleanup_outfile()
+        self._finish(self._cracked)
 
     def _emit(self, text, color=None):
         if self._on_output:
@@ -156,21 +198,5 @@ class HashcatEngine:
         if self._on_progress and self._progress_total > 0:
             self._on_progress(self._progress_total, self._progress_total,
                               self._progress_recovered)
-        if cracked:
-            for c in cracked:
-                if self._on_cracked:
-                    plain = c.rsplit(":", 1)[1] if ":" in c else c
-                    self._on_cracked(self._hash_value, plain)
         if self._on_done:
             self._on_done(cracked or [])
-
-
-_STATUS_RE = re.compile(r"\.\s*:")  # status lines have "..........:" before value
-
-
-def _is_cracked_line(line, hash_val):
-    if not line:
-        return False
-    if _STATUS_RE.search(line):
-        return False
-    return ':' in line
