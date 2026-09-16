@@ -80,6 +80,7 @@ class ToolsView(BaseView):
             {"name": "Bruteforce", "action": "bruteforce", "desc": "Brute force FTP, SSH, SMB credentials."},
             {"name": "Hashcat", "action": "hashcat", "desc": "Crack hashes with hashcat."},
             {"name": "Dicma", "action": "dicma", "desc": "Generate custom wordlists."},
+            {"name": "Wifi operator", "action": "wifioperator", "desc": "Deauth clients from nearby WiFi networks."},
         ]
         self._rendered = False
         self._poll_id = None

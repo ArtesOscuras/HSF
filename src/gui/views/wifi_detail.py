@@ -129,6 +129,14 @@ class WifiDetailView(BaseView):
         else:
             self._lock_btn.config(text=f"  Lock channel {chan}  ", fg=BRIGHT)
 
+    @staticmethod
+    def _pmf_label(pmf):
+        return {
+            "required": "required (802.11w)",
+            "capable": "capable (802.11w)",
+            "no": "no",
+        }.get(pmf, "-")
+
     def _poll(self):
         self._refresh()
         self._poll_id = self.after(2000, self._poll)
@@ -159,6 +167,7 @@ class WifiDetailView(BaseView):
             ("BSSID", net.get("bssid", "") or "-"),
             ("Signal", f"{net.get('signal', 0)}%" if net.get("signal") else "-"),
             ("Security", net.get("security", "") or "-"),
+            ("PMF", self._pmf_label(net.get("pmf"))),
             ("Channel", str(net.get("chan", "") or "-")),
             ("Frequency", net.get("freq", "") or "-"),
             ("Interface", net.get("device", "") or "-"),

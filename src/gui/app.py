@@ -847,7 +847,7 @@ class App(tk.Tk):
         self.console.register_command("view", self._cmd_view, "Switch or list views")
         self.console.set_subcommands("view", ["list", "wifi", "tools", "inventory", "machine", "domain", "shell", "credential", "hash", "user", "passwords", "people", "evidence", "services", "dictionary", "rule", "poc", "report", "handshake"])
         self.console.register_command("use", self._cmd_use, "Use a tool")
-        self.console.set_subcommands("use", ["scanner", "port-inspector", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "bannergrab", "whatweb", "bruteforce", "hashcat", "dicma"])
+        self.console.set_subcommands("use", ["scanner", "port-inspector", "fuzzer", "webrecorder", "nslookup", "ping", "tcpscan", "udpscan", "bannergrab", "whatweb", "bruteforce", "hashcat", "dicma", "wifioperator"])
         self.console.register_command("connect", self._cmd_connect, "Connect via FTP/SFTP/SSH/WinRM")
         self.console.set_subcommands("connect", ["ftp", "sftp", "ssh", "winrm"])
         self.console.register_command("start", self._cmd_start, "Start listeners")
@@ -1663,7 +1663,7 @@ class App(tk.Tk):
 
     def _cmd_use(self, args):
         if not args:
-            self.console.body("Usage: use <scanner|port-inspector|fuzzer|webrecorder|nslookup|ping|tcpscan|udpscan|bannergrab|whatweb|ftp|dicma> ...")
+            self.console.body("Usage: use <scanner|port-inspector|fuzzer|webrecorder|nslookup|ping|tcpscan|udpscan|bannergrab|whatweb|ftp|dicma|wifioperator> ...")
             return
         sub = args[0].lower()
         rest = args[1:]
@@ -1693,6 +1693,8 @@ class App(tk.Tk):
             self._cmd_use_hashcat(rest)
         elif sub == "dicma":
             self._cmd_use_dicma(rest)
+        elif sub == "wifioperator":
+            self._cmd_use_wifioperator(rest)
         else:
             self.console.error(f"Unknown tool: {sub}")
 
@@ -2093,6 +2095,10 @@ class App(tk.Tk):
         )
         self._hashcat_engine = engine
         engine.start()
+
+    def _cmd_use_wifioperator(self, args):
+        from .dialogs.wifi_operator import WifiOperatorDialog
+        WifiOperatorDialog(self)
 
     def _cmd_use_dicma(self, args):
         from .dialogs.dicma import DicmaDialog
@@ -2788,6 +2794,8 @@ class App(tk.Tk):
             self._cmd_use_hashcat([])
         elif action == "dicma":
             self._cmd_use_dicma([])
+        elif action == "wifioperator":
+            self._cmd_use_wifioperator([])
 
     def _on_inventory_click(self, action):
         self.visualizer.activate_view(action)
@@ -5665,7 +5673,10 @@ class App(tk.Tk):
                     if os.path.isfile(fp):
                         os.remove(fp)
 
-        self.console.success("All data cleared (machines, domains, inventory, people, shells, evidence, POCs, cache). Dictionaries, rules and reports preserved.")
+        from src.tools.scanner import wifi_monitor
+        wifi_monitor.clear()
+
+        self.console.success("All data cleared (machines, domains, inventory, people, shells, evidence, POCs, cache, WiFi networks/probes). Dictionaries, rules and reports preserved.")
 
     def _toggle_focus(self, event=None):
         focused = self.focus_get()
