@@ -150,7 +150,50 @@ def _stderr_reader(proc, on_line):
         pass
 
 
-def capture_loop(iface, stop_event):
+# Channels to hop through while capturing (2.4 GHz + 5 GHz).
+HOP_CHANNELS = [1, 6, 11, 36, 40, 44, 48, 100, 116, 132, 149, 153, 157, 161]
+HOP_DWELL = 0.5
+
+
+def set_channel(iface, chan):
+    """Set the Wi-Fi channel via CoreWLAN (public API, what `airport` used).
+
+    CoreWLAN refuses to change the channel while the interface is associated,
+    which is fine: it is called in monitor mode (disassociated). Returns True
+    on success."""
+    if not available():
+        return False
+    try:
+        dev = _client().interfaceWithName_(iface)
+        if dev is None:
+            return False
+        for c in (dev.supportedWLANChannels() or []):
+            if int(c.channelNumber()) == int(chan):
+                res = dev.setWLANChannel_error_(c, None)
+                return bool(res[0]) if isinstance(res, tuple) else bool(res)
+    except Exception:
+        return False
+    return False
+
+
+def _hopper(iface, stop_event, proc):
+    """Cycle the monitor channel while tcpdump keeps capturing."""
+    from src.tools.scanner import wifi_monitor as wm
+    i = 0
+    announced = False
+    while not stop_event.is_set() and proc.poll() is None:
+        ch = HOP_CHANNELS[i % len(HOP_CHANNELS)]
+        if set_channel(iface, ch) and not announced:
+            announced = True
+            wm._emit_error(f"macOS monitor: hopping channels on {iface} "
+                           f"({len(HOP_CHANNELS)} channels)")
+        i += 1
+        end = time.time() + HOP_DWELL
+        while time.time() < end and not stop_event.is_set():
+            time.sleep(0.05)
+
+
+def capture_loop(iface, stop_event, hop=True):
     """Monitor-mode RX on macOS via tcpdump -I (radiotap).
 
     Runs in a worker thread; feeds every captured 802.11 frame into the shared
@@ -158,6 +201,7 @@ def capture_loop(iface, stop_event):
     handshakes are collected exactly like on Linux. Requires root (BPF) and the
     interface to be **disassociated** (monitor mode cannot run while associated;
     macOS may auto-rejoin, which makes it stop capturing — disconnect it first).
+    With ``hop`` it cycles the monitor channel via CoreWLAN while capturing.
     """
     import threading
     from functools import partial
@@ -194,6 +238,10 @@ def capture_loop(iface, stop_event):
     th = threading.Thread(target=_stderr_reader, args=(proc, _on_err),
                           daemon=True)
     th.start()
+
+    if hop:
+        threading.Thread(target=_hopper, args=(iface, stop_event, proc),
+                         daemon=True).start()
 
     process = partial(wm._process, device=iface)
     frames = 0
