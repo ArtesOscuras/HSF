@@ -3832,7 +3832,7 @@ class App(tk.Tk):
             elif t == "scan_error":
                 scan_errors.append(ev)
             elif t == "scan_info":
-                self.console.body(ev["message"])
+                self.console.info(ev["message"])
             elif t == "handshake":
                 self.console.success(ev["message"])
 

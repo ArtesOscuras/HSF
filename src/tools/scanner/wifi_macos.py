@@ -153,6 +153,8 @@ def _stderr_reader(proc, on_line):
 # Channels to hop through while capturing (2.4 GHz + 5 GHz).
 HOP_CHANNELS = [1, 6, 11, 36, 40, 44, 48, 100, 116, 132, 149, 153, 157, 161]
 HOP_DWELL = 0.6
+# How long a locked-channel session is kept alive (until the lock changes/stop).
+LOCK_HOLD = float("inf")
 
 
 def _pick_channel(dev, chan):
@@ -203,21 +205,38 @@ def supported_channels(iface):
 
 
 def _hop_band(iface, chans, stop_event, deadline):
-    """Hop the given channels until deadline (or stop)."""
+    """Hop the given channels until deadline (or stop).
+
+    When `wifi_monitor` has a channel locked, park on it instead of cycling
+    (as long as it belongs to this band). Returns as soon as the lock changes
+    or is released so `capture_loop` can recreate the session on the right band.
+    """
+    from src.tools.scanner import wifi_monitor as wm
     i = 0
     fails = 0
+    lock = wm._locked_channel
     while not stop_event.is_set() and time.time() < deadline:
-        if not set_channel(iface, chans[i % len(chans)]):
+        if wm._locked_channel != lock:
+            return fails
+        target = lock or chans[i % len(chans)]
+        if not set_channel(iface, target):
             fails += 1
         i += 1
         end = min(deadline, time.time() + HOP_DWELL)
         while time.time() < end and not stop_event.is_set():
+            if wm._locked_channel != lock:
+                return fails
             time.sleep(0.05)
     return fails
 
 
-def _pump(proc, iface, stop_event, deadline):
-    """Read radiotap frames from proc.stdout until deadline/stop/exit."""
+def _pump(proc, iface, stop_event, deadline, lock_snapshot=None):
+    """Read radiotap frames from proc.stdout until deadline/stop/exit.
+
+    Also returns when `wifi_monitor`'s locked channel differs from
+    `lock_snapshot` (the lock was set, changed or released mid-session), so the
+    session is torn down and recreated with the new lock.
+    """
     from functools import partial
     from src.tools.scanner import wifi_monitor as wm
     process = partial(wm._process, device=iface)
@@ -228,7 +247,8 @@ def _pump(proc, iface, stop_event, deadline):
     big = gh[:4] in (b"\xa1\xb2\xc3\xd4", b"\xa1\xb2\x3c\x4d")
     endian = ">" if big else "<"
     while (not stop_event.is_set() and time.time() < deadline
-           and proc.poll() is None):
+           and proc.poll() is None
+           and wm._locked_channel == lock_snapshot):
         ph = _read_exact(proc.stdout, 16)
         if ph is None:
             break
@@ -249,6 +269,7 @@ def _pump(proc, iface, stop_event, deadline):
         except Exception:
             pass
     return frames
+
 
 
 def capture_loop(iface, stop_event, hop=True):
@@ -292,10 +313,26 @@ def capture_loop(iface, stop_event, hop=True):
         if err["n"] <= 10:
             wm._emit_error(f"tcpdump: {core}")
 
+    announced = None
     while not stop_event.is_set():
-        for band in bands:
+        locked = wm._locked_channel
+        if locked != announced:
+            if locked:
+                wm._emit_info(f"macOS monitor: locked to channel {locked} "
+                              f"on {iface}")
+            else:
+                wm._emit_info(f"macOS monitor: channel lock released on "
+                              f"{iface}, resuming hop")
+            announced = locked
+        session_bands = [[locked]] if locked else bands
+        for band in session_bands:
             if stop_event.is_set():
                 break
+            # A lock set while the previous band was running must take effect
+            # now, before binding this band's first channel.
+            if wm._locked_channel != locked:
+                break
+            lock_snapshot = wm._locked_channel
             # Bind the monitor to this band by starting on its first channel.
             set_channel(iface, band[0])
             time.sleep(0.3)
@@ -309,12 +346,15 @@ def capture_loop(iface, stop_event, hop=True):
                 return
             threading.Thread(target=_stderr_reader, args=(proc, _on_err),
                              daemon=True).start()
-            deadline = time.time() + max(len(band) * HOP_DWELL, 3.0) + 5.0
+            if lock_snapshot:
+                deadline = time.time() + LOCK_HOLD
+            else:
+                deadline = time.time() + max(len(band) * HOP_DWELL, 3.0) + 5.0
             hp = threading.Thread(target=_hop_band,
                                   args=(iface, band, stop_event, deadline),
                                   daemon=True)
             hp.start()
-            _pump(proc, iface, stop_event, deadline)
+            _pump(proc, iface, stop_event, deadline, lock_snapshot)
             _terminate(proc)
             hp.join(timeout=2)
 

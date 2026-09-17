@@ -281,7 +281,7 @@ class WifiView(BaseView):
                 text=f"Scan-only mode  |  {len(self._fb_nets)} networks")
 
     def _update_unlock_btn(self):
-        if not wifi_monitor.injection_supported():
+        if not wifi_monitor.monitor_supported():
             self._unlock_btn.pack_forget()
             return
         if wifi_monitor.is_locked():
