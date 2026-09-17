@@ -9,6 +9,9 @@ returns False and the caller degrades gracefully. Nothing here is imported on
 Linux, so the Linux code path is completely unaffected.
 """
 
+import os
+import shutil
+import struct
 import subprocess
 import time
 
@@ -103,6 +106,94 @@ def _security_label(corewlan, network):
         if getattr(corewlan, name, None) == value:
             return label
     return "WPA2"
+
+
+def _tcpdump():
+    for p in (shutil.which("tcpdump"), "/usr/sbin/tcpdump",
+              "/usr/bin/tcpdump"):
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
+def _read_exact(stream, n):
+    buf = b""
+    while len(buf) < n:
+        chunk = stream.read(n - len(buf))
+        if not chunk:
+            return None
+        buf += chunk
+    return buf
+
+
+def capture_loop(iface, stop_event):
+    """Monitor-mode RX on macOS via tcpdump -I (radiotap).
+
+    Runs in a worker thread; feeds every captured 802.11 frame into the shared
+    monitor pipeline (wifi_monitor._process) so networks, client probes and
+    handshakes are collected exactly like on Linux. Requires root (BPF) and the
+    interface to be disassociated (monitor mode cannot run while associated).
+    """
+    from functools import partial
+    from src.tools.scanner import wifi_monitor as wm
+
+    tcpdump = _tcpdump()
+    if not tcpdump:
+        wm._emit_error("macOS monitor: tcpdump not found.")
+        return
+    cmd = [tcpdump, "-I", "-i", iface, "-y", "IEEE802_11_RADIO",
+           "-U", "-w", "-"]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                stderr=subprocess.DEVNULL)
+    except Exception as e:
+        wm._emit_error(f"macOS monitor: could not start tcpdump: {e}")
+        return
+
+    process = partial(wm._process, device=iface)
+    try:
+        gh = _read_exact(proc.stdout, 24)
+        if not gh:
+            return
+        big = gh[:4] in (b"\xa1\xb2\xc3\xd4", b"\xa1\xb2\x3c\x4d")
+        endian = ">" if big else "<"
+        while not stop_event.is_set():
+            ph = _read_exact(proc.stdout, 16)
+            if ph is None:
+                break
+            _ts, _tus, incl, _orig = struct.unpack(endian + "IIII", ph)
+            if incl <= 0 or incl > 65535:
+                break
+            data = _read_exact(proc.stdout, incl)
+            if data is None:
+                break
+            try:
+                from scapy.all import RadioTap
+                pkt = RadioTap(data)
+            except Exception:
+                continue
+            try:
+                process(pkt)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    finally:
+        _terminate(proc)
+
+
+def _terminate(proc):
+    try:
+        proc.terminate()
+    except Exception:
+        pass
+    try:
+        proc.wait(timeout=2)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
 
 
 def scan(iface=None):

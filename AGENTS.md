@@ -384,21 +384,37 @@ Guidelines:
 
 ## WiFi Monitor (`src/tools/scanner/wifi_monitor.py`)
 
-The WiFi subsystem is **platform-split**: Linux keeps full passive monitoring, macOS runs in scan-only mode.
+The WiFi subsystem is **platform-split**: Linux does full passive monitoring + injection; macOS can do **monitor RX (capture)** and scanning, but **no injection**.
 
-**Platform detection** is centralized in `src/info.py` (populated by `init_dialog` at startup). `wifi_monitor` reads `_info.get("platform") or sys.platform` once at import into `_IS_MACOS` / `_IS_LINUX`. Do not duplicate `sys.platform` checks; use `is_macos()` / `is_linux()` / `monitor_supported()`.
+**Platform detection** is centralized in `src/info.py` (populated by `init_dialog` at startup). `wifi_monitor` reads `_info.get("platform") or sys.platform` once at import into `_IS_MACOS` / `_IS_LINUX`. Do not duplicate `sys.platform` checks; use `is_macos()` / `is_linux()` and the capability helpers below.
 
-**Linux (unchanged):**
-* Interfaces via `nmcli` / `iw`; monitor mode via `iw`/`ip`/`nmcli`; passive capture of beacons, probes, and EAPOL handshakes with `scapy`.
-* `start_monitor()` returns True, `monitor_supported()` returns True. `WifiView` uses `get_networks()` (live monitor data). Falls back to `nmcli` system scan when the monitor is off.
+**Capabilities (do NOT use a single flag):**
+* `capture_supported()` — monitor-mode RX. Linux: always. macOS: only if `tcpdump` exists.
+* `injection_supported()` — frame injection / deauth / CSA. Linux only.
+* `monitor_supported()` is kept as an alias of `capture_supported()` (backward compat).
+* Gate **capture** features (networks/probes/handshakes) on `capture_supported()`; gate **attack** features (Deauther, CSA Spoof, `lock_channel`) on `injection_supported()`.
+
+**Per-interface monitor (user-activated, no auto-start):**
+* The monitor is **never started automatically** at app boot. Each interface is enabled/disabled explicitly by the user.
+* `WifiMonitorService` keeps an `_enabled` set; the manager only spawns workers for enabled + free interfaces. API: `enable_iface(iface)`, `disable_iface(iface)`, `is_iface_enabled(iface)`, `enabled_ifaces()`, `active_ifaces()`.
+* `is_running()` means "at least one interface is actively capturing".
+* UI: one switch per interface — `<iface> Monitor mode` in **Services** (`key = "wifi:<iface>"`) and a `mon` toggle per interface in **WifiView**.
+* `reserve_iface(iface)` / `release_iface(iface)` pause/resume one interface (used by the attacks while injecting) without changing its enabled state.
+
+**Linux:**
+* Interfaces via `nmcli` / `iw` (monitor-mode interfaces are included too); monitor mode via `iw`/`ip`/`nmcli`; passive capture of beacons, probes, and EAPOL handshakes with `scapy`.
+* `WifiView` uses `get_networks()` (live monitor data). Falls back to the `nmcli` system scan when no interface is capturing.
+* `deauth()` works whether or not the monitor service is running: if the interface is not in monitor mode it enters it for the burst and restores it afterwards (so it is not sniffing while injecting).
 * Handshake files (`.pcap`, `.hc22000`) are written to `handshakes_dir()`.
 
-**macOS (scan-only):**
-* Backend lives in `src/tools/scanner/wifi_macos.py`, imported lazily only on darwin. It uses CoreWLAN via `pyobjc-framework-CoreWLAN` (conditional dependency, installed only when `sys_platform == 'darwin'`).
-* Returns the **same normalized dict shape** as the Linux `_scan_nmcli` backend, so the GUI is platform-agnostic.
-* `monitor_supported()` returns False and `start_monitor()` returns False, so `WifiView._poll` automatically uses the fallback scan path (`scan_networks_fallback` → `scan_networks` → CoreWLAN).
-* The built-in Apple Silicon Wi-Fi adapter does **not** support monitor mode / frame injection, so client probes and WPA handshake capture are disabled. `WifiView` / `WifiDetailView` show a "scan-only" message instead of pretending the monitor is running.
+**macOS:**
+* Backend lives in `src/tools/scanner/wifi_macos.py`, imported lazily only on darwin. `scan()` uses CoreWLAN via `pyobjc-framework-CoreWLAN` (conditional dependency, installed only when `sys_platform == 'darwin'`) and returns the **same normalized dict shape** as Linux.
+* **Monitor RX works** on the built-in Apple Silicon radio (no injection). It is done with `tcpdump -I -i <iface> -y IEEE802_11_RADIO -U -w -` (requires **root**/BPF and the interface to be **disassociated**, since monitor mode cannot run while associated). `wifi_macos.capture_loop()` parses the pcap stream and feeds `wifi_monitor._process()` — so networks, client probes and handshakes are collected exactly like on Linux.
+* The old `airport` CLI was removed by Apple (only `airportd.sb` remains); `tcpdump -I` is the replacement.
+* Non-root: no capture → `WifiView` falls back to the CoreWLAN scan (scan-only). `WifiDetailView` shows "Probe capture requires root permissions in Mac OS."
+* Note: CoreWLAN scanning needs **Location Services** granted to the terminal; running as **root** (sudo) loses that grant and returns empty SSIDs — run HSF as the normal user for scanning, or as root for monitor capture.
 * `iface` discovery falls back to parsing `networksetup -listallhardwareports` if CoreWLAN is unavailable.
+* No PMF field via CoreWLAN.
 
 **Rules for changes:**
 * Never let macOS code run on Linux or vice versa — every platform branch must early-return.

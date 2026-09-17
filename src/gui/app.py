@@ -694,7 +694,6 @@ class App(tk.Tk):
             self._start_passive_scanner()
         if self._shell_listener is None or not self._shell_listener.is_running:
             self._start_shell_listener()
-        self._start_wifi_monitor()
 
     def _set_initial_sash(self):
         self.update_idletasks()
@@ -750,20 +749,33 @@ class App(tk.Tk):
                 if self._shell_listener and self._shell_listener.is_running:
                     self._shell_listener.stop()
                     self.console.info("Reverse shell listener stopped")
-        elif key == "wifi":
+        elif key.startswith("wifi:"):
             from src.tools.scanner import wifi_monitor
-            if not wifi_monitor.monitor_supported():
-                self.console.info(
-                    "WiFi scan-only mode: passive monitor/probes unavailable on this platform")
-                return
+            iface = key.split(":", 1)[1]
             if enable:
-                if not wifi_monitor.is_running():
-                    wifi_monitor.start_monitor()
-                    self.console.info("WiFi monitor started")
+                if not wifi_monitor.capture_supported():
+                    self.console.info(
+                        "WiFi capture not available on this platform "
+                        "(Linux: needs a monitor adapter; macOS: needs root "
+                        "and tcpdump).")
+                    return
+                wifi_monitor.enable_iface(iface)
+                self.console.info(f"Monitor mode ON on {iface}")
             else:
-                if wifi_monitor.is_running():
-                    wifi_monitor.stop_monitor()
-                    self.console.info("WiFi monitor stopped")
+                wifi_monitor.disable_iface(iface)
+                self.console.info(f"Monitor mode OFF on {iface}")
+
+    def _services_state(self):
+        from src.tools.scanner import wifi_monitor
+        states = {
+            "mdns": (self._passive_scanner is not None
+                     and self._passive_scanner.is_running),
+            "revershell": (self._shell_listener is not None
+                           and self._shell_listener.is_running),
+        }
+        for iface in wifi_monitor.wifi_interfaces():
+            states[f"wifi:{iface}"] = wifi_monitor.is_iface_enabled(iface)
+        return states
 
     def _register_views(self):
         wifi_view = WifiView(self.visualizer)
@@ -815,11 +827,7 @@ class App(tk.Tk):
 
         services_view = ServicesView(self.visualizer)
         services_view._on_toggle = self._on_service_toggle
-        services_view._check_state = lambda: (
-            self._passive_scanner is not None and self._passive_scanner.is_running,
-            self._shell_listener is not None and self._shell_listener.is_running,
-            _wifi_monitor_running(),
-        )
+        services_view._check_state = self._services_state
         self.visualizer.register_view("services", services_view)
 
         dictionarys_view = DictionarysView(self.visualizer)

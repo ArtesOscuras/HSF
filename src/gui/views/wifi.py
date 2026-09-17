@@ -170,6 +170,32 @@ class WifiView(BaseView):
                 font=fonts.view_font_bold(11) if i == self._selected_iface else fonts.view_font(11),
                 fg=ACCENT if i == self._selected_iface else MUTED))
 
+            if iface is not None:
+                on = wifi_monitor.is_iface_enabled(iface)
+                mon = tk.Label(
+                    self.iface_frame,
+                    text=" MON " if on else " mon ",
+                    font=fonts.view_font_bold(9),
+                    fg=STRONG if on else MUTED,
+                    bg="#000000",
+                )
+                mon.pack(side=tk.LEFT, padx=(0, 8))
+                mon.bind("<Button-1>", lambda e, i=iface: self._toggle_monitor(i))
+                mon.bind("<Enter>", lambda e, b=mon: b.config(fg=BRIGHT))
+                mon.bind("<Leave>", lambda e, b=mon, i=iface: b.config(
+                    fg=STRONG if wifi_monitor.is_iface_enabled(i) else MUTED))
+
+    def _toggle_monitor(self, iface):
+        if wifi_monitor.is_iface_enabled(iface):
+            wifi_monitor.disable_iface(iface)
+        else:
+            if not wifi_monitor.capture_supported():
+                return
+            wifi_monitor.enable_iface(iface)
+        self._last_hash = None
+        self._render_ifaces()
+        self._poll()
+
     def _select_iface(self, iface):
         if self._selected_iface == iface:
             iface = None
@@ -227,21 +253,18 @@ class WifiView(BaseView):
             self._render_ifaces()
 
     def _update_stats(self):
-        if not wifi_monitor.monitor_supported():
+        if wifi_monitor.is_running():
+            s = wifi_monitor.get_stats()
+            self.stats_label.config(
+                text=f"{s['networks']} networks  |  {s['probes']} clients  |  "
+                     f"{s['handshakes']} handshakes  "
+                     f"(beacons {s['beacons_seen']}, data {s['data_seen']})")
+        else:
             self.stats_label.config(
                 text=f"Scan-only mode  |  {len(self._fb_nets)} networks")
-            return
-        if not wifi_monitor.is_running():
-            self.stats_label.config(text="")
-            return
-        s = wifi_monitor.get_stats()
-        self.stats_label.config(
-            text=f"{s['networks']} networks  |  {s['probes']} clients  |  "
-                 f"{s['handshakes']} handshakes  "
-                 f"(beacons {s['beacons_seen']}, data {s['data_seen']})")
 
     def _update_unlock_btn(self):
-        if not wifi_monitor.monitor_supported():
+        if not wifi_monitor.injection_supported():
             self._unlock_btn.pack_forget()
             return
         if wifi_monitor.is_locked():

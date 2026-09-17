@@ -96,8 +96,36 @@ def is_linux():
     return _IS_LINUX
 
 
-def monitor_supported():
+def tcpdump_path():
+    """Locate the tcpdump binary (used for macOS monitor RX)."""
+    for p in (shutil.which("tcpdump"), "/usr/sbin/tcpdump",
+              "/usr/bin/tcpdump", "/sbin/tcpdump"):
+        if p and os.path.exists(p):
+            return p
+    return None
+
+
+def capture_supported():
+    """Monitor-mode *receive* (capture) is available.
+
+    Linux: yes. macOS: only if tcpdump exists (it drives monitor mode via the
+    Apple80211 ioctl). The built-in Apple Silicon radio supports monitor RX
+    (no injection)."""
+    if _IS_LINUX:
+        return True
+    if _IS_MACOS:
+        return tcpdump_path() is not None
+    return False
+
+
+def injection_supported():
+    """Frame injection / deauth is Linux-only."""
     return _IS_LINUX
+
+
+def monitor_supported():
+    # Kept for backward compatibility: means "capture (monitor RX)".
+    return capture_supported()
 
 
 def _macos_backend():
@@ -111,27 +139,27 @@ def wifi_interfaces():
             return _macos_backend().interfaces()
         except Exception:
             return []
+    names = []
     if _which("nmcli"):
         ok, out, _ = _run(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE", "device", "status"])
         if ok:
-            names = []
             for line in out.splitlines():
                 parts = _split_terse(line)
                 if len(parts) >= 2 and parts[1] == "wifi":
                     names.append(parts[0])
-            if names:
-                return names
-    if _which("iw"):
+    if not names and _which("iw"):
         ok, out, _ = _run(["iw", "dev"])
         if ok:
-            names = []
             for line in out.splitlines():
                 m = re.match(r"\s*Interface\s+(\S+)", line)
                 if m:
                     names.append(m.group(1))
-            if names:
-                return names
-    return []
+    # Also expose interfaces already in monitor mode (e.g. left over, or
+    # enabled), so the per-interface monitor switch can turn them back off.
+    for iface in _monitor_interfaces():
+        if iface not in names:
+            names.append(iface)
+    return names
 
 
 def wifi_interfaces_state():
@@ -930,11 +958,12 @@ def _send_deauth(iface, addr1, addr2, addr3, count, reason):
 def deauth(bssid, client=None, iface=None, count=DEAUTH_COUNT, reason=7):
     """Send a burst of deauthentication frames from an AP to a client.
 
-    Returns (ok, message). Linux only, requires the monitor to be running."""
-    if not monitor_supported():
+    Linux only. Works whether or not the monitor service is running: if the
+    target interface is not already in monitor mode it is put there for the
+    burst and restored afterwards, so it is NOT sniffing while injecting.
+    Returns (ok, message)."""
+    if not injection_supported():
         return False, "Deauth is not supported on this platform (scan-only)."
-    if not is_running():
-        return False, "WiFi monitor is off. Start the monitor before deauthing."
     bssid = _mac(bssid)
     if not bssid:
         return False, "No target network selected."
@@ -946,52 +975,37 @@ def deauth(bssid, client=None, iface=None, count=DEAUTH_COUNT, reason=7):
     if not chan:
         return False, f"Unknown channel for {bssid}; cannot deauth."
 
-    ifaces = monitor_ifaces()
+    ifaces = wifi_interfaces()
     if not ifaces:
-        return False, "No WiFi interface is in monitor mode."
+        return False, "No WiFi interface available."
     if iface not in ifaces:
         iface = ifaces[0]
-    itype = _iface_type(iface)
-    if itype and itype != "monitor":
-        return False, (f"Interface {iface} is not in monitor mode "
-                       f"(type={itype}); cannot inject frames.")
-
-    locked = _locked_channel
-    released = False
-    if locked is not None:
-        if locked != chan:
-            return False, (f"Channel {locked} is locked but {bssid} is on "
-                           f"channel {chan}. Unlock that channel first.")
-    else:
-        lock_channel(chan)
-        released = True
 
     dst = _mac(client) if client else _BROADCAST
     if dst in ("", _BROADCAST):
         dst = _BROADCAST
+
+    entered = False
+    if _iface_type(iface) != "monitor":
+        if not _enter_monitor(iface):
+            return False, f"Could not put {iface} in monitor mode."
+        entered = True
+
     sent = 0
     try:
-        # Let the monitor worker finish its current dwell so the channel lock
-        # takes effect and the radio is really parked on the target channel.
-        time.sleep(0.7)
         _set_channel(iface, chan)
-        time.sleep(0.1)
+        time.sleep(0.15)
         sent += _send_deauth(iface, dst, bssid, bssid, count, reason)
         if dst != _BROADCAST:
             sent += _send_deauth(iface, bssid, dst, bssid, count, reason)
     except Exception as e:
         return False, f"Deauth failed: {e}"
     finally:
-        if released:
-            unlock_channel()
+        if entered:
+            _exit_monitor(iface)
 
     target = "all clients (broadcast)" if dst == _BROADCAST else dst
     return True, (f"Sent {sent} deauth frames to {target} [{bssid}] "
-                  f"channel {chan} (radio on {_current_channel(iface)}) "
-                  f"on {iface}.")
-
-    target = "all clients (broadcast)" if dst == _BROADCAST else dst
-    return True, (f"Sent {count} deauth frames to {target} [{bssid}] "
                   f"channel {chan} on {iface}.")
 
 
@@ -1002,6 +1016,7 @@ class WifiMonitorService:
         self._ifaces = []
         self._workers = {}
         self._excluded = set()
+        self._enabled = set()
         self._lock = threading.Lock()
 
     def start(self, iface=None):
@@ -1027,6 +1042,34 @@ class WifiMonitorService:
     def ifaces(self):
         return list(self._ifaces)
 
+    def enable(self, iface):
+        """User wants monitor mode on this interface."""
+        with self._lock:
+            self._enabled.add(iface)
+        self.start()
+
+    def disable(self, iface):
+        """User turned monitor mode off for this interface."""
+        with self._lock:
+            self._enabled.discard(iface)
+            self._excluded.discard(iface)
+            w = self._workers.pop(iface, None)
+            self._ifaces = sorted(self._workers)
+        if w:
+            w["stop"].set()
+
+    def is_enabled(self, iface):
+        with self._lock:
+            return iface in self._enabled
+
+    def enabled_ifaces(self):
+        with self._lock:
+            return sorted(self._enabled)
+
+    def active_ifaces(self):
+        with self._lock:
+            return sorted(self._workers)
+
     def reserve(self, iface):
         """Stop monitoring on a single interface and keep it free for
         external use (e.g. the CSA pulse attack). Other interfaces keep
@@ -1045,14 +1088,19 @@ class WifiMonitorService:
 
     def _manager(self):
         while self._running:
-            free = [n for n, s in wifi_interfaces_state()
-                    if s != "connected" and n not in self._excluded]
+            if _IS_MACOS:
+                free = [n for n in wifi_interfaces()
+                        if n not in self._excluded]
+            else:
+                free = [n for n, s in wifi_interfaces_state()
+                        if s != "connected" and n not in self._excluded]
             with self._lock:
+                want = [i for i in free if i in self._enabled]
                 for iface in list(self._workers):
-                    if iface not in free:
+                    if iface not in want:
                         self._workers[iface]["stop"].set()
                         del self._workers[iface]
-                for iface in free:
+                for iface in want:
                     if iface not in self._workers:
                         stop_event = threading.Event()
                         self._workers[iface] = {"stop": stop_event}
@@ -1067,6 +1115,13 @@ class WifiMonitorService:
             time.sleep(5)
 
     def _worker(self, iface, stop_event):
+        if _IS_MACOS:
+            try:
+                from . import wifi_macos
+                wifi_macos.capture_loop(iface, stop_event)
+            except Exception as e:
+                _emit_error(f"WiFi capture error: {e}")
+            return
         if not _enter_monitor(iface):
             return
         try:
@@ -1135,9 +1190,29 @@ def get_service():
 
 
 def start_monitor(iface=None):
-    if _IS_MACOS:
-        return False
     return get_service().start(iface)
+
+
+def enable_iface(iface):
+    """Turn monitor mode ON for a single interface (user action)."""
+    get_service().enable(iface)
+
+
+def disable_iface(iface):
+    """Turn monitor mode OFF for a single interface."""
+    get_service().disable(iface)
+
+
+def is_iface_enabled(iface):
+    return _scanner is not None and _scanner.is_enabled(iface)
+
+
+def enabled_ifaces():
+    return _scanner.enabled_ifaces() if _scanner else []
+
+
+def active_ifaces():
+    return _scanner.active_ifaces() if _scanner else []
 
 
 def stop_monitor():
@@ -1146,7 +1221,8 @@ def stop_monitor():
 
 
 def is_running():
-    return _scanner is not None and _scanner.is_running
+    # True when at least one interface is actively capturing.
+    return bool(_scanner is not None and _scanner.active_ifaces())
 
 
 def last_error():

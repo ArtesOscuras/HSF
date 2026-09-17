@@ -190,7 +190,9 @@ class WifiDetailView(BaseView):
                     self._insert_probe(p)
             else:
                 self.text.insert(tk.END, "  No probes captured yet.\n", "muted")
-        elif not wifi_monitor.monitor_supported():
+        elif wifi_monitor.is_macos():
+            self.text.insert(tk.END, "  Probe capture requires root permissions in Mac OS.\n", "muted")
+        elif not wifi_monitor.capture_supported():
             self.text.insert(tk.END, "  Probe capture requires Linux with a monitor-mode adapter.\n", "muted")
         else:
             self.text.insert(tk.END, "  Probe capture requires root (WiFi Monitor off).\n", "muted")

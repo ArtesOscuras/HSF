@@ -137,8 +137,8 @@ def csa_pulse(iface, bssid=None, client=None, ssid="", channel=0,
                "cycles": 0, "eapol": 0, "handshakes": 0, "target_seen": False,
                "hc22000": "", "targets": [b for b, _ in tg]}
 
-    if not wm.monitor_supported():
-        summary["reason"] = "Monitor/injection is Linux-only."
+    if not wm.injection_supported():
+        summary["reason"] = "Frame injection is Linux-only."
         return summary
     if not tg:
         summary["reason"] = "No target BSSID."

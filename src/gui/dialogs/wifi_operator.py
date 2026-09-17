@@ -564,8 +564,18 @@ class WifiOperatorDialog(tk.Toplevel):
     def _run_deauth(self, bssid, client, iface):
         from src.tools.scanner import wifi_monitor as wm
         target = client if client else "all clients (broadcast)"
-        self._log_async(f"[*] Sending 64 deauth frames to {target} ...")
-        ok, msg = wm.deauth(bssid, client=client, iface=iface)
+        self._log_async(f"[*] Sending deauth frames to {target} ...")
+        if iface:
+            wm.reserve_iface(iface)
+            wm.wait_iface_released(iface, timeout=6.0)
+        ok, msg = False, "Deauth failed."
+        try:
+            ok, msg = wm.deauth(bssid, client=client, iface=iface)
+        except Exception as e:
+            msg = f"Deauth error: {e}"
+        finally:
+            if iface:
+                wm.release_iface(iface)
         self._log_async(("[+] " if ok else "[!] ") + msg,
                         "info" if ok else "error")
         self._post(self._end_deauth)

@@ -14,7 +14,7 @@ INFO = "#5ba3ec"
 COL_GAP = "   "
 ICON_SIZE = 50
 
-_SERVICES = [
+_STATIC_SERVICES = [
     {
         "key": "mdns",
         "name": "mDNS Listener",
@@ -27,13 +27,21 @@ _SERVICES = [
         "desc": "Listener for incoming reverse shell connections",
         "icon": "service.png",
     },
-    {
-        "key": "wifi",
-        "name": "WiFi Monitor",
-        "desc": "Captures nearby networks and client probes",
-        "icon": "wifi.png",
-    },
 ]
+
+
+def _services():
+    """Static services plus one monitor-mode switch per WiFi interface."""
+    from src.tools.scanner import wifi_monitor
+    svcs = [dict(s) for s in _STATIC_SERVICES]
+    for iface in wifi_monitor.wifi_interfaces():
+        svcs.append({
+            "key": f"wifi:{iface}",
+            "name": f"{iface} Monitor mode",
+            "desc": "Captures nearby networks and client probes",
+            "icon": "wifi.png",
+        })
+    return svcs
 
 
 class ServicesView(BaseView):
@@ -112,16 +120,13 @@ class ServicesView(BaseView):
             self._poll_id = None
 
     def _poll(self):
-        if self._check_state:
-            states = self._check_state()
-            for i, svc in enumerate(_SERVICES):
-                self._states[svc["key"]] = states[i] if i < len(states) else False
-        else:
-            for svc in _SERVICES:
-                self._states.setdefault(svc["key"], False)
+        svcs = _services()
+        states = self._check_state() if self._check_state else {}
+        for svc in svcs:
+            self._states[svc["key"]] = bool(states.get(svc["key"], False))
 
         w_name = self.MIN_NAME
-        for svc in _SERVICES:
+        for svc in svcs:
             w_name = max(w_name, len(svc["name"]))
 
         font = tkfont.Font(font=self.text.cget("font"))
@@ -133,7 +138,7 @@ class ServicesView(BaseView):
             return font.measure(" " * n)
 
         max_desc_px = 0
-        for svc in _SERVICES:
+        for svc in svcs:
             max_desc_px = max(max_desc_px, desc_font.measure(svc["desc"]))
         switch_w = col_w(8)
         row_px = ICON_SIZE + gap_px + col_w(w_name) + gap_px + max_desc_px + gap_px + switch_w + 20
@@ -161,7 +166,7 @@ class ServicesView(BaseView):
         self.text.insert(tk.END, center_pad, "bright")
 
         first = True
-        for svc in _SERVICES:
+        for svc in svcs:
             if not first:
                 self.text.insert(tk.END, center_pad, "bright")
             first = False

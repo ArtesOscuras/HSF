@@ -68,6 +68,7 @@ def _checks():
     yield _check("hydra", "hydra", lambda: _resolve_binary("hydra")[0], kind="binary", critical=False)
     yield _check("whatweb", "whatweb", lambda: _resolve_binary("whatweb")[0], kind="binary", critical=False)
     yield _check("xfreerdp", "xfreerdp", lambda: _resolve_binary("xfreerdp")[0], kind="binary", critical=False)
+    yield _check("tcpdump", "tcpdump", lambda: _resolve_binary("tcpdump")[0], kind="binary", critical=False)
     yield _check("browsers", "Chromium browser", lambda: _browser_check()[0], kind="binary", critical=False)
 
     # --- Wordlists ---
