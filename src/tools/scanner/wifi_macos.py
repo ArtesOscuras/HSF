@@ -181,6 +181,12 @@ def capture_loop(iface, stop_event):
     err = {"n": 0}
 
     def _on_err(line):
+        low = line.lower()
+        # tcpdump prints a harmless summary on exit; not an error.
+        if ("packets captured" in low or "packets received by filter" in low
+                or "packets dropped by kernel" in low
+                or low.startswith("listening on")):
+            return
         err["n"] += 1
         if err["n"] <= 10:
             wm._emit_error(f"tcpdump: {line}")
