@@ -56,6 +56,9 @@ class WifiView(BaseView):
         self.iface_frame = tk.Frame(header, bg="#000000")
         self.iface_frame.pack(anchor="center")
 
+        self.monitor_frame = tk.Frame(header, bg="#000000")
+        self.monitor_frame.pack(anchor="center")
+
         self.stats_label = tk.Label(
             header,
             text="",
@@ -170,20 +173,34 @@ class WifiView(BaseView):
                 font=fonts.view_font_bold(11) if i == self._selected_iface else fonts.view_font(11),
                 fg=ACCENT if i == self._selected_iface else MUTED))
 
-            if iface is not None:
-                on = wifi_monitor.is_iface_enabled(iface)
-                mon = tk.Label(
-                    self.iface_frame,
-                    text=" MON " if on else " mon ",
-                    font=fonts.view_font_bold(9),
-                    fg=STRONG if on else MUTED,
-                    bg="#000000",
-                )
-                mon.pack(side=tk.LEFT, padx=(0, 8))
-                mon.bind("<Button-1>", lambda e, i=iface: self._toggle_monitor(i))
-                mon.bind("<Enter>", lambda e, b=mon: b.config(fg=BRIGHT))
-                mon.bind("<Leave>", lambda e, b=mon, i=iface: b.config(
-                    fg=STRONG if wifi_monitor.is_iface_enabled(i) else MUTED))
+        self._render_monitor()
+
+    def _render_monitor(self):
+        for child in self.monitor_frame.winfo_children():
+            child.destroy()
+        iface = self._selected_iface
+        if not iface:
+            return
+        on = wifi_monitor.is_iface_enabled(iface)
+        tk.Label(
+            self.monitor_frame,
+            text=f"{iface}   Monitor mode:",
+            font=fonts.view_font(11),
+            fg=MUTED,
+            bg="#000000",
+        ).pack(side=tk.LEFT, padx=(0, 4))
+        sw = tk.Label(
+            self.monitor_frame,
+            text="  ON  " if on else "  OFF  ",
+            font=fonts.view_font_bold(11),
+            fg=STRONG if on else MUTED,
+            bg="#000000",
+        )
+        sw.pack(side=tk.LEFT)
+        sw.bind("<Button-1>", lambda e, i=iface: self._toggle_monitor(i))
+        sw.bind("<Enter>", lambda e, b=sw: b.config(fg=BRIGHT))
+        sw.bind("<Leave>", lambda e, b=sw, i=iface: b.config(
+            fg=STRONG if wifi_monitor.is_iface_enabled(i) else MUTED))
 
     def _toggle_monitor(self, iface):
         if wifi_monitor.is_iface_enabled(iface):

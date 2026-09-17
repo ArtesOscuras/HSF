@@ -1259,6 +1259,12 @@ def shutdown():
     flush_handshakes()
     for iface in _monitor_interfaces():
         _exit_monitor(iface)
-    if not _IS_MACOS:
+    if _IS_MACOS:
+        try:
+            from . import wifi_macos
+            wifi_macos.cleanup_capture()
+        except Exception:
+            pass
+    else:
         for iface in wifi_interfaces():
             _run(["nmcli", "device", "set", iface, "managed", "yes"])

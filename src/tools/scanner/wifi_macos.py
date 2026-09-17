@@ -126,14 +126,40 @@ def _read_exact(stream, n):
     return buf
 
 
+def cleanup_capture():
+    """Kill leftover monitor tcpdump processes that hold /dev/bpf* devices.
+
+    If a previous capture was interrupted (Ctrl+C, crash, HSF killed) the
+    tcpdump process can survive and keep the BPF device busy, which makes the
+    next capture fail or return nothing. Best effort; needs root to kill the
+    root-owned ones."""
+    try:
+        subprocess.run(["pkill", "-f", "tcpdump -I"],
+                       capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+
+def _stderr_reader(proc, on_line):
+    try:
+        for raw in iter(proc.stderr.readline, b""):
+            line = raw.decode("utf-8", "replace").strip()
+            if line:
+                on_line(line)
+    except Exception:
+        pass
+
+
 def capture_loop(iface, stop_event):
     """Monitor-mode RX on macOS via tcpdump -I (radiotap).
 
     Runs in a worker thread; feeds every captured 802.11 frame into the shared
     monitor pipeline (wifi_monitor._process) so networks, client probes and
     handshakes are collected exactly like on Linux. Requires root (BPF) and the
-    interface to be disassociated (monitor mode cannot run while associated).
+    interface to be **disassociated** (monitor mode cannot run while associated;
+    macOS may auto-rejoin, which makes it stop capturing — disconnect it first).
     """
+    import threading
     from functools import partial
     from src.tools.scanner import wifi_monitor as wm
 
@@ -141,19 +167,36 @@ def capture_loop(iface, stop_event):
     if not tcpdump:
         wm._emit_error("macOS monitor: tcpdump not found.")
         return
+
+    cleanup_capture()
     cmd = [tcpdump, "-I", "-i", iface, "-y", "IEEE802_11_RADIO",
            "-U", "-w", "-"]
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                stderr=subprocess.DEVNULL)
+                                stderr=subprocess.PIPE)
     except Exception as e:
         wm._emit_error(f"macOS monitor: could not start tcpdump: {e}")
         return
 
+    err = {"n": 0}
+
+    def _on_err(line):
+        err["n"] += 1
+        if err["n"] <= 10:
+            wm._emit_error(f"tcpdump: {line}")
+
+    th = threading.Thread(target=_stderr_reader, args=(proc, _on_err),
+                          daemon=True)
+    th.start()
+
     process = partial(wm._process, device=iface)
+    frames = 0
     try:
         gh = _read_exact(proc.stdout, 24)
         if not gh:
+            wm._emit_error(
+                "macOS monitor: tcpdump produced no capture (interface "
+                "associated? no permission?). Check it is disassociated.")
             return
         big = gh[:4] in (b"\xa1\xb2\xc3\xd4", b"\xa1\xb2\x3c\x4d")
         endian = ">" if big else "<"
@@ -174,12 +217,15 @@ def capture_loop(iface, stop_event):
                 continue
             try:
                 process(pkt)
+                frames += 1
             except Exception:
                 pass
     except Exception:
         pass
     finally:
         _terminate(proc)
+        if proc.poll() is not None and frames == 0 and err["n"] == 0:
+            wm._emit_error("macOS monitor: tcpdump captured 0 frames.")
 
 
 def _terminate(proc):
