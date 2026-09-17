@@ -152,7 +152,19 @@ def _stderr_reader(proc, on_line):
 
 # Channels to hop through while capturing (2.4 GHz + 5 GHz).
 HOP_CHANNELS = [1, 6, 11, 36, 40, 44, 48, 100, 116, 132, 149, 153, 157, 161]
-HOP_DWELL = 0.7
+HOP_DWELL = 1.0
+
+
+def _pick_channel(dev, chan):
+    """Prefer the 20 MHz variant of a channel (beacons are 20 MHz wide)."""
+    best = None
+    best_w = None
+    for c in (dev.supportedWLANChannels() or []):
+        if int(c.channelNumber()) == int(chan):
+            w = int(c.channelWidth())
+            if best is None or w < best_w:
+                best, best_w = c, w
+    return best
 
 
 def set_channel(iface, chan):
@@ -167,27 +179,42 @@ def set_channel(iface, chan):
         dev = _client().interfaceWithName_(iface)
         if dev is None:
             return False
-        for c in (dev.supportedWLANChannels() or []):
-            if int(c.channelNumber()) == int(chan):
-                res = dev.setWLANChannel_error_(c, None)
-                return bool(res[0]) if isinstance(res, tuple) else bool(res)
+        c = _pick_channel(dev, chan)
+        if c is None:
+            return False
+        res = dev.setWLANChannel_error_(c, None)
+        return bool(res[0]) if isinstance(res, tuple) else bool(res)
     except Exception:
         return False
-    return False
+
+
+def supported_channels(iface):
+    """Sorted unique channel numbers the radio supports (from CoreWLAN)."""
+    if not available():
+        return []
+    try:
+        dev = _client().interfaceWithName_(iface)
+        if dev is None:
+            return []
+        return sorted({int(c.channelNumber())
+                       for c in (dev.supportedWLANChannels() or [])})
+    except Exception:
+        return []
 
 
 def _hopper(iface, stop_event, proc):
     """Cycle the monitor channel while tcpdump keeps capturing."""
     from src.tools.scanner import wifi_monitor as wm
+    chans = supported_channels(iface) or HOP_CHANNELS
     i = 0
     announced = False
     fails = 0
     while not stop_event.is_set() and proc.poll() is None:
-        ch = HOP_CHANNELS[i % len(HOP_CHANNELS)]
+        ch = chans[i % len(chans)]
         if set_channel(iface, ch):
             if not announced:
                 announced = True
-                wm._emit_info(f"macOS monitor: hopping {len(HOP_CHANNELS)} "
+                wm._emit_info(f"macOS monitor: hopping {len(chans)} "
                               f"channels on {iface}")
         else:
             fails += 1
