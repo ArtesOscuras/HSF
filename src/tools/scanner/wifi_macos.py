@@ -152,7 +152,7 @@ def _stderr_reader(proc, on_line):
 
 # Channels to hop through while capturing (2.4 GHz + 5 GHz).
 HOP_CHANNELS = [1, 6, 11, 36, 40, 44, 48, 100, 116, 132, 149, 153, 157, 161]
-HOP_DWELL = 1.0
+HOP_DWELL = 0.6
 
 
 def _pick_channel(dev, chan):
@@ -309,7 +309,7 @@ def capture_loop(iface, stop_event, hop=True):
                 return
             threading.Thread(target=_stderr_reader, args=(proc, _on_err),
                              daemon=True).start()
-            deadline = time.time() + max(len(band) * HOP_DWELL, 3.0)
+            deadline = time.time() + max(len(band) * HOP_DWELL, 3.0) + 5.0
             hp = threading.Thread(target=_hop_band,
                                   args=(iface, band, stop_event, deadline),
                                   daemon=True)
