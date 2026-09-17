@@ -152,7 +152,7 @@ def _stderr_reader(proc, on_line):
 
 # Channels to hop through while capturing (2.4 GHz + 5 GHz).
 HOP_CHANNELS = [1, 6, 11, 36, 40, 44, 48, 100, 116, 132, 149, 153, 157, 161]
-HOP_DWELL = 0.5
+HOP_DWELL = 0.7
 
 
 def set_channel(iface, chan):
@@ -181,16 +181,22 @@ def _hopper(iface, stop_event, proc):
     from src.tools.scanner import wifi_monitor as wm
     i = 0
     announced = False
+    fails = 0
     while not stop_event.is_set() and proc.poll() is None:
         ch = HOP_CHANNELS[i % len(HOP_CHANNELS)]
-        if set_channel(iface, ch) and not announced:
-            announced = True
-            wm._emit_error(f"macOS monitor: hopping channels on {iface} "
-                           f"({len(HOP_CHANNELS)} channels)")
+        if set_channel(iface, ch):
+            if not announced:
+                announced = True
+                wm._emit_info(f"macOS monitor: hopping {len(HOP_CHANNELS)} "
+                              f"channels on {iface}")
+        else:
+            fails += 1
         i += 1
         end = time.time() + HOP_DWELL
         while time.time() < end and not stop_event.is_set():
             time.sleep(0.05)
+    if fails and not stop_event.is_set():
+        wm._emit_error(f"macOS monitor: {fails} channel change(s) failed.")
 
 
 def capture_loop(iface, stop_event, hop=True):
@@ -226,14 +232,16 @@ def capture_loop(iface, stop_event, hop=True):
 
     def _on_err(line):
         low = line.lower()
-        # tcpdump prints a harmless summary on exit; not an error.
-        if ("packets captured" in low or "packets received by filter" in low
-                or "packets dropped by kernel" in low
-                or low.startswith("listening on")):
+        core = low.split("tcpdump:", 1)[-1].strip()
+        # tcpdump prints harmless informational lines; not errors.
+        if ("packets captured" in core or "packets received by filter" in core
+                or "packets dropped by kernel" in core
+                or core.startswith("listening on")
+                or core.startswith("data link type")):
             return
         err["n"] += 1
         if err["n"] <= 10:
-            wm._emit_error(f"tcpdump: {line}")
+            wm._emit_error(f"tcpdump: {core}")
 
     th = threading.Thread(target=_stderr_reader, args=(proc, _on_err),
                           daemon=True)

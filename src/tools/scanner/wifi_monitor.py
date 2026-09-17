@@ -1182,6 +1182,14 @@ def _emit_error(msg):
         pass
 
 
+def _emit_info(msg):
+    try:
+        from src import event_bus
+        event_bus.submit({"type": "scan_info", "message": msg})
+    except Exception:
+        pass
+
+
 def get_service():
     global _scanner
     if _scanner is None:
