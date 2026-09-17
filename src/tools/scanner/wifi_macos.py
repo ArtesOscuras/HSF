@@ -202,42 +202,64 @@ def supported_channels(iface):
         return []
 
 
-def _hopper(iface, stop_event, proc):
-    """Cycle the monitor channel while tcpdump keeps capturing."""
-    from src.tools.scanner import wifi_monitor as wm
-    chans = supported_channels(iface) or HOP_CHANNELS
+def _hop_band(iface, chans, stop_event, deadline):
+    """Hop the given channels until deadline (or stop)."""
     i = 0
-    announced = False
     fails = 0
-    while not stop_event.is_set() and proc.poll() is None:
-        ch = chans[i % len(chans)]
-        if set_channel(iface, ch):
-            if not announced:
-                announced = True
-                wm._emit_info(f"macOS monitor: hopping {len(chans)} "
-                              f"channels on {iface}")
-        else:
+    while not stop_event.is_set() and time.time() < deadline:
+        if not set_channel(iface, chans[i % len(chans)]):
             fails += 1
         i += 1
-        end = time.time() + HOP_DWELL
+        end = min(deadline, time.time() + HOP_DWELL)
         while time.time() < end and not stop_event.is_set():
             time.sleep(0.05)
-    if fails and not stop_event.is_set():
-        wm._emit_error(f"macOS monitor: {fails} channel change(s) failed.")
+    return fails
+
+
+def _pump(proc, iface, stop_event, deadline):
+    """Read radiotap frames from proc.stdout until deadline/stop/exit."""
+    from functools import partial
+    from src.tools.scanner import wifi_monitor as wm
+    process = partial(wm._process, device=iface)
+    frames = 0
+    gh = _read_exact(proc.stdout, 24)
+    if not gh:
+        return 0
+    big = gh[:4] in (b"\xa1\xb2\xc3\xd4", b"\xa1\xb2\x3c\x4d")
+    endian = ">" if big else "<"
+    while (not stop_event.is_set() and time.time() < deadline
+           and proc.poll() is None):
+        ph = _read_exact(proc.stdout, 16)
+        if ph is None:
+            break
+        _ts, _tus, incl, _orig = struct.unpack(endian + "IIII", ph)
+        if incl <= 0 or incl > 65535:
+            break
+        data = _read_exact(proc.stdout, incl)
+        if data is None:
+            break
+        try:
+            from scapy.all import RadioTap
+            pkt = RadioTap(data)
+        except Exception:
+            continue
+        try:
+            process(pkt)
+            frames += 1
+        except Exception:
+            pass
+    return frames
 
 
 def capture_loop(iface, stop_event, hop=True):
     """Monitor-mode RX on macOS via tcpdump -I (radiotap).
 
-    Runs in a worker thread; feeds every captured 802.11 frame into the shared
-    monitor pipeline (wifi_monitor._process) so networks, client probes and
-    handshakes are collected exactly like on Linux. Requires root (BPF) and the
-    interface to be **disassociated** (monitor mode cannot run while associated;
-    macOS may auto-rejoin, which makes it stop capturing — disconnect it first).
-    With ``hop`` it cycles the monitor channel via CoreWLAN while capturing.
+    The radio latches onto the band it is on when tcpdump starts, so we run one
+    tcpdump per band (binding it by starting on that band's first channel) and
+    hop every channel of the band. Requires root (BPF) and the interface to be
+    **disassociated** (monitor cannot run while associated; macOS may auto-rejoin).
     """
     import threading
-    from functools import partial
     from src.tools.scanner import wifi_monitor as wm
 
     tcpdump = _tcpdump()
@@ -246,21 +268,21 @@ def capture_loop(iface, stop_event, hop=True):
         return
 
     cleanup_capture()
-    cmd = [tcpdump, "-I", "-i", iface, "-y", "IEEE802_11_RADIO",
-           "-U", "-w", "-"]
-    try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
-    except Exception as e:
-        wm._emit_error(f"macOS monitor: could not start tcpdump: {e}")
-        return
+    chans = supported_channels(iface) or HOP_CHANNELS
+    if hop:
+        c24 = [c for c in chans if c <= 14]
+        c5 = [c for c in chans if c >= 36]
+        bands = [b for b in (c24, c5) if b] or [chans]
+    else:
+        bands = [chans]
+    wm._emit_info(f"macOS monitor: capturing on {iface} "
+                  f"({len(bands)} band(s), {len(chans)} channels)")
 
     err = {"n": 0}
 
     def _on_err(line):
         low = line.lower()
         core = low.split("tcpdump:", 1)[-1].strip()
-        # tcpdump prints harmless informational lines; not errors.
         if ("packets captured" in core or "packets received by filter" in core
                 or "packets dropped by kernel" in core
                 or core.startswith("listening on")
@@ -270,51 +292,31 @@ def capture_loop(iface, stop_event, hop=True):
         if err["n"] <= 10:
             wm._emit_error(f"tcpdump: {core}")
 
-    th = threading.Thread(target=_stderr_reader, args=(proc, _on_err),
-                          daemon=True)
-    th.start()
-
-    if hop:
-        threading.Thread(target=_hopper, args=(iface, stop_event, proc),
-                         daemon=True).start()
-
-    process = partial(wm._process, device=iface)
-    frames = 0
-    try:
-        gh = _read_exact(proc.stdout, 24)
-        if not gh:
-            wm._emit_error(
-                "macOS monitor: tcpdump produced no capture (interface "
-                "associated? no permission?). Check it is disassociated.")
-            return
-        big = gh[:4] in (b"\xa1\xb2\xc3\xd4", b"\xa1\xb2\x3c\x4d")
-        endian = ">" if big else "<"
-        while not stop_event.is_set():
-            ph = _read_exact(proc.stdout, 16)
-            if ph is None:
+    while not stop_event.is_set():
+        for band in bands:
+            if stop_event.is_set():
                 break
-            _ts, _tus, incl, _orig = struct.unpack(endian + "IIII", ph)
-            if incl <= 0 or incl > 65535:
-                break
-            data = _read_exact(proc.stdout, incl)
-            if data is None:
-                break
+            # Bind the monitor to this band by starting on its first channel.
+            set_channel(iface, band[0])
+            time.sleep(0.3)
             try:
-                from scapy.all import RadioTap
-                pkt = RadioTap(data)
-            except Exception:
-                continue
-            try:
-                process(pkt)
-                frames += 1
-            except Exception:
-                pass
-    except Exception:
-        pass
-    finally:
-        _terminate(proc)
-        if proc.poll() is not None and frames == 0 and err["n"] == 0:
-            wm._emit_error("macOS monitor: tcpdump captured 0 frames.")
+                proc = subprocess.Popen(
+                    [tcpdump, "-I", "-i", iface, "-y", "IEEE802_11_RADIO",
+                     "-U", "-w", "-"],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            except Exception as e:
+                wm._emit_error(f"macOS monitor: could not start tcpdump: {e}")
+                return
+            threading.Thread(target=_stderr_reader, args=(proc, _on_err),
+                             daemon=True).start()
+            deadline = time.time() + max(len(band) * HOP_DWELL, 3.0)
+            hp = threading.Thread(target=_hop_band,
+                                  args=(iface, band, stop_event, deadline),
+                                  daemon=True)
+            hp.start()
+            _pump(proc, iface, stop_event, deadline)
+            _terminate(proc)
+            hp.join(timeout=2)
 
 
 def _terminate(proc):
